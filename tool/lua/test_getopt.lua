@@ -80,4 +80,30 @@ assert(#unknown == 1, "should have 1 unknown option")
 opts, args, unknown = getopt.parse({"-x", "-y", "-z"}, "h", {})
 assert(#unknown == 3, "should have 3 unknown options")
 
+-- Test repeated short options
+opts, args, unknown = getopt.parse({"-e", "foo", "-e", "bar", "-e", "spam"}, "e:", {})
+assert(type(opts.e) == "table", "repeated option should create a table")
+assert(#opts.e == 3, "should have 3 values for -e")
+assert(opts.e[1] == "foo", "first -e value should be 'foo'")
+assert(opts.e[2] == "bar", "second -e value should be 'bar'")
+assert(opts.e[3] == "spam", "third -e value should be 'spam'")
+
+-- Test repeated long options
+opts, args, unknown = getopt.parse({"--include", "a.h", "--include", "b.h"}, "I:", {
+  {"include", "required", "I"},
+})
+assert(type(opts.include) == "table", "repeated long option should create a table")
+assert(#opts.include == 2, "should have 2 values for --include")
+assert(opts.include[1] == "a.h", "first --include should be 'a.h'")
+assert(opts.include[2] == "b.h", "second --include should be 'b.h'")
+assert(type(opts.I) == "table", "short option should also be a table")
+assert(opts.I[1] == "a.h", "short option should have same values")
+
+-- Test mix of single and repeated options
+opts, args, unknown = getopt.parse({"-v", "-e", "foo", "-o", "out", "-e", "bar"}, "ve:o:", {})
+assert(opts.v == true, "single option should be boolean")
+assert(type(opts.e) == "table", "repeated option should be table")
+assert(opts.e[1] == "foo" and opts.e[2] == "bar", "repeated values should be correct")
+assert(opts.o == "out", "single option with arg should be string")
+
 print("PASS")

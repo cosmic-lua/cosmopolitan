@@ -37,6 +37,48 @@ static int ParseHasArg(const char *s) {
   return -1;
 }
 
+// Helper function to set an option value, accumulating repeated options into tables
+static void SetOption(lua_State *L, int opts_idx, const char *key, const char *value, int is_bool) {
+  // Get current value if it exists
+  lua_getfield(L, opts_idx, key);
+  int existing_type = lua_type(L, -1);
+
+  if (existing_type == LUA_TNIL) {
+    // First occurrence - set directly
+    lua_pop(L, 1);  // pop nil
+    if (is_bool) {
+      lua_pushboolean(L, 1);
+    } else {
+      lua_pushstring(L, value);
+    }
+    lua_setfield(L, opts_idx, key);
+  } else if (existing_type == LUA_TTABLE) {
+    // Already a table - append to it
+    lua_Integer len = luaL_len(L, -1);
+    if (is_bool) {
+      lua_pushboolean(L, 1);
+    } else {
+      lua_pushstring(L, value);
+    }
+    lua_rawseti(L, -2, len + 1);
+    lua_pop(L, 1);  // pop the table
+  } else {
+    // Second occurrence - convert to table
+    // Stack: [existing_value]
+    lua_newtable(L);  // Stack: [existing_value, new_table]
+    lua_pushvalue(L, -2);  // Stack: [existing_value, new_table, existing_value]
+    lua_rawseti(L, -2, 1);  // new_table[1] = existing_value; Stack: [existing_value, new_table]
+    if (is_bool) {
+      lua_pushboolean(L, 1);  // Stack: [existing_value, new_table, new_bool]
+    } else {
+      lua_pushstring(L, value);  // Stack: [existing_value, new_table, new_string]
+    }
+    lua_rawseti(L, -2, 2);  // new_table[2] = new_value; Stack: [existing_value, new_table]
+    lua_setfield(L, opts_idx, key);  // opts[key] = new_table; Stack: [existing_value]
+    lua_pop(L, 1);  // pop existing_value
+  }
+}
+
 // getopt.parse(args, optstring, longopts) -> opts, remaining, unknown
 //
 // NOTE: This function uses global getopt state and is NOT thread-safe.
@@ -195,31 +237,16 @@ static int LuaGetoptParse(lua_State *L) {
     if (opt == 0) {
       // Long option with flag set
       longname = longopts[longidx].name;
-      if (optarg) {
-        lua_pushstring(L, optarg);
-      } else {
-        lua_pushboolean(L, 1);
-      }
-      lua_setfield(L, opts_idx, longname);
+      SetOption(L, opts_idx, longname, optarg, optarg == NULL);
     } else {
       // Short option (or long option returning val)
       shortopt[0] = opt;
-      if (optarg) {
-        lua_pushstring(L, optarg);
-      } else {
-        lua_pushboolean(L, 1);
-      }
-      lua_setfield(L, opts_idx, shortopt);
+      SetOption(L, opts_idx, shortopt, optarg, optarg == NULL);
 
       // Also set long name if this came from a long option
       for (int i = 0; i < nlong; i++) {
         if (longopts[i].val == opt) {
-          if (optarg) {
-            lua_pushstring(L, optarg);
-          } else {
-            lua_pushboolean(L, 1);
-          }
-          lua_setfield(L, opts_idx, longopts[i].name);
+          SetOption(L, opts_idx, longopts[i].name, optarg, optarg == NULL);
           break;
         }
       }
