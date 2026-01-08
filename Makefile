@@ -633,14 +633,10 @@ aarch64:
 clean:
 	$(RM) -r o
 
-bin/cosmic-lua:
-	@$(MKDIR) bin
-	@curl -ssLo $@ https://github.com/whilp/world/releases/download/home-2026-01-03-11aa802/cosmic-lua
-	@$(CHMOD) 755 $@
-	@ln -sf cosmic-lua bin/lua
-
 .PHONY: bootstrap
-bootstrap: bin/cosmic-lua
+bootstrap:
+	@bin/cosmic --version >/dev/null 2>&1  # Trigger cosmic-lua download on first run
+	@test -e bin/lua || ln -sf cosmic-lua bin/lua
 	@test -z "$$CLAUDE_ENV_FILE" || $(ECHO) "export PATH=\"$(CURDIR)/bin:$$PATH\"" >> "$$CLAUDE_ENV_FILE"
 
 # UNSPECIFIED PREREQUISITES TUTORIAL
