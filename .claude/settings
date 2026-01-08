@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "make --no-print-directory -C \"$CLAUDE_PROJECT_DIR\" bootstrap"
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/cosmic --version >/dev/null 2>&1 && test -e bin/lua || ln -sf cosmic-lua bin/lua && echo \"export PATH=\\\"$CLAUDE_PROJECT_DIR/bin:\\$PATH\\\"\" >> \"$CLAUDE_ENV_FILE\""
           }
         ]
       }
