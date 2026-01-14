@@ -27,4 +27,4 @@ print("SUCCESS: repl.start function exists")
 
 print("\nAll tests passed!")
 print("\nTo test the REPL interactively, run:")
-print('  lua -e "require(\\'cosmo.repl\\').start()"')
+print([[  lua -e "require('cosmo.repl').start()"]])
