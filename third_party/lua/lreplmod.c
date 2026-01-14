@@ -29,6 +29,7 @@
 #include "libc/errno.h"
 #include "libc/sock/sock.h"
 #include "libc/sock/struct/pollfd.h"
+#include "libc/str/str.h"
 #include "libc/sysv/consts/poll.h"
 #include "third_party/linenoise/linenoise.h"
 #include "third_party/lua/lauxlib.h"
