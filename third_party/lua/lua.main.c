@@ -52,6 +52,15 @@
 #include "third_party/lua/lunix.h"
 #ifdef LUA_COSMO
 #include "third_party/lua/lcosmo.h"
+/* Forward declarations for cosmo submodules */
+int LuaPath(lua_State *);
+int LuaRe(lua_State *);
+int LuaGetopt(lua_State *);
+int LuaZip(lua_State *);
+int LuaHttp(lua_State *);
+int LuaGoodSocket(lua_State *);
+int luaopen_argon2(lua_State *);
+int luaopen_lsqlite3(lua_State *);
 #endif
 #include "libc/cosmo.h"
 __static_yoink("lua_notice");
@@ -381,9 +390,27 @@ static int pmain (lua_State *L) {
 #ifdef LUA_COSMO
   lua_pushcfunction(L, luaopen_cosmo);
   lua_setfield(L, -2, "cosmo");
+  lua_pushcfunction(L, LuaPath);
+  lua_setfield(L, -2, "cosmo.path");
+  lua_pushcfunction(L, LuaRe);
+  lua_setfield(L, -2, "cosmo.re");
+  lua_pushcfunction(L, LuaGetopt);
+  lua_setfield(L, -2, "cosmo.getopt");
+  lua_pushcfunction(L, LuaZip);
+  lua_setfield(L, -2, "cosmo.zip.c");
+  lua_pushcfunction(L, LuaHttp);
+  lua_setfield(L, -2, "cosmo.http");
+  lua_pushcfunction(L, LuaGoodSocket);
+  lua_setfield(L, -2, "cosmo.goodsocket");
+  lua_pushcfunction(L, luaopen_argon2);
+  lua_setfield(L, -2, "cosmo.argon2");
+  lua_pushcfunction(L, luaopen_lsqlite3);
+  lua_setfield(L, -2, "cosmo.lsqlite3");
 #endif
   lua_pushcfunction(L, LuaUnix);
   lua_setfield(L, -2, "unix");
+  lua_pushcfunction(L, LuaUnix);
+  lua_setfield(L, -2, "cosmo.unix");
   lua_pop(L, 1);  /* remove PRELOAD table */
   createargtable(L, argv, argc, script);  /* create table 'arg' */
   lua_gc(L, LUA_GCRESTART);  /* start GC... */
