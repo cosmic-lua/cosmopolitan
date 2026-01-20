@@ -7722,6 +7722,7 @@ function unix.gmtime(unixts) end
 function unix.localtime(unixts) end
 
 --- Gets information about file or directory.
+---@param path string
 ---@param flags? integer may have any of:
 --- - `AT_SYMLINK_NOFOLLOW`: do not follow symbolic links.
 ---@param dirfd? integer defaults to `unix.AT_FDCWD` and may optionally be set to a directory file descriptor to which `path` is relative.
@@ -7729,6 +7730,41 @@ function unix.localtime(unixts) end
 ---@nodiscard
 ---@overload fun(path: string, flags?: integer, dirfd?: integer): nil, unix.Errno
 function unix.stat(path, flags, dirfd) end
+
+--- Tests if file mode represents a directory.
+---@param mode integer
+---@return boolean
+function unix.S_ISDIR(mode) end
+
+--- Tests if file mode represents a regular file.
+---@param mode integer
+---@return boolean
+function unix.S_ISREG(mode) end
+
+--- Tests if file mode represents a symbolic link.
+---@param mode integer
+---@return boolean
+function unix.S_ISLNK(mode) end
+
+--- Tests if file mode represents a block device.
+---@param mode integer
+---@return boolean
+function unix.S_ISBLK(mode) end
+
+--- Tests if file mode represents a character device.
+---@param mode integer
+---@return boolean
+function unix.S_ISCHR(mode) end
+
+--- Tests if file mode represents a FIFO/pipe.
+---@param mode integer
+---@return boolean
+function unix.S_ISFIFO(mode) end
+
+--- Tests if file mode represents a socket.
+---@param mode integer
+---@return boolean
+function unix.S_ISSOCK(mode) end
 
 --- Gets information about opened file descriptor.
 ---
