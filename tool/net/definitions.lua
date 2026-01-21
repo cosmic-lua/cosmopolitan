@@ -4330,7 +4330,6 @@ function goodsocket.socket(family, type, protocol, isserver, timeout) end
 --- ### ZIP
 ---
 --- The zip module provides functionality for creating and reading ZIP archives.
---- Use `zip.open()` for writing/appending and `zip.from()` for reading.
 --- This module is available as `require("cosmo.zip")`.
 ---
 --- Example - Creating a ZIP archive:
@@ -4344,7 +4343,7 @@ function goodsocket.socket(family, type, protocol, isserver, timeout) end
 --- Example - Reading a ZIP archive:
 ---
 ---     local zip = require("cosmo.zip")
----     local archive = assert(zip.from(io.open("input.zip", "rb"):read("*a")))
+---     local archive = assert(zip.open("input.zip", "r"))
 ---     local files = archive:list()
 ---     for _, name in ipairs(files) do
 ---       local content = archive:read(name)
@@ -4352,55 +4351,57 @@ function goodsocket.socket(family, type, protocol, isserver, timeout) end
 ---     end
 ---     archive:close()
 ---
+--- Example - Reading from in-memory data:
+---
+---     local zip = require("cosmo.zip")
+---     local archive = assert(zip.from(Slurp("input.zip")))
+---     print(archive:read("hello.txt"))
+---     archive:close()
+---
 zip = {}
 
---- Opens a ZIP archive for writing or appending.
+---@class zip.OpenOptions
+---@field level? integer Compression level 0-9 (for "w" and "a" modes)
+---@field max_file_size? integer Maximum file size limit in bytes
+
+--- Opens a ZIP archive for reading, writing, or appending.
 ---
---- Creates a new archive or appends to an existing one.
---- To read a ZIP file from disk, use `zip.from(Slurp(path))`.
+--- The first argument can be a file path string or a file descriptor integer.
 ---
----@param path string Path to the ZIP file
----@param mode string Open mode: `"w"` for writing (creates new), `"a"` for appending
----@return zip.Appender? appender ZIP writer object on success
+---@param path string|integer Path to the ZIP file, or file descriptor
+---@param mode? string Open mode: `"r"` for reading (default), `"w"` for writing, `"a"` for appending
+---@param options? zip.OpenOptions Optional settings
+---@return zip.Reader|zip.Writer|zip.Appender? archive Archive object on success
 ---@return string? error Error message on failure
 ---@nodiscard
-function zip.open(path, mode) end
+---@overload fun(path: string|integer, mode: "r", options?: zip.OpenOptions): zip.Reader?, string?
+---@overload fun(path: string|integer, mode: "w", options?: zip.OpenOptions): zip.Writer?, string?
+---@overload fun(path: string|integer, mode: "a", options?: zip.OpenOptions): zip.Appender?, string?
+function zip.open(path, mode, options) end
 
 --- Opens a ZIP archive from in-memory data for reading.
 ---
---- To read a ZIP file from disk, use `zip.from(Slurp(path))` or
---- `zip.from(io.open(path, "rb"):read("*a"))`.
----
 ---@param data string ZIP file contents as a string
+---@param options? zip.OpenOptions Optional settings (only max_file_size applies)
 ---@return zip.Reader? reader ZIP reader object on success
 ---@return string? error Error message on failure
 ---@nodiscard
-function zip.from(data) end
-
----@class zip.Appender: userdata
---- Writer for adding files to a ZIP archive.
-zip.Appender = {}
-
---- Adds a file to the ZIP archive.
----
----@param name string The path/filename within the ZIP archive
----@param content string The file content to add
----@return boolean success `true` on success
----@return string? error Error message on failure
-function zip.Appender:add(name, content) end
-
---- Closes the ZIP archive and finalizes all entries.
-function zip.Appender:close() end
+function zip.from(data, options) end
 
 ---@class zip.Stat
 --- File metadata within a ZIP archive.
----@field size number Uncompressed file size in bytes
----@field compressed_size number Compressed file size in bytes
----@field crc32 number CRC32 checksum of uncompressed data
----@field mtime number Modification time as Unix timestamp
----@field method number Compression method (0=stored, 8=deflated)
----@field mode number Unix file mode/permissions
+---@field size integer Uncompressed file size in bytes
+---@field compressed_size integer Compressed file size in bytes
+---@field crc32 integer CRC32 checksum of uncompressed data
+---@field mtime integer Modification time as Unix timestamp
+---@field method integer Compression method (0=stored, 8=deflated)
+---@field mode integer Unix file mode/permissions
 zip.Stat = {}
+
+---@class zip.AddOptions
+---@field method? string Compression method: `"store"` or `"deflate"`
+---@field mtime? integer Modification time as Unix timestamp
+---@field mode? integer Unix file mode (default 0644)
 
 ---@class zip.Reader: userdata
 --- Reader for extracting files from a ZIP archive.
@@ -4415,19 +4416,52 @@ function zip.Reader:list() end
 --- Gets metadata for a specific file in the archive.
 ---
 ---@param name string The file path within the archive
----@return zip.Stat stat File metadata
+---@return zip.Stat? stat File metadata, or nil if not found
 ---@nodiscard
 function zip.Reader:stat(name) end
 
 --- Reads the contents of a file from the archive.
 ---
 ---@param name string The file path within the archive
----@return string content The file contents
+---@return string? content The file contents
+---@return string? error Error message on failure
 ---@nodiscard
 function zip.Reader:read(name) end
 
 --- Closes the ZIP reader and releases resources.
 function zip.Reader:close() end
+
+---@class zip.Writer: userdata
+--- Writer for creating new ZIP archives.
+zip.Writer = {}
+
+--- Adds a file to the ZIP archive.
+---
+---@param name string The path/filename within the ZIP archive
+---@param content string The file content to add
+---@param options? zip.AddOptions Optional settings for this entry
+---@return boolean? success `true` on success
+---@return string? error Error message on failure
+function zip.Writer:add(name, content, options) end
+
+--- Closes the ZIP archive and writes the central directory.
+function zip.Writer:close() end
+
+---@class zip.Appender: userdata
+--- Writer for appending files to an existing ZIP archive.
+zip.Appender = {}
+
+--- Adds a file to the ZIP archive.
+---
+---@param name string The path/filename within the ZIP archive
+---@param content string The file content to add
+---@param options? zip.AddOptions Optional settings for this entry
+---@return boolean? success `true` on success
+---@return string? error Error message on failure
+function zip.Appender:add(name, content, options) end
+
+--- Closes the ZIP archive and writes the updated central directory.
+function zip.Appender:close() end
 
 --- This module exposes the low-level System Five system call interface.
 --- This module works on all supported platforms, including Windows NT.
