@@ -4330,6 +4330,7 @@ function goodsocket.socket(family, type, protocol, isserver, timeout) end
 --- ### ZIP
 ---
 --- The zip module provides functionality for creating and reading ZIP archives.
+--- Use `zip.open()` for writing/appending and `zip.from()` for reading.
 --- This module is available as `require("cosmo.zip")`.
 ---
 --- Example - Creating a ZIP archive:
@@ -4353,18 +4354,22 @@ function goodsocket.socket(family, type, protocol, isserver, timeout) end
 ---
 zip = {}
 
---- Opens a ZIP archive for reading or writing.
+--- Opens a ZIP archive for writing or appending.
 ---
---- For writing, creates a new archive or appends to an existing one.
+--- Creates a new archive or appends to an existing one.
+--- To read a ZIP file from disk, use `zip.from(Slurp(path))`.
 ---
 ---@param path string Path to the ZIP file
----@param mode string Open mode: `"r"` for reading, `"w"` for writing, `"a"` for appending
+---@param mode string Open mode: `"w"` for writing (creates new), `"a"` for appending
 ---@return zip.Appender? appender ZIP writer object on success
 ---@return string? error Error message on failure
 ---@nodiscard
 function zip.open(path, mode) end
 
---- Opens a ZIP archive from in-memory data.
+--- Opens a ZIP archive from in-memory data for reading.
+---
+--- To read a ZIP file from disk, use `zip.from(Slurp(path))` or
+--- `zip.from(io.open(path, "rb"):read("*a"))`.
 ---
 ---@param data string ZIP file contents as a string
 ---@return zip.Reader? reader ZIP reader object on success
