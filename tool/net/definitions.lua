@@ -4327,6 +4327,103 @@ goodsocket = {
 ---@overload fun(family: integer, type: integer, protocol: integer, isserver: boolean, timeout?: number): nil, error: string
 function goodsocket.socket(family, type, protocol, isserver, timeout) end
 
+--- ### ZIP
+---
+--- The zip module provides functionality for creating and reading ZIP archives.
+--- This module is available as `require("cosmo.zip")`.
+---
+--- Example - Creating a ZIP archive:
+---
+---     local zip = require("cosmo.zip")
+---     local archive = assert(zip.open("output.zip", "w"))
+---     archive:add("hello.txt", "Hello, World!")
+---     archive:add("data/config.json", '{"key": "value"}')
+---     archive:close()
+---
+--- Example - Reading a ZIP archive:
+---
+---     local zip = require("cosmo.zip")
+---     local archive = assert(zip.from(io.open("input.zip", "rb"):read("*a")))
+---     local files = archive:list()
+---     for _, name in ipairs(files) do
+---       local content = archive:read(name)
+---       print(name, #content)
+---     end
+---     archive:close()
+---
+zip = {}
+
+--- Opens a ZIP archive for reading or writing.
+---
+--- For writing, creates a new archive or appends to an existing one.
+---
+---@param path string Path to the ZIP file
+---@param mode string Open mode: `"r"` for reading, `"w"` for writing, `"a"` for appending
+---@return zip.Appender? appender ZIP writer object on success
+---@return string? error Error message on failure
+---@nodiscard
+function zip.open(path, mode) end
+
+--- Opens a ZIP archive from in-memory data.
+---
+---@param data string ZIP file contents as a string
+---@return zip.Reader? reader ZIP reader object on success
+---@return string? error Error message on failure
+---@nodiscard
+function zip.from(data) end
+
+---@class zip.Appender: userdata
+--- Writer for adding files to a ZIP archive.
+zip.Appender = {}
+
+--- Adds a file to the ZIP archive.
+---
+---@param name string The path/filename within the ZIP archive
+---@param content string The file content to add
+---@return boolean success `true` on success
+---@return string? error Error message on failure
+function zip.Appender:add(name, content) end
+
+--- Closes the ZIP archive and finalizes all entries.
+function zip.Appender:close() end
+
+---@class zip.Stat
+--- File metadata within a ZIP archive.
+---@field size number Uncompressed file size in bytes
+---@field compressed_size number Compressed file size in bytes
+---@field crc32 number CRC32 checksum of uncompressed data
+---@field mtime number Modification time as Unix timestamp
+---@field method number Compression method (0=stored, 8=deflated)
+---@field mode number Unix file mode/permissions
+zip.Stat = {}
+
+---@class zip.Reader: userdata
+--- Reader for extracting files from a ZIP archive.
+zip.Reader = {}
+
+--- Lists all files in the ZIP archive.
+---
+---@return string[] files Array of file paths in the archive
+---@nodiscard
+function zip.Reader:list() end
+
+--- Gets metadata for a specific file in the archive.
+---
+---@param name string The file path within the archive
+---@return zip.Stat stat File metadata
+---@nodiscard
+function zip.Reader:stat(name) end
+
+--- Reads the contents of a file from the archive.
+---
+---@param name string The file path within the archive
+---@return string content The file contents
+---@nodiscard
+function zip.Reader:read(name) end
+
+--- Closes the ZIP reader and releases resources.
+function zip.Reader:close() end
+
 --- This module exposes the low-level System Five system call interface.
 --- This module works on all supported platforms, including Windows NT.
 unix = {
