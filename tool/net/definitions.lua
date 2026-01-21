@@ -7926,8 +7926,11 @@ function unix.sched_yield() end
 function unix.mapshared(size) end
 
 ---@class unix.Memory: userdata
+--- Shared memory for inter-process communication.
+---
+--- Provides atomic operations and wait/wake primitives for synchronization.
 --- unix.Memory encapsulates memory that's shared across fork() and
---- this module provides the fundamental synchronization primitives
+--- this module provides the fundamental synchronization primitives.
 ---
 --- Redbean memory maps may be used in two ways:
 ---
@@ -8123,6 +8126,8 @@ function unix.Memory:wait(word_index, expect, abs_deadline, nanos) end
 function unix.Memory:wake(index, count) end
 
 ---@class unix.Dir: userdata
+--- Directory handle for reading directory entries.
+---
 --- `unix.Dir` objects are created by `opendir()` or `fdopendir()`.
 unix.Dir = {}
 
@@ -8174,7 +8179,10 @@ function unix.Dir:tell() end
 function unix.Dir:rewind() end
 
 ---@class unix.Rusage: userdata
----`unix.Rusage` objects are created by `wait()` or `getrusage()`.
+--- Process resource usage statistics.
+---
+--- Contains CPU time, memory usage, I/O, and context switch counters.
+--- `unix.Rusage` objects are created by `wait()` or `getrusage()`.
 unix.Rusage = {}
 
 ---@return integer seconds, integer nanos amount of CPU consumed in userspace.
@@ -8316,7 +8324,11 @@ function unix.Rusage:nvcsw() end
 function unix.Rusage:nivcsw() end
 
 ---@class unix.Stat: userdata
----`unix.Stat` objects are created by `stat()` or `fstat()`.
+--- File metadata and attributes.
+---
+--- Contains file size, permissions, ownership, and timestamps.
+--- `unix.Stat` objects are created by `stat()` or `fstat()`.
+--- Use `unix.S_ISDIR()`, `unix.S_ISREG()`, etc. to check file type from mode.
 unix.Stat = {}
 
 ---@return integer bytes Size of file in bytes.
@@ -8441,6 +8453,9 @@ function unix.Stat:gen() end
 function unix.Stat:flags() end
 
 ---@class unix.Sigset: userdata
+--- Signal set for blocking, unblocking, and waiting on signals.
+---
+--- Used with `unix.sigprocmask()`, `unix.sigaction()`, and `unix.sigsuspend()`.
 --- The unix.Sigset class defines a mutable bitset that may currently
 --- contain 128 entries. See `unix.NSIG` to find out how many signals
 --- your operating system actually supports.
@@ -8479,11 +8494,14 @@ function unix.Sigset:__repr() end
 ---@nodiscard
 function unix.Sigset:__tostring() end
 
+---@class unix.Errno: userdata
+--- Error information from system calls.
+---
+--- Provides detailed error codes and human-readable descriptions.
 --- This object is returned by system calls that fail. We prefer returning
---- an object because for many system calls, an error is part their normal
+--- an object because for many system calls, an error is part of their normal
 --- operation. For example, it's often desirable to use the `errno()` method
 --- when performing a `read()` to check for EINTR.
----@class unix.Errno: userdata
 unix.Errno = {}
 
 ---@return integer error error magic number.
