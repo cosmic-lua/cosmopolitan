@@ -1056,6 +1056,14 @@ function EscapeLiteral(str) end
 ---@nodiscard
 function EscapeParam(str) end
 
+--- Unescapes URL parameter name or value. Decodes `%XX` hex sequences and
+--- converts `+` to space (common in application/x-www-form-urlencoded).
+--- This is the inverse of EscapeParam.
+---@param str string
+---@return string
+---@nodiscard
+function UnescapeParam(str) end
+
 --- Escapes URL password. See `kescapeauthority.S`.
 ---@param str string
 ---@return string

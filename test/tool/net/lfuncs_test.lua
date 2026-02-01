@@ -69,6 +69,12 @@ assert(EscapeHtml("?hello&there<>") == "?hello&amp;there&lt;&gt;")
 assert(EscapeParam(nil) == nil)
 assert(EscapeParam("?hello&there<>") == "%3Fhello%26there%3C%3E")
 
+assert(UnescapeParam(nil) == nil)
+assert(UnescapeParam("%3Fhello%26there%3C%3E") == "?hello&there<>")
+assert(UnescapeParam("hello+world") == "hello world")
+assert(UnescapeParam("hello%20world") == "hello world")
+assert(UnescapeParam(EscapeParam("hello world!")) == "hello world!")
+
 assert(DecodeLatin1(nil) == nil)
 assert(DecodeLatin1("hello\xff\xc0") == "helloÿÀ")
 assert(EncodeLatin1("helloÿÀ") == "hello\xff\xc0")

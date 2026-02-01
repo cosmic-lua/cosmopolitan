@@ -856,6 +856,10 @@ int LuaEscapeParam(lua_State *L) {
   return LuaCoder(L, EscapeParam);
 }
 
+int LuaUnescapeParam(lua_State *L) {
+  return LuaCoder(L, UnescapeParam);
+}
+
 int LuaEscapePath(lua_State *L) {
   return LuaCoder(L, EscapePath);
 }
