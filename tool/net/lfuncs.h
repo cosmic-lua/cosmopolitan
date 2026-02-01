@@ -35,6 +35,7 @@ int LuaEscapeHtml(lua_State *);
 int LuaEscapeIp(lua_State *);
 int LuaEscapeLiteral(lua_State *);
 int LuaEscapeParam(lua_State *);
+int LuaUnescapeParam(lua_State *);
 int LuaEscapePass(lua_State *);
 int LuaEscapePath(lua_State *);
 int LuaEscapeSegment(lua_State *);

@@ -198,6 +198,7 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"EscapeIp", LuaEscapeIp},
     {"EscapeLiteral", LuaEscapeLiteral},
     {"EscapeParam", LuaEscapeParam},
+    {"UnescapeParam", LuaUnescapeParam},
     {"EscapePass", LuaEscapePass},
     {"EscapePath", LuaEscapePath},
     {"EscapeSegment", LuaEscapeSegment},
