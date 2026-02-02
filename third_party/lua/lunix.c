@@ -98,6 +98,7 @@
 #include "libc/sysv/consts/tcp.h"
 #include "libc/sysv/consts/prio.h"
 #include "libc/sysv/consts/termios.h"
+#include "libc/calls/termios.h"
 #include "libc/sysv/consts/utime.h"
 #include "libc/proc/posix_spawn.h"
 #include "libc/sysv/consts/w.h"
@@ -2298,6 +2299,88 @@ static int LuaUnixTiocgwinsz(lua_State *L) {
   }
 }
 
+// unix.tcgetattr(fd:int)
+//     ├─→ termios:table
+//     └─→ nil, unix.Errno
+static int LuaUnixTcgetattr(lua_State *L) {
+  struct termios tio;
+  int olderr = errno;
+  int fd = luaL_checkinteger(L, 1);
+  if (tcgetattr(fd, &tio) != -1) {
+    lua_newtable(L);
+    lua_pushinteger(L, tio.c_iflag);
+    lua_setfield(L, -2, "iflag");
+    lua_pushinteger(L, tio.c_oflag);
+    lua_setfield(L, -2, "oflag");
+    lua_pushinteger(L, tio.c_cflag);
+    lua_setfield(L, -2, "cflag");
+    lua_pushinteger(L, tio.c_lflag);
+    lua_setfield(L, -2, "lflag");
+    lua_newtable(L);
+    for (int i = 0; i < NCCS; i++) {
+      lua_pushinteger(L, tio.c_cc[i]);
+      lua_rawseti(L, -2, i + 1);
+    }
+    lua_setfield(L, -2, "cc");
+    lua_pushinteger(L, cfgetispeed(&tio));
+    lua_setfield(L, -2, "ispeed");
+    lua_pushinteger(L, cfgetospeed(&tio));
+    lua_setfield(L, -2, "ospeed");
+    return 1;
+  } else {
+    return LuaUnixSysretErrno(L, "tcgetattr", olderr);
+  }
+}
+
+// unix.tcsetattr(fd:int, action:int, termios:table)
+//     ├─→ true
+//     └─→ nil, unix.Errno
+static int LuaUnixTcsetattr(lua_State *L) {
+  struct termios tio;
+  int olderr = errno;
+  int fd = luaL_checkinteger(L, 1);
+  int action = luaL_checkinteger(L, 2);
+  luaL_checktype(L, 3, LUA_TTABLE);
+  memset(&tio, 0, sizeof(tio));
+  lua_getfield(L, 3, "iflag");
+  tio.c_iflag = luaL_optinteger(L, -1, 0);
+  lua_pop(L, 1);
+  lua_getfield(L, 3, "oflag");
+  tio.c_oflag = luaL_optinteger(L, -1, 0);
+  lua_pop(L, 1);
+  lua_getfield(L, 3, "cflag");
+  tio.c_cflag = luaL_optinteger(L, -1, 0);
+  lua_pop(L, 1);
+  lua_getfield(L, 3, "lflag");
+  tio.c_lflag = luaL_optinteger(L, -1, 0);
+  lua_pop(L, 1);
+  lua_getfield(L, 3, "cc");
+  if (lua_istable(L, -1)) {
+    for (int i = 0; i < NCCS; i++) {
+      lua_rawgeti(L, -1, i + 1);
+      tio.c_cc[i] = luaL_optinteger(L, -1, 0);
+      lua_pop(L, 1);
+    }
+  }
+  lua_pop(L, 1);
+  lua_getfield(L, 3, "ispeed");
+  if (!lua_isnil(L, -1)) {
+    cfsetispeed(&tio, luaL_checkinteger(L, -1));
+  }
+  lua_pop(L, 1);
+  lua_getfield(L, 3, "ospeed");
+  if (!lua_isnil(L, -1)) {
+    cfsetospeed(&tio, luaL_checkinteger(L, -1));
+  }
+  lua_pop(L, 1);
+  if (tcsetattr(fd, action, &tio) != -1) {
+    lua_pushboolean(L, 1);
+    return 1;
+  } else {
+    return LuaUnixSysretErrno(L, "tcsetattr", olderr);
+  }
+}
+
 // unix.sched_yield()
 static int LuaUnixSchedYield(lua_State *L) {
   pthread_yield();
@@ -3702,6 +3785,8 @@ static const luaL_Reg kLuaUnix[] = {
     {"symlink", LuaUnixSymlink},          // create symbolic link
     {"sync", LuaUnixSync},                // flushes files and disks
     {"syslog", LuaUnixSyslog},            // logs to system log
+    {"tcgetattr", LuaUnixTcgetattr},      // get terminal attributes
+    {"tcsetattr", LuaUnixTcsetattr},      // set terminal attributes
     {"tiocgwinsz", LuaUnixTiocgwinsz},    // pseudoteletypewriter dimensions
     {"tmpfd", LuaUnixTmpfd},              // create anonymous file
     {"truncate", LuaUnixTruncate},        // shrink or extend file medium
@@ -4076,6 +4161,69 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "ST_MANDLOCK", ST_MANDLOCK);
   LuaSetIntField(L, "ST_NODIRATIME", ST_NODIRATIME);
   LuaSetIntField(L, "ST_WRITE", ST_WRITE);
+
+  // tcsetattr() action
+  LuaSetIntField(L, "TCSANOW", TCSANOW);
+  LuaSetIntField(L, "TCSADRAIN", TCSADRAIN);
+  LuaSetIntField(L, "TCSAFLUSH", TCSAFLUSH);
+
+  // termios c_iflag
+  LuaSetIntField(L, "BRKINT", BRKINT);
+  LuaSetIntField(L, "ICRNL", ICRNL);
+  LuaSetIntField(L, "IGNBRK", IGNBRK);
+  LuaSetIntField(L, "IGNCR", IGNCR);
+  LuaSetIntField(L, "IGNPAR", IGNPAR);
+  LuaSetIntField(L, "INLCR", INLCR);
+  LuaSetIntField(L, "INPCK", INPCK);
+  LuaSetIntField(L, "ISTRIP", ISTRIP);
+  LuaSetIntField(L, "IXANY", IXANY);
+  LuaSetIntField(L, "IXOFF", IXOFF);
+  LuaSetIntField(L, "IXON", IXON);
+  LuaSetIntField(L, "PARMRK", PARMRK);
+
+  // termios c_oflag
+  LuaSetIntField(L, "OPOST", OPOST);
+  LuaSetIntField(L, "ONLCR", ONLCR);
+  LuaSetIntField(L, "OCRNL", OCRNL);
+  LuaSetIntField(L, "ONOCR", ONOCR);
+  LuaSetIntField(L, "ONLRET", ONLRET);
+
+  // termios c_cflag
+  LuaSetIntField(L, "CLOCAL", CLOCAL);
+  LuaSetIntField(L, "CREAD", CREAD);
+  LuaSetIntField(L, "CS5", CS5);
+  LuaSetIntField(L, "CS6", CS6);
+  LuaSetIntField(L, "CS7", CS7);
+  LuaSetIntField(L, "CS8", CS8);
+  LuaSetIntField(L, "CSIZE", CSIZE);
+  LuaSetIntField(L, "CSTOPB", CSTOPB);
+  LuaSetIntField(L, "HUPCL", HUPCL);
+  LuaSetIntField(L, "PARENB", PARENB);
+  LuaSetIntField(L, "PARODD", PARODD);
+
+  // termios c_lflag
+  LuaSetIntField(L, "ECHO", ECHO);
+  LuaSetIntField(L, "ECHOE", ECHOE);
+  LuaSetIntField(L, "ECHOK", ECHOK);
+  LuaSetIntField(L, "ECHONL", ECHONL);
+  LuaSetIntField(L, "ICANON", ICANON);
+  LuaSetIntField(L, "IEXTEN", IEXTEN);
+  LuaSetIntField(L, "ISIG", ISIG);
+  LuaSetIntField(L, "NOFLSH", NOFLSH);
+  LuaSetIntField(L, "TOSTOP", TOSTOP);
+
+  // termios c_cc indices
+  LuaSetIntField(L, "VEOF", VEOF);
+  LuaSetIntField(L, "VEOL", VEOL);
+  LuaSetIntField(L, "VERASE", VERASE);
+  LuaSetIntField(L, "VINTR", VINTR);
+  LuaSetIntField(L, "VKILL", VKILL);
+  LuaSetIntField(L, "VMIN", VMIN);
+  LuaSetIntField(L, "VQUIT", VQUIT);
+  LuaSetIntField(L, "VSTART", VSTART);
+  LuaSetIntField(L, "VSTOP", VSTOP);
+  LuaSetIntField(L, "VTIME", VTIME);
+  LuaSetIntField(L, "NCCS", NCCS);
 
   return 1;
 }
