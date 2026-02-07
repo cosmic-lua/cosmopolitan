@@ -7983,6 +7983,56 @@ function unix.isatty(fd) end
 ---@overload fun(fd: integer): nil, error: unix.Errno
 function unix.tiocgwinsz(fd) end
 
+--- Gets terminal attributes.
+---
+--- Returns a termios table containing the terminal I/O settings for the
+--- specified file descriptor. The table contains these fields:
+---
+--- - `iflag`: Input mode flags (e.g., `unix.ICRNL`, `unix.IXON`)
+--- - `oflag`: Output mode flags (e.g., `unix.OPOST`, `unix.ONLCR`)
+--- - `cflag`: Control mode flags (e.g., `unix.CS8`, `unix.CREAD`)
+--- - `lflag`: Local mode flags (e.g., `unix.ECHO`, `unix.ICANON`)
+--- - `cc`: Array of control characters indexed 1 to `unix.NCCS`
+--- - `ispeed`: Input baud rate
+--- - `ospeed`: Output baud rate
+---
+--- Example: reading a password without echoing:
+---
+---     local tio = unix.tcgetattr(0)
+---     local old_lflag = tio.lflag
+---     tio.lflag = tio.lflag & ~unix.ECHO
+---     unix.tcsetattr(0, unix.TCSANOW, tio)
+---     local password = io.read()
+---     tio.lflag = old_lflag
+---     unix.tcsetattr(0, unix.TCSANOW, tio)
+---
+---@param fd integer
+---@return table termios
+---@nodiscard
+---@overload fun(fd: integer): nil, error: unix.Errno
+function unix.tcgetattr(fd) end
+
+--- Sets terminal attributes.
+---
+--- Modifies the terminal I/O settings for the specified file descriptor
+--- using the provided termios table. The `action` parameter controls when
+--- the changes take effect:
+---
+--- - `unix.TCSANOW`: Changes occur immediately
+--- - `unix.TCSADRAIN`: Changes occur after all output is transmitted
+--- - `unix.TCSAFLUSH`: Changes occur after output is transmitted and
+---   input is discarded
+---
+--- The termios table should contain the same fields as returned by
+--- `unix.tcgetattr()`. Missing fields default to zero.
+---
+---@param fd integer
+---@param action integer
+---@param termios table
+---@return true
+---@overload fun(fd: integer, action: integer, termios: table): nil, error: unix.Errno
+function unix.tcsetattr(fd, action, termios) end
+
 --- Returns file descriptor of open anonymous file.
 ---
 --- This creates a secure temporary file inside `$TMPDIR`. If it isn't
