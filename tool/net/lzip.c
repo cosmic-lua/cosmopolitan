@@ -91,6 +91,7 @@ struct LuaZipAppender {
   uint8_t **pending_data;  // compressed data for pending entries
   int level;
   int64_t max_file_size;
+  int dirty;               // nonzero if entries were removed
 };
 
 static struct LuaZipReader *GetZipReader(lua_State *L) {
@@ -1521,6 +1522,70 @@ static int LuaZipAppenderAdd(lua_State *L) {
   return 1;
 }
 
+// Returns true if entry name matches for removal.
+// If the pattern ends with '/', it matches any entry with that prefix
+// (recursive directory removal). Otherwise it matches exactly.
+static bool RemoveMatches(const char *entry_name, size_t entry_namelen,
+                          const char *pattern, size_t pattern_len,
+                          bool is_dir_pattern) {
+  if (is_dir_pattern) {
+    return entry_namelen >= pattern_len &&
+           !memcmp(entry_name, pattern, pattern_len);
+  } else {
+    return entry_namelen == pattern_len &&
+           !memcmp(entry_name, pattern, pattern_len);
+  }
+}
+
+// appender:remove(name) -> true | nil, error
+// Removes entries by name from the appender (existing or pending).
+// If name ends with '/', removes all entries with that directory prefix.
+// The local file data for removed existing entries remains as dead space
+// in the archive; only the central directory reference is removed.
+static int LuaZipAppenderRemove(lua_State *L) {
+  struct LuaZipAppender *a = GetZipAppender(L);
+  size_t namelen;
+  const char *name = luaL_checklstring(L, 2, &namelen);
+
+  if (a->fd == -1)
+    return ZipError(L, "zip appender is closed");
+
+  bool is_dir = namelen > 0 && name[namelen - 1] == '/';
+  int removed = 0;
+
+  // Check existing entries (iterate backwards for safe swap-removal)
+  for (size_t i = a->existing_count; i-- > 0;) {
+    if (RemoveMatches(a->existing[i].name, a->existing[i].namelen,
+                      name, namelen, is_dir)) {
+      free(a->existing[i].name);
+      a->existing[i] = a->existing[--a->existing_count];
+      removed++;
+      if (!is_dir) break;
+    }
+  }
+
+  // Check pending entries (iterate backwards for safe swap-removal)
+  for (size_t i = a->pending_count; i-- > 0;) {
+    if (RemoveMatches(a->pending[i].name, a->pending[i].namelen,
+                      name, namelen, is_dir)) {
+      free(a->pending[i].name);
+      free(a->pending_data[i]);
+      size_t last = --a->pending_count;
+      a->pending[i] = a->pending[last];
+      a->pending_data[i] = a->pending_data[last];
+      removed++;
+      if (!is_dir) break;
+    }
+  }
+
+  if (removed == 0)
+    return ZipError(L, "entry not found");
+
+  a->dirty = 1;
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 // appender:close() -> true | nil, error
 static int LuaZipAppenderClose(lua_State *L) {
   struct LuaZipAppender *a = GetZipAppender(L);
@@ -1530,8 +1595,8 @@ static int LuaZipAppenderClose(lua_State *L) {
     return 1;
   }
 
-  // If no pending entries, just close
-  if (a->pending_count == 0) {
+  // If no pending entries and nothing was removed, just close
+  if (a->pending_count == 0 && !a->dirty) {
     AppenderCleanup(a);
     lua_pushboolean(L, 1);
     return 1;
@@ -1681,6 +1746,7 @@ static const luaL_Reg kLuaZipAppenderMeta[] = {
 static const luaL_Reg kLuaZipAppenderMethods[] = {
     {"close", LuaZipAppenderClose},
     {"add", LuaZipAppenderAdd},
+    {"remove", LuaZipAppenderRemove},
     {0},
 };
 
