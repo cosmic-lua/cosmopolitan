@@ -167,6 +167,262 @@ assert(result == nil, "add on closed appender should fail")
 assert(err:match("closed"), "error should mention closed")
 
 --------------------------------------------------------------------------------
+-- Test remove existing entry
+--------------------------------------------------------------------------------
+
+local remove_zip = tmpdir .. "/remove_test.zip"
+writer = zip.open(remove_zip, "w")
+writer:add("keep.txt", "keep this")
+writer:add("remove_me.txt", "remove this")
+writer:add("also_keep.txt", "also keep")
+writer:close()
+
+appender = zip.open(remove_zip, "a")
+assert(appender, "should open for append")
+
+ok, err = appender:remove("remove_me.txt")
+assert(ok, "remove should succeed: " .. tostring(err))
+
+ok, err = appender:close()
+assert(ok, "close after remove should succeed: " .. tostring(err))
+
+reader = zip.open(remove_zip)
+entries = reader:list()
+assert(#entries == 2, "should have 2 entries after remove, got " .. #entries)
+
+entry_set = {}
+for _, name in ipairs(entries) do
+  entry_set[name] = true
+end
+assert(entry_set["keep.txt"], "keep.txt should still exist")
+assert(entry_set["also_keep.txt"], "also_keep.txt should still exist")
+assert(not entry_set["remove_me.txt"], "remove_me.txt should be gone")
+
+assert(reader:read("keep.txt") == "keep this", "keep.txt content should be preserved")
+assert(reader:read("also_keep.txt") == "also keep", "also_keep.txt content should be preserved")
+reader:close()
+
+--------------------------------------------------------------------------------
+-- Test remove then add same name (replace pattern)
+--------------------------------------------------------------------------------
+
+local replace_zip = tmpdir .. "/replace_test.zip"
+writer = zip.open(replace_zip, "w")
+writer:add("config.txt", "old config")
+writer:add("data.txt", "data file")
+writer:close()
+
+appender = zip.open(replace_zip, "a")
+assert(appender, "should open for append")
+
+ok, err = appender:remove("config.txt")
+assert(ok, "remove should succeed: " .. tostring(err))
+
+ok, err = appender:add("config.txt", "new config")
+assert(ok, "add after remove should succeed: " .. tostring(err))
+
+ok, err = appender:close()
+assert(ok, "close should succeed: " .. tostring(err))
+
+reader = zip.open(replace_zip)
+entries = reader:list()
+assert(#entries == 2, "should still have 2 entries, got " .. #entries)
+
+local config_content = reader:read("config.txt")
+assert(config_content == "new config", "config should have new content, got: " .. tostring(config_content))
+assert(reader:read("data.txt") == "data file", "data.txt should be preserved")
+reader:close()
+
+--------------------------------------------------------------------------------
+-- Test remove pending entry
+--------------------------------------------------------------------------------
+
+local remove_pending_zip = tmpdir .. "/remove_pending_test.zip"
+writer = zip.open(remove_pending_zip, "w")
+writer:add("existing.txt", "existing")
+writer:close()
+
+appender = zip.open(remove_pending_zip, "a")
+appender:add("new1.txt", "new content 1")
+appender:add("new2.txt", "new content 2")
+
+-- Remove a pending entry (not yet written to disk)
+ok, err = appender:remove("new1.txt")
+assert(ok, "remove pending entry should succeed: " .. tostring(err))
+
+ok, err = appender:close()
+assert(ok, "close should succeed: " .. tostring(err))
+
+reader = zip.open(remove_pending_zip)
+entries = reader:list()
+assert(#entries == 2, "should have 2 entries (existing + new2), got " .. #entries)
+
+entry_set = {}
+for _, name in ipairs(entries) do
+  entry_set[name] = true
+end
+assert(entry_set["existing.txt"], "existing.txt should be present")
+assert(entry_set["new2.txt"], "new2.txt should be present")
+assert(not entry_set["new1.txt"], "new1.txt should be gone")
+reader:close()
+
+--------------------------------------------------------------------------------
+-- Test remove non-existent entry
+--------------------------------------------------------------------------------
+
+appender = zip.open(remove_pending_zip, "a")
+
+result, err = appender:remove("nonexistent.txt")
+assert(result == nil, "removing non-existent entry should fail")
+assert(err:match("not found"), "error should mention not found")
+
+appender:close()
+
+--------------------------------------------------------------------------------
+-- Test remove on closed appender
+--------------------------------------------------------------------------------
+
+appender = zip.open(remove_pending_zip, "a")
+appender:close()
+
+result, err = appender:remove("test.txt")
+assert(result == nil, "remove on closed appender should fail")
+assert(err:match("closed"), "error should mention closed")
+
+--------------------------------------------------------------------------------
+-- Test remove all entries
+--------------------------------------------------------------------------------
+
+local remove_all_zip = tmpdir .. "/remove_all_test.zip"
+writer = zip.open(remove_all_zip, "w")
+writer:add("a.txt", "aaa")
+writer:add("b.txt", "bbb")
+writer:close()
+
+appender = zip.open(remove_all_zip, "a")
+appender:remove("a.txt")
+appender:remove("b.txt")
+appender:close()
+
+reader = zip.open(remove_all_zip)
+entries = reader:list()
+assert(#entries == 0, "should have 0 entries after removing all, got " .. #entries)
+reader:close()
+
+--------------------------------------------------------------------------------
+-- Test remove directory (recursive prefix removal)
+--------------------------------------------------------------------------------
+
+local remove_dir_zip = tmpdir .. "/remove_dir_test.zip"
+writer = zip.open(remove_dir_zip, "w")
+writer:add("root.txt", "root file")
+writer:add("subdir/a.txt", "aaa")
+writer:add("subdir/b.txt", "bbb")
+writer:add("subdir/nested/c.txt", "ccc")
+writer:add("other/d.txt", "ddd")
+writer:close()
+
+appender = zip.open(remove_dir_zip, "a")
+assert(appender, "should open for append")
+
+-- Remove entire subdir/ directory recursively
+ok, err = appender:remove("subdir/")
+assert(ok, "directory remove should succeed: " .. tostring(err))
+
+ok, err = appender:close()
+assert(ok, "close should succeed: " .. tostring(err))
+
+reader = zip.open(remove_dir_zip)
+entries = reader:list()
+assert(#entries == 2, "should have 2 entries after dir remove, got " .. #entries)
+
+entry_set = {}
+for _, name in ipairs(entries) do
+  entry_set[name] = true
+end
+assert(entry_set["root.txt"], "root.txt should still exist")
+assert(entry_set["other/d.txt"], "other/d.txt should still exist")
+assert(not entry_set["subdir/a.txt"], "subdir/a.txt should be gone")
+assert(not entry_set["subdir/b.txt"], "subdir/b.txt should be gone")
+assert(not entry_set["subdir/nested/c.txt"], "subdir/nested/c.txt should be gone")
+reader:close()
+
+--------------------------------------------------------------------------------
+-- Test remove directory with pending entries
+--------------------------------------------------------------------------------
+
+local remove_dir_pending_zip = tmpdir .. "/remove_dir_pending_test.zip"
+writer = zip.open(remove_dir_pending_zip, "w")
+writer:add("existing.txt", "existing")
+writer:add("dir/old.txt", "old file")
+writer:close()
+
+appender = zip.open(remove_dir_pending_zip, "a")
+appender:add("dir/new1.txt", "new 1")
+appender:add("dir/new2.txt", "new 2")
+appender:add("other.txt", "other")
+
+-- Remove dir/ should remove existing dir/old.txt AND pending dir/new1.txt, dir/new2.txt
+ok, err = appender:remove("dir/")
+assert(ok, "directory remove should succeed: " .. tostring(err))
+
+appender:close()
+
+reader = zip.open(remove_dir_pending_zip)
+entries = reader:list()
+assert(#entries == 2, "should have 2 entries, got " .. #entries)
+
+entry_set = {}
+for _, name in ipairs(entries) do
+  entry_set[name] = true
+end
+assert(entry_set["existing.txt"], "existing.txt should be present")
+assert(entry_set["other.txt"], "other.txt should be present")
+assert(not entry_set["dir/old.txt"], "dir/old.txt should be gone")
+assert(not entry_set["dir/new1.txt"], "dir/new1.txt should be gone")
+assert(not entry_set["dir/new2.txt"], "dir/new2.txt should be gone")
+reader:close()
+
+--------------------------------------------------------------------------------
+-- Test remove directory then add new entries in same directory
+--------------------------------------------------------------------------------
+
+local replace_dir_zip = tmpdir .. "/replace_dir_test.zip"
+writer = zip.open(replace_dir_zip, "w")
+writer:add("assets/logo.png", "old logo")
+writer:add("assets/style.css", "old style")
+writer:add("index.html", "index")
+writer:close()
+
+appender = zip.open(replace_dir_zip, "a")
+appender:remove("assets/")
+appender:add("assets/logo.png", "new logo")
+appender:add("assets/app.js", "new script")
+appender:close()
+
+reader = zip.open(replace_dir_zip)
+entries = reader:list()
+assert(#entries == 3, "should have 3 entries, got " .. #entries)
+
+assert(reader:read("index.html") == "index", "index.html should be preserved")
+assert(reader:read("assets/logo.png") == "new logo", "logo should have new content")
+assert(reader:read("assets/app.js") == "new script", "app.js should exist")
+
+local old_style = reader:read("assets/style.css")
+assert(old_style == nil, "style.css should be gone")
+reader:close()
+
+--------------------------------------------------------------------------------
+-- Test remove non-existent directory
+--------------------------------------------------------------------------------
+
+appender = zip.open(replace_dir_zip, "a")
+result, err = appender:remove("nonexistent/")
+assert(result == nil, "removing non-existent directory should fail")
+assert(err:match("not found"), "error should mention not found")
+appender:close()
+
+--------------------------------------------------------------------------------
 -- Cleanup
 --------------------------------------------------------------------------------
 
