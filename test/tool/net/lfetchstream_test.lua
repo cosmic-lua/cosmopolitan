@@ -16,15 +16,17 @@
 -- Test cases for FetchStream (streaming fetch)
 -- Uses local test servers to verify streaming behavior
 
+-- Use FetchStream from redbean globals or cosmo module
 local cosmo = require("cosmo")
-local unix = require("cosmo.unix")
-local FetchStream = cosmo.FetchStream
+local FetchStream = FetchStream or cosmo.FetchStream
+local ParseIp = ParseIp or cosmo.ParseIp
+local unix = unix or require("unix")
 
 -- Helper: Create a simple TCP server
 local function create_test_server()
     local sock = assert(unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0))
     assert(unix.setsockopt(sock, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1))
-    assert(unix.bind(sock, cosmo.ParseIp("127.0.0.1"), 0))
+    assert(unix.bind(sock, ParseIp("127.0.0.1"), 0))
     assert(unix.listen(sock, 5))
     local ip, port = unix.getsockname(sock)
     return sock, port

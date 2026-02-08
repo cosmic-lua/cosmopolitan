@@ -323,6 +323,7 @@ typedef struct FetchReader {
   int sock;
   bool closed;
   bool usingssl;
+  bool stream_complete;     // true when body is fully read (return nil on next read)
   int body_state;           // kHttpClientStateBody/Lengthed/Chunked
   size_t content_length;    // for lengthed bodies
   size_t bytes_read;        // body bytes returned so far
@@ -374,6 +375,12 @@ static int LuaFetchReaderRead(lua_State *L) {
     return 2;
   }
 
+  // Check if stream was already completed (return EOF)
+  if (r->stream_complete) {
+    lua_pushnil(L);
+    return 1;
+  }
+
   // For lengthed bodies, check if we already got everything
   if (r->body_state == kHttpClientStateBodyLengthed &&
       r->bytes_read >= r->content_length) {
@@ -400,14 +407,19 @@ static int LuaFetchReaderRead(lua_State *L) {
       // paylen is only set when uc>0 (complete), so use u.j always.
       size_t decoded = r->u.j;
       if (uc > 0) {
-        // Chunked encoding complete
+        // Chunked encoding complete - mark stream as done
+        r->stream_complete = true;
         if (decoded > 0) {
+          // Return the decoded data; next read will return EOF
           lua_pushlstring(L, r->buf.p + r->buf_pos, decoded);
           r->bytes_read += decoded;
+          r->buf_pos = r->buf.n;
+          return 1;
         }
-        FetchReaderClose(r);
+        // No data in final chunk, return EOF immediately
         r->buf_pos = r->buf.n;
-        return decoded > 0 ? 1 : (lua_pushnil(L), 1);
+        lua_pushnil(L);
+        return 1;
       }
       if (decoded > 0) {
         lua_pushlstring(L, r->buf.p + r->buf_pos, decoded);
@@ -491,12 +503,16 @@ static int LuaFetchReaderRead(lua_State *L) {
     size_t decoded = r->u.j;
     if (uc > 0) {
       // Chunked encoding complete (final chunk + trailers received)
+      r->stream_complete = true;
       if (decoded > 0) {
+        // Return the decoded data; next read will return EOF
         lua_pushlstring(L, readbuf, decoded);
         r->bytes_read += decoded;
+        return 1;
       }
-      FetchReaderClose(r);
-      return decoded > 0 ? 1 : (lua_pushnil(L), 1);
+      // No data in final chunk, return EOF immediately
+      lua_pushnil(L);
+      return 1;
     }
     if (decoded > 0) {
       lua_pushlstring(L, readbuf, decoded);
@@ -518,7 +534,7 @@ static int LuaFetchReaderRead(lua_State *L) {
   r->bytes_read += len;
   if (r->body_state == kHttpClientStateBodyLengthed &&
       r->bytes_read >= r->content_length) {
-    FetchReaderClose(r);
+    r->stream_complete = true;
   }
   return 1;
 }
