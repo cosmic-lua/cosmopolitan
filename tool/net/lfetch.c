@@ -390,20 +390,28 @@ static int LuaFetchReaderRead(lua_State *L) {
       r->u.i = 0;
       r->u.j = 0;
       size_t paylen = 0;
-      rc = Unchunk(&r->u, r->buf.p + r->buf_pos, avail, &paylen);
-      if (rc == -1) {
+      int uc = Unchunk(&r->u, r->buf.p + r->buf_pos, avail, &paylen);
+      if (uc == -1) {
         lua_pushnil(L);
         lua_pushliteral(L, "unchunk error");
         return 2;
       }
-      if (paylen > 0) {
-        lua_pushlstring(L, r->buf.p + r->buf_pos, paylen);
-        r->bytes_read += paylen;
-        if (rc) {
-          // Unchunk complete - all data received
-          FetchReaderClose(r);
+      // Unchunk writes decoded data in-place; u.j has decoded byte count.
+      // paylen is only set when uc>0 (complete), so use u.j always.
+      size_t decoded = r->u.j;
+      if (uc > 0) {
+        // Chunked encoding complete
+        if (decoded > 0) {
+          lua_pushlstring(L, r->buf.p + r->buf_pos, decoded);
+          r->bytes_read += decoded;
         }
-        // Mark buffer as consumed
+        FetchReaderClose(r);
+        r->buf_pos = r->buf.n;
+        return decoded > 0 ? 1 : (lua_pushnil(L), 1);
+      }
+      if (decoded > 0) {
+        lua_pushlstring(L, r->buf.p + r->buf_pos, decoded);
+        r->bytes_read += decoded;
         r->buf_pos = r->buf.n;
         return 1;
       }
@@ -478,13 +486,21 @@ static int LuaFetchReaderRead(lua_State *L) {
       lua_pushliteral(L, "unchunk error");
       return 2;
     }
-    if (paylen > 0) {
-      lua_pushlstring(L, readbuf, paylen);
-      r->bytes_read += paylen;
-      if (uc) {
-        // Final chunk received
-        FetchReaderClose(r);
+    // Unchunk writes decoded data in-place; u.j has decoded byte count.
+    // paylen is only set when uc>0 (complete), so use u.j always.
+    size_t decoded = r->u.j;
+    if (uc > 0) {
+      // Chunked encoding complete (final chunk + trailers received)
+      if (decoded > 0) {
+        lua_pushlstring(L, readbuf, decoded);
+        r->bytes_read += decoded;
       }
+      FetchReaderClose(r);
+      return decoded > 0 ? 1 : (lua_pushnil(L), 1);
+    }
+    if (decoded > 0) {
+      lua_pushlstring(L, readbuf, decoded);
+      r->bytes_read += decoded;
       return 1;
     }
     // Got chunk framing but no data yet, try again
