@@ -358,6 +358,190 @@ function test_stream_sse_pattern()
     print("test_stream_sse_pattern: PASS")
 end
 
+-- Test: Invalid chunk size (non-hex characters)
+function test_stream_chunked_invalid_size()
+    local server, port = create_test_server()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        accept_and_respond(server, function(client)
+            unix.write(client, "HTTP/1.1 200 OK\r\n" ..
+                              "Transfer-Encoding: chunked\r\n" ..
+                              "Connection: close\r\n" ..
+                              "\r\n" ..
+                              "XYZ\r\n")  -- invalid: non-hex chunk size
+        end)
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    local status, headers, reader = FetchStream("http://127.0.0.1:" .. port .. "/bad-chunk", {
+        proxy = "http://127.0.0.1:" .. port
+    })
+
+    assert(status == 200, "expected 200")
+
+    -- Reading should eventually fail due to invalid chunk encoding
+    local chunk, err = reader:read()
+    -- Either returns nil with error, or empty string, or the invalid data
+    -- The key is that we don't crash
+    reader:close()
+
+    unix.wait(pid)
+    print("test_stream_chunked_invalid_size: PASS")
+end
+
+-- Test: Missing CRLF after chunk data
+function test_stream_chunked_missing_crlf()
+    local server, port = create_test_server()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        accept_and_respond(server, function(client)
+            unix.write(client, "HTTP/1.1 200 OK\r\n" ..
+                              "Transfer-Encoding: chunked\r\n" ..
+                              "Connection: close\r\n" ..
+                              "\r\n" ..
+                              "5\r\nHello")  -- missing trailing \r\n
+            -- Connection closes immediately
+        end)
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    local status, headers, reader = FetchStream("http://127.0.0.1:" .. port .. "/missing-crlf", {
+        proxy = "http://127.0.0.1:" .. port
+    })
+
+    assert(status == 200, "expected 200")
+
+    -- Try to read - may get partial data or error
+    local chunks = {}
+    while true do
+        local chunk, err = reader:read()
+        if not chunk then break end
+        if #chunk > 0 then table.insert(chunks, chunk) end
+    end
+    reader:close()
+
+    -- We should have gotten some data or an error, but not crashed
+    unix.wait(pid)
+    print("test_stream_chunked_missing_crlf: PASS")
+end
+
+-- Test: Incomplete terminator (0\r\n without final \r\n)
+function test_stream_chunked_incomplete_terminator()
+    local server, port = create_test_server()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        accept_and_respond(server, function(client)
+            unix.write(client, "HTTP/1.1 200 OK\r\n" ..
+                              "Transfer-Encoding: chunked\r\n" ..
+                              "Connection: close\r\n" ..
+                              "\r\n" ..
+                              "5\r\nHello\r\n" ..
+                              "0\r\n")  -- missing final \r\n
+            -- Connection closes before final CRLF
+        end)
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    local status, headers, reader = FetchStream("http://127.0.0.1:" .. port .. "/incomplete", {
+        proxy = "http://127.0.0.1:" .. port
+    })
+
+    assert(status == 200, "expected 200")
+
+    -- Read until EOF or error
+    local chunks = {}
+    while true do
+        local chunk, err = reader:read()
+        if not chunk then break end
+        if #chunk > 0 then table.insert(chunks, chunk) end
+    end
+    reader:close()
+
+    -- Should have received "Hello" even if the terminator was incomplete
+    local body = table.concat(chunks)
+    assert(body == "Hello" or body == "",
+           "expected 'Hello' or empty, got: '" .. body .. "'")
+
+    unix.wait(pid)
+    print("test_stream_chunked_incomplete_terminator: PASS")
+end
+
+-- Test: Overflow chunk size (exceeds size_t)
+function test_stream_chunked_overflow_size()
+    local server, port = create_test_server()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        accept_and_respond(server, function(client)
+            unix.write(client, "HTTP/1.1 200 OK\r\n" ..
+                              "Transfer-Encoding: chunked\r\n" ..
+                              "Connection: close\r\n" ..
+                              "\r\n" ..
+                              "10000000000000001\r\n")  -- overflow size
+        end)
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    local status, headers, reader = FetchStream("http://127.0.0.1:" .. port .. "/overflow", {
+        proxy = "http://127.0.0.1:" .. port
+    })
+
+    assert(status == 200, "expected 200")
+
+    -- Reading should fail with error (not hang or crash)
+    local chunk, err = reader:read()
+    -- Should get nil with error, or empty result
+    reader:close()
+
+    unix.wait(pid)
+    print("test_stream_chunked_overflow_size: PASS")
+end
+
+-- Test: HTTPS streaming (uses external service)
+function test_stream_https()
+    -- Test with a real HTTPS endpoint that supports streaming
+    local status, headers, reader = FetchStream("https://httpbin.org/stream/3")
+    if not status then
+        -- Network may not be available, skip test
+        print("test_stream_https: SKIP (no network: " .. tostring(headers) .. ")")
+        return
+    end
+    assert(status == 200, "expected 200, got: " .. tostring(status))
+    assert(reader, "expected reader object")
+
+    -- Read all chunks
+    local chunks = {}
+    while true do
+        local chunk, err = reader:read()
+        if not chunk then
+            if err then error("read error: " .. err) end
+            break
+        end
+        if #chunk > 0 then table.insert(chunks, chunk) end
+    end
+    reader:close()
+
+    local body = table.concat(chunks)
+    assert(#body > 0, "expected response body")
+    -- httpbin.org/stream/3 returns 3 JSON objects
+    local count = 0
+    for _ in body:gmatch('"id":') do count = count + 1 end
+    assert(count == 3, "expected 3 JSON objects, got: " .. count)
+
+    print("test_stream_https: PASS")
+end
+
 local function main()
     local tests = {
         test_stream_content_length,
@@ -367,6 +551,11 @@ local function main()
         test_stream_error_handling,
         test_stream_no_content,
         test_stream_sse_pattern,
+        test_stream_chunked_invalid_size,
+        test_stream_chunked_missing_crlf,
+        test_stream_chunked_incomplete_terminator,
+        test_stream_chunked_overflow_size,
+        test_stream_https,
     }
 
     local passed = 0

@@ -395,7 +395,8 @@ int LuaFetch(lua_State *L) {
    */
   if (usingssl && proxyhost) {
     char *connectreq = 0;
-    char connectbuf[1024];
+    struct Buffer connectbuf = {0};
+    struct HttpMessage connectmsg;
     ssize_t connectrc;
     appendf(&connectreq,
             "CONNECT %s:%s HTTP/1.1\r\n"
@@ -415,17 +416,52 @@ int LuaFetch(lua_State *L) {
         return LuaNilError(L, "proxy CONNECT write error: %s", strerror(errno));
       }
     }
-    // Read proxy response (simple parsing - just check for "200")
-    if ((connectrc = READ(sock, connectbuf, sizeof(connectbuf) - 1)) <= 0) {
-      close(sock);
-      return LuaNilError(L, "proxy CONNECT read error: %s", strerror(errno));
+    // Read and parse proxy CONNECT response properly
+    InitHttpMessage(&connectmsg, kHttpResponse);
+    for (;;) {
+      if (connectbuf.n == connectbuf.c) {
+        char *newp;
+        connectbuf.c += 256;
+        if (connectbuf.c > 8192) {
+          DestroyHttpMessage(&connectmsg);
+          free(connectbuf.p);
+          close(sock);
+          return LuaNilError(L, "proxy CONNECT response too large");
+        }
+        if (!(newp = realloc(connectbuf.p, connectbuf.c))) {
+          DestroyHttpMessage(&connectmsg);
+          free(connectbuf.p);
+          close(sock);
+          return LuaNilError(L, "out of memory");
+        }
+        connectbuf.p = newp;
+      }
+      if ((connectrc = READ(sock, connectbuf.p + connectbuf.n,
+                            connectbuf.c - connectbuf.n)) <= 0) {
+        DestroyHttpMessage(&connectmsg);
+        free(connectbuf.p);
+        close(sock);
+        return LuaNilError(L, "proxy CONNECT read error: %s", strerror(errno));
+      }
+      connectbuf.n += connectrc;
+      rc = ParseHttpMessage(&connectmsg, connectbuf.p, connectbuf.n, SHRT_MAX);
+      if (rc == -1) {
+        DestroyHttpMessage(&connectmsg);
+        free(connectbuf.p);
+        close(sock);
+        return LuaNilError(L, "proxy CONNECT malformed response");
+      }
+      if (rc > 0) break;  // complete
     }
-    connectbuf[connectrc] = '\0';
-    // Check for successful tunnel establishment (HTTP/1.x 200)
-    if (!strstr(connectbuf, " 200 ")) {
+    if (connectmsg.status != 200) {
+      int status = connectmsg.status;
+      DestroyHttpMessage(&connectmsg);
+      free(connectbuf.p);
       close(sock);
-      return LuaNilError(L, "proxy CONNECT failed: %.64s", connectbuf);
+      return LuaNilError(L, "proxy CONNECT failed: HTTP %d", status);
     }
+    DestroyHttpMessage(&connectmsg);
+    free(connectbuf.p);
     DEBUGF("(ftch) CONNECT tunnel established through proxy");
   }
 

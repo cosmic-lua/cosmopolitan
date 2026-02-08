@@ -519,7 +519,10 @@ static int LuaFetchReaderRead(lua_State *L) {
       r->bytes_read += decoded;
       return 1;
     }
-    // Got chunk framing but no data yet, try again
+    // Got chunk framing but no payload data yet.
+    // NOTE: Returns empty string when chunk framing received but no payload data.
+    // Callers should handle empty chunks gracefully (e.g., skip if #chunk == 0).
+    // This can occur when chunk headers arrive separately from chunk data.
     lua_pushliteral(L, "");
     return 1;
   }
@@ -559,8 +562,7 @@ static int LuaFetchReaderTostring(lua_State *L) {
   if (r->closed) {
     lua_pushliteral(L, "FetchReader(closed)");
   } else {
-    lua_pushfstring(L, "FetchReader(fd=%d%s)", r->sock,
-                    r->usingssl ? ", ssl" : "");
+    lua_pushfstring(L, "FetchReader(%s)", r->usingssl ? "ssl" : "http");
   }
   return 1;
 }
@@ -861,7 +863,8 @@ int LuaFetchStream(lua_State *L) {
   // ---- HTTPS proxy CONNECT tunnel ----
   if (usingssl && proxyhost) {
     char *connectreq = 0;
-    char connectbuf[1024];
+    struct Buffer connectbuf = {0};
+    struct HttpMessage connectmsg;
     ssize_t connectrc;
     appendf(&connectreq,
             "CONNECT %s:%s HTTP/1.1\r\n"
@@ -880,15 +883,52 @@ int LuaFetchStream(lua_State *L) {
         return LuaNilError(L, "proxy CONNECT write error: %s", strerror(errno));
       }
     }
-    if ((connectrc = READ(sock, connectbuf, sizeof(connectbuf) - 1)) <= 0) {
-      close(sock);
-      return LuaNilError(L, "proxy CONNECT read error: %s", strerror(errno));
+    // Read and parse proxy CONNECT response properly
+    InitHttpMessage(&connectmsg, kHttpResponse);
+    for (;;) {
+      if (connectbuf.n == connectbuf.c) {
+        char *newp;
+        connectbuf.c += 256;
+        if (connectbuf.c > 8192) {
+          DestroyHttpMessage(&connectmsg);
+          free(connectbuf.p);
+          close(sock);
+          return LuaNilError(L, "proxy CONNECT response too large");
+        }
+        if (!(newp = realloc(connectbuf.p, connectbuf.c))) {
+          DestroyHttpMessage(&connectmsg);
+          free(connectbuf.p);
+          close(sock);
+          return LuaNilError(L, "out of memory");
+        }
+        connectbuf.p = newp;
+      }
+      if ((connectrc = READ(sock, connectbuf.p + connectbuf.n,
+                            connectbuf.c - connectbuf.n)) <= 0) {
+        DestroyHttpMessage(&connectmsg);
+        free(connectbuf.p);
+        close(sock);
+        return LuaNilError(L, "proxy CONNECT read error: %s", strerror(errno));
+      }
+      connectbuf.n += connectrc;
+      rc = ParseHttpMessage(&connectmsg, connectbuf.p, connectbuf.n, SHRT_MAX);
+      if (rc == -1) {
+        DestroyHttpMessage(&connectmsg);
+        free(connectbuf.p);
+        close(sock);
+        return LuaNilError(L, "proxy CONNECT malformed response");
+      }
+      if (rc > 0) break;  // complete
     }
-    connectbuf[connectrc] = '\0';
-    if (!strstr(connectbuf, " 200 ")) {
+    if (connectmsg.status != 200) {
+      int status = connectmsg.status;
+      DestroyHttpMessage(&connectmsg);
+      free(connectbuf.p);
       close(sock);
-      return LuaNilError(L, "proxy CONNECT failed: %.64s", connectbuf);
+      return LuaNilError(L, "proxy CONNECT failed: HTTP %d", status);
     }
+    DestroyHttpMessage(&connectmsg);
+    free(connectbuf.p);
   }
 
   // ---- TLS handshake ----
@@ -1171,10 +1211,16 @@ StreamCreateReader: {
 
 #ifndef UNSECURE
     if (sslctx_initialized) {
+      // NOTE: We memcpy the ssl_context from stack to heap userdata.
+      // This works because:
+      // 1. We don't call mbedtls_ssl_free on the original (ownership transferred)
+      // 2. mbedtls_ssl_set_bio updates the only self-referential pointer (p_bio)
+      // 3. All other pointers (session, buffers) are to external heap allocations
+      // This pattern could break with future mbedtls versions if they add
+      // internal self-referential pointers.
       memcpy(&reader->sslctx, &sslctx, sizeof(sslctx));
       reader->bio = bio;
       reader->sslctx_initialized = true;
-      // Rebind bio to copied context
       mbedtls_ssl_set_bio(&reader->sslctx, reader->bio, TlsSend, 0,
                           TlsRecvImpl);
     }
