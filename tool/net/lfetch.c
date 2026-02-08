@@ -331,9 +331,8 @@ typedef struct FetchReader {
   struct Buffer buf;        // read buffer
   size_t buf_pos;           // current read position in buffer (body data)
 #ifndef UNSECURE
-  mbedtls_ssl_context sslctx;
+  mbedtls_ssl_context *sslctx;  // heap-allocated, owned by reader
   struct TlsBio *bio;
-  bool sslctx_initialized;
 #endif
 } FetchReader;
 
@@ -345,9 +344,10 @@ static void FetchReaderClose(FetchReader *r) {
   if (r->closed) return;
   r->closed = true;
 #ifndef UNSECURE
-  if (r->sslctx_initialized) {
-    mbedtls_ssl_free(&r->sslctx);
-    r->sslctx_initialized = false;
+  if (r->sslctx) {
+    mbedtls_ssl_free(r->sslctx);
+    free(r->sslctx);
+    r->sslctx = NULL;
   }
   if (r->bio) {
     free(r->bio);
@@ -446,7 +446,7 @@ static int LuaFetchReaderRead(lua_State *L) {
   char readbuf[16384];
 #ifndef UNSECURE
   if (r->usingssl) {
-    rc = mbedtls_ssl_read(&r->sslctx, (unsigned char *)readbuf,
+    rc = mbedtls_ssl_read(r->sslctx, (unsigned char *)readbuf,
                           sizeof(readbuf));
     if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || rc == 0) {
       // EOF
@@ -602,8 +602,7 @@ int LuaFetchStream(lua_State *L) {
   char *proxyauthhdr = 0;
   char *request;
   struct TlsBio *bio;
-  mbedtls_ssl_context sslctx;
-  bool sslctx_initialized = false;
+  mbedtls_ssl_context *sslctx = NULL;
   struct addrinfo *addr;
   struct Buffer inbuf;
   struct HttpMessage msg;
@@ -934,18 +933,24 @@ int LuaFetchStream(lua_State *L) {
   // ---- TLS handshake ----
   bio = NULL;
   if (usingssl) {
-    mbedtls_ssl_init(&sslctx);
-    sslctx_initialized = true;
-    if ((ret = mbedtls_ssl_setup(&sslctx, &confcli)) != 0) {
-      mbedtls_ssl_free(&sslctx);
+    sslctx = malloc(sizeof(*sslctx));
+    if (!sslctx) {
+      close(sock);
+      return LuaNilError(L, "out of memory");
+    }
+    mbedtls_ssl_init(sslctx);
+    if ((ret = mbedtls_ssl_setup(sslctx, &confcli)) != 0) {
+      mbedtls_ssl_free(sslctx);
+      free(sslctx);
       close(sock);
       return LuaNilTlsError(L, "ssl_setup", ret);
     }
     if (!evadedragnetsurveillance)
-      mbedtls_ssl_set_hostname(&sslctx, host);
+      mbedtls_ssl_set_hostname(sslctx, host);
     bio = malloc(sizeof(struct TlsBio));
     if (!bio) {
-      mbedtls_ssl_free(&sslctx);
+      mbedtls_ssl_free(sslctx);
+      free(sslctx);
       close(sock);
       return LuaNilError(L, "out of memory");
     }
@@ -953,8 +958,8 @@ int LuaFetchStream(lua_State *L) {
     bio->a = 0;
     bio->b = 0;
     bio->c = -1;
-    mbedtls_ssl_set_bio(&sslctx, bio, TlsSend, 0, TlsRecvImpl);
-    while ((ret = mbedtls_ssl_handshake(&sslctx))) {
+    mbedtls_ssl_set_bio(sslctx, bio, TlsSend, 0, TlsRecvImpl);
+    while ((ret = mbedtls_ssl_handshake(sslctx))) {
       switch (ret) {
         case MBEDTLS_ERR_SSL_WANT_READ:
           break;
@@ -962,7 +967,8 @@ int LuaFetchStream(lua_State *L) {
           goto StreamVerifyFailed;
         default:
           free(bio);
-          mbedtls_ssl_free(&sslctx);
+          mbedtls_ssl_free(sslctx);
+          free(sslctx);
           close(sock);
           return LuaNilTlsError(L, "handshake", ret);
       }
@@ -975,13 +981,14 @@ int LuaFetchStream(lua_State *L) {
   for (i = 0; i < requestlen; i += rc) {
 #ifndef UNSECURE
     if (usingssl) {
-      rc = mbedtls_ssl_write(&sslctx, (unsigned char *)request + i,
+      rc = mbedtls_ssl_write(sslctx, (unsigned char *)request + i,
                              requestlen - i);
       if (rc <= 0) {
         if (rc == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)
           goto StreamVerifyFailed;
         free(bio);
-        mbedtls_ssl_free(&sslctx);
+        mbedtls_ssl_free(sslctx);
+        free(sslctx);
         close(sock);
         return LuaNilTlsError(L, "write", rc);
       }
@@ -1011,7 +1018,7 @@ int LuaFetchStream(lua_State *L) {
     }
 #ifndef UNSECURE
     if (usingssl) {
-      if ((rc = mbedtls_ssl_read(&sslctx, (unsigned char *)inbuf.p + inbuf.n,
+      if ((rc = mbedtls_ssl_read(sslctx, (unsigned char *)inbuf.p + inbuf.n,
                                  inbuf.c - inbuf.n)) < 0) {
         if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
           rc = 0;
@@ -1019,7 +1026,8 @@ int LuaFetchStream(lua_State *L) {
           DestroyHttpMessage(&msg);
           free(inbuf.p);
           free(bio);
-          mbedtls_ssl_free(&sslctx);
+          mbedtls_ssl_free(sslctx);
+          free(sslctx);
           close(sock);
           return LuaNilTlsError(L, "read", rc);
         }
@@ -1030,7 +1038,7 @@ int LuaFetchStream(lua_State *L) {
       DestroyHttpMessage(&msg);
       free(inbuf.p);
 #ifndef UNSECURE
-      if (sslctx_initialized) { free(bio); mbedtls_ssl_free(&sslctx); }
+      if (sslctx) { free(bio); mbedtls_ssl_free(sslctx); free(sslctx); }
 #endif
       close(sock);
       return LuaNilError(L, "read error: %s", strerror(errno));
@@ -1099,7 +1107,7 @@ int LuaFetchStream(lua_State *L) {
               !memcasecmp(url.scheme.p, "http", 4)) {
             DestroyHttpMessage(&msg);
             free(inbuf.p);
-            if (sslctx_initialized) { free(bio); mbedtls_ssl_free(&sslctx); }
+            if (sslctx) { free(bio); mbedtls_ssl_free(sslctx); free(sslctx); }
             close(sock);
             return LuaNilError(L, "refusing HTTPS to HTTP redirect downgrade");
           }
@@ -1141,7 +1149,7 @@ int LuaFetchStream(lua_State *L) {
           DestroyHttpMessage(&msg);
           free(inbuf.p);
 #ifndef UNSECURE
-          if (sslctx_initialized) { free(bio); mbedtls_ssl_free(&sslctx); }
+          if (sslctx) { free(bio); mbedtls_ssl_free(sslctx); free(sslctx); }
 #endif
           close(sock);
           return LuaFetchStream(L);
@@ -1210,27 +1218,15 @@ StreamCreateReader: {
     }
 
 #ifndef UNSECURE
-    if (sslctx_initialized) {
-      // NOTE: We memcpy the ssl_context from stack to heap userdata.
-      // This works because:
-      // 1. We don't call mbedtls_ssl_free on the original (ownership transferred)
-      // 2. mbedtls_ssl_set_bio updates the only self-referential pointer (p_bio)
-      // 3. All other pointers (session, buffers) are to external heap allocations
-      // This pattern could break with future mbedtls versions if they add
-      // internal self-referential pointers.
-      memcpy(&reader->sslctx, &sslctx, sizeof(sslctx));
+    if (sslctx) {
+      // Transfer ownership of heap-allocated sslctx to reader
+      reader->sslctx = sslctx;
       reader->bio = bio;
-      reader->sslctx_initialized = true;
-      mbedtls_ssl_set_bio(&reader->sslctx, reader->bio, TlsSend, 0,
-                          TlsRecvImpl);
     }
 #endif
 
     // Stack: ..., status, headers, reader
-    // Don't free inbuf.p - reader owns it now
-    // Don't free bio - reader owns it now
-    // Don't close sock - reader owns it now
-    // Don't free sslctx - reader owns it now
+    // Ownership transferred to reader: inbuf.p, bio, sock, sslctx
     return 3;
   }
 
@@ -1241,9 +1237,10 @@ StreamFinishNoBody: {
     DestroyHttpMessage(&msg);
     free(inbuf.p);
 #ifndef UNSECURE
-    if (sslctx_initialized) {
+    if (sslctx) {
       free(bio);
-      mbedtls_ssl_free(&sslctx);
+      mbedtls_ssl_free(sslctx);
+      free(sslctx);
     }
 #endif
     close(sock);
@@ -1263,9 +1260,10 @@ StreamCleanupError:
   DestroyHttpMessage(&msg);
   free(inbuf.p);
 #ifndef UNSECURE
-  if (sslctx_initialized) {
+  if (sslctx) {
     free(bio);
-    mbedtls_ssl_free(&sslctx);
+    mbedtls_ssl_free(sslctx);
+    free(sslctx);
   }
 #endif
   close(sock);
@@ -1275,9 +1273,10 @@ StreamCleanupError:
 StreamVerifyFailed:
   LockInc(&shared->c.sslverifyfailed);
   {
-    uint32_t verify_result = sslctx.session_negotiate->verify_result;
+    uint32_t verify_result = sslctx->session_negotiate->verify_result;
     free(bio);
-    mbedtls_ssl_free(&sslctx);
+    mbedtls_ssl_free(sslctx);
+    free(sslctx);
     close(sock);
     return LuaNilTlsError(L, gc(DescribeSslVerifyFailure(verify_result)), ret);
   }
