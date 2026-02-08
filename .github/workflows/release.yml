@@ -75,13 +75,21 @@ jobs:
               o/x86_64/third_party/$bin/$bin.dbg \
               o/aarch64/third_party/$bin/$bin.dbg
           done
+          o/x86_64/tool/build/apelink.dbg \
+            -l o/x86_64/ape/ape.elf \
+            -l o/aarch64/ape/ape.elf \
+            -M ape/ape-m1.c \
+            -o o/fat/bin/lua-debug \
+            o/x86_64/tool/lua/lua.dbg \
+            o/aarch64/tool/lua/lua.dbg
 
       - name: Verify fat binaries
         run: |
-          for bin in lua assimilate make zip unzip; do
+          for bin in lua lua-debug assimilate make zip unzip; do
             grep -q MZqFpD o/fat/bin/$bin
           done
           o/fat/bin/lua -v
+          o/fat/bin/lua-debug -v
           o/fat/bin/assimilate -v
           o/fat/bin/make --version
           o/fat/bin/zip -v
@@ -90,12 +98,12 @@ jobs:
       - name: Create cosmos.zip
         run: |
           cd o/fat/bin
-          zip cosmos.zip lua assimilate make unzip zip
+          zip cosmos.zip lua lua-debug assimilate make unzip zip
 
       - name: Create checksums
         run: |
           cd o/fat/bin
-          sha256sum assimilate make zip unzip lua cosmos.zip > SHA256SUMS
+          sha256sum assimilate make zip unzip lua lua-debug cosmos.zip > SHA256SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.2.0
@@ -108,6 +116,7 @@ jobs:
             o/fat/bin/zip
             o/fat/bin/unzip
             o/fat/bin/lua
+            o/fat/bin/lua-debug
             o/fat/bin/cosmos.zip
             o/fat/bin/SHA256SUMS
         env:
