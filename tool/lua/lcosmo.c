@@ -261,6 +261,7 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"Sha512", LuaSha512},
     {"Curve25519", LuaCurve25519},
     {"Fetch", LuaFetch},
+    {"FetchStream", LuaFetchStream},
     {NULL, NULL}
 };
 // clang-format on
@@ -277,6 +278,7 @@ static void register_submodule(lua_State *L, const char *name) {
 int luaopen_cosmo(lua_State *L) {
   /* initialize fetch SSL state */
   LuaInitFetch();
+  LuaInitFetchReader(L);
 
   luaL_newlib(L, kCosmoFuncs);
 

@@ -1156,6 +1156,19 @@ function EvadeDragnetSurveillance(bool) end
 ---@overload fun(url:string, body?: string|{ headers: table<string,string>, method: string, body: string, maxredirects?: integer, keepalive: boolean?, proxy: string?, maxresponse: integer?, resettls: boolean? }): nil, error: string
 function Fetch(url, body) end
 
+--- Sends an HTTP/HTTPS request and returns a streaming reader for the response body.
+--- Useful for Server-Sent Events (SSE), large downloads, or processing data incrementally.
+---@param url string The URL to fetch
+---@param options? { headers: table<string,string>, method: string, body: string, maxredirects?: integer, followredirect?: boolean, proxy: string? } Request options
+---@return integer status, table<string,string> headers, FetchReader reader
+---@nodiscard
+---@overload fun(url:string, options?: table): nil, error: string
+function FetchStream(url, options) end
+
+---@class FetchReader
+---@field read fun(self: FetchReader): string?, string? Returns next chunk, or nil on EOF, or nil,error on failure
+---@field close fun(self: FetchReader) Closes the reader and releases resources (idempotent)
+
 --- Converts UNIX timestamp to an RFC1123 string that looks like this:
 --- `Mon, 29 Mar 2021 15:37:13 GMT`. See `formathttpdatetime.c`.
 ---@param seconds integer

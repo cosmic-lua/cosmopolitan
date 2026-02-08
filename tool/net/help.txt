@@ -1100,6 +1100,40 @@ FUNCTIONS
           redirect is followed. Note that if these (method/body) values are
           provided as table fields, they will be modified in place.
 
+  FetchStream(url:str[,{method=value:str,body=value:str,headers=table,...}])
+      ├─→ status:int, {header:str=value:str,...}, reader:FetchReader
+      └─→ nil, error:str
+          Sends an HTTP/HTTPS request and returns a streaming reader for the
+          response body. This is useful for Server-Sent Events (SSE), large
+          downloads, or any case where you want to process data incrementally
+          rather than buffering the entire response in memory.
+
+          The options table accepts the same fields as Fetch():
+            - method (default = "GET"): sets the request method
+            - body (default = ""): sets the request body
+            - headers: sets request headers
+            - followredirect (default = true): follow redirects
+            - maxredirects (default = 5): maximum number of redirects
+
+          The returned FetchReader object has these methods:
+            - reader:read() → chunk:str or nil,error:str
+              Returns the next chunk of data, or nil on EOF, or nil,error
+              on failure. May return empty string if chunk framing was
+              received but no payload data is available yet.
+            - reader:close()
+              Closes the reader and releases resources. Idempotent.
+
+          Example usage:
+            local status, headers, reader = FetchStream(url)
+            if status == 200 then
+              while true do
+                local chunk, err = reader:read()
+                if not chunk then break end
+                if #chunk > 0 then process(chunk) end
+              end
+              reader:close()
+            end
+
   FormatHttpDateTime(seconds:int) → rfc1123:str
           Converts UNIX timestamp to an RFC1123 string that looks like this:
           Mon, 29 Mar 2021 15:37:13 GMT. See formathttpdatetime.c.
