@@ -767,6 +767,9 @@ int LuaFetchStream(lua_State *L) {
         return LuaNilError(L, "bad unix proxy; socket path too long (max %zu)",
                            sizeof(((struct sockaddr_un *)0)->sun_path) - 1);
       }
+      if (!IsReasonablePath(proxyurl.path.p, proxyurl.path.n)) {
+        return LuaNilError(L, "bad unix proxy; path contains . or .. segments");
+      }
       proxysockpath = gc(strndup(proxyurl.path.p, proxyurl.path.n));
       DEBUGF("(ftch) using unix proxy %s", proxysockpath);
     } else if (proxyurl.scheme.n == 4 &&
@@ -844,7 +847,7 @@ int LuaFetchStream(lua_State *L) {
           "\r\n",
           method, gc(EncodeUrl(&url, 0)), hosthdr,
           agenthdr, conlenhdr,
-          ((proxyhost || proxyunix) && !usingssl && proxyauthhdr) ? proxyauthhdr : "",
+          (proxyhost && !usingssl && proxyauthhdr) ? proxyauthhdr : "",
           headers ? headers : "");
   appendd(&request, body, bodylen);
   requestlen = appendz(request).i;

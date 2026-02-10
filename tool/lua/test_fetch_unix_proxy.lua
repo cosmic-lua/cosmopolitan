@@ -59,7 +59,18 @@ local function test_socket_not_found()
 end
 
 --------------------------------------------------------------------------------
--- Test 4: FetchStream error - missing socket path
+-- Test 4: Error - path traversal with ".." segments
+--------------------------------------------------------------------------------
+local function test_path_traversal()
+  local status, headers, body = cosmo.Fetch("http://example.com", {
+    proxy = "unix:///tmp/../etc/shadow.sock"
+  })
+  check("path traversal should fail", status == nil)
+  check("error mentions path segments", headers:find("%.") or headers:find("segment"))
+end
+
+--------------------------------------------------------------------------------
+-- Test 5: FetchStream error - missing socket path
 --------------------------------------------------------------------------------
 local function test_stream_missing_path()
   local status, err = cosmo.FetchStream("http://example.com", {
@@ -94,6 +105,17 @@ local function test_stream_socket_not_found()
 end
 
 --------------------------------------------------------------------------------
+-- Test 7: FetchStream error - path traversal
+--------------------------------------------------------------------------------
+local function test_stream_path_traversal()
+  local status, err = cosmo.FetchStream("http://example.com", {
+    proxy = "unix:///tmp/../etc/shadow.sock"
+  })
+  check("FetchStream path traversal should fail", status == nil)
+  check("error mentions path segments", err:find("%.") or err:find("segment"))
+end
+
+--------------------------------------------------------------------------------
 -- Run all tests
 --------------------------------------------------------------------------------
 print("Running unix socket proxy tests...")
@@ -107,6 +129,9 @@ print("  [pass] path too long error (security fix)")
 test_socket_not_found()
 print("  [pass] socket not found error")
 
+test_path_traversal()
+print("  [pass] path traversal rejected")
+
 test_stream_missing_path()
 print("  [pass] FetchStream missing path error")
 
@@ -115,5 +140,8 @@ print("  [pass] FetchStream path too long error (security fix)")
 
 test_stream_socket_not_found()
 print("  [pass] FetchStream socket not found error")
+
+test_stream_path_traversal()
+print("  [pass] FetchStream path traversal rejected")
 
 print("all unix socket proxy tests passed")
