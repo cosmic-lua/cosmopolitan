@@ -233,11 +233,14 @@ int LuaFetch(lua_State *L) {
         !memcasecmp(proxyurl.scheme.p, "unix", 4)) {
       proxyunix = true;
       // Path is in url path, e.g. unix:///tmp/proxy.sock
-      if (proxyurl.path.n) {
-        proxysockpath = gc(strndup(proxyurl.path.p, proxyurl.path.n));
-      } else {
+      if (!proxyurl.path.n) {
         return LuaNilError(L, "bad unix proxy; missing socket path");
       }
+      if (proxyurl.path.n >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+        return LuaNilError(L, "bad unix proxy; socket path too long (max %zu)",
+                           sizeof(((struct sockaddr_un *)0)->sun_path) - 1);
+      }
+      proxysockpath = gc(strndup(proxyurl.path.p, proxyurl.path.n));
       DEBUGF("(ftch) using unix proxy %s", proxysockpath);
       // Disable keepalive when using proxy for simplicity
       keepalive = kaNONE;
