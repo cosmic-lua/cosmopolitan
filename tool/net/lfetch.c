@@ -30,6 +30,7 @@
 #include "libc/serialize.h"
 #include "libc/sock/goodsocket.internal.h"
 #include "libc/sock/sock.h"
+#include "libc/sock/struct/sockaddr.h"
 #include "libc/stdio/append.h"
 #include "libc/str/slice.h"
 #include "libc/str/str.h"
@@ -600,6 +601,8 @@ int LuaFetchStream(lua_State *L) {
   const char *proxyarg = 0;
   size_t proxyarglen = 0;
   char *proxyauthhdr = 0;
+  bool proxyunix = false;
+  char *proxysockpath = NULL;
   char *request;
   struct TlsBio *bio;
   mbedtls_ssl_context *sslctx = NULL;
@@ -752,27 +755,45 @@ int LuaFetchStream(lua_State *L) {
   if (proxyarg && proxyarglen) {
     gc(ParseUrl(proxyarg, proxyarglen, &proxyurl, true));
     gc(proxyurl.params.p);
-    if (!(proxyurl.scheme.n == 4 &&
-          !memcasecmp(proxyurl.scheme.p, "http", 4))) {
-      return LuaNilError(L, "bad proxy scheme; only http:// proxies supported");
-    }
-    if (!proxyurl.host.n)
-      return LuaNilError(L, "bad proxy; missing host");
-    proxyhost = gc(strndup(proxyurl.host.p, proxyurl.host.n));
-    proxyport = proxyurl.port.n
-                    ? gc(strndup(proxyurl.port.p, proxyurl.port.n))
-                    : "80";
-    if (!IsAcceptableHost(proxyhost, -1))
-      return LuaNilError(L, "bad proxy; invalid host");
-    if (!IsAcceptablePort(proxyport, -1))
-      return LuaNilError(L, "bad proxy; invalid port");
-    if (proxyurl.user.n) {
-      char *creds = gc(xasprintf("%.*s:%.*s",
-                                 (int)proxyurl.user.n, proxyurl.user.p,
-                                 (int)proxyurl.pass.n, proxyurl.pass.p));
-      char *b64 = gc(EncodeBase64(creds, strlen(creds), 0));
-      if (b64)
-        proxyauthhdr = gc(xasprintf("Proxy-Authorization: Basic %s\r\n", b64));
+    // Check for unix:// scheme
+    if (proxyurl.scheme.n == 4 &&
+        !memcasecmp(proxyurl.scheme.p, "unix", 4)) {
+      proxyunix = true;
+      // Path is in url path, e.g. unix:///tmp/proxy.sock
+      if (!proxyurl.path.n) {
+        return LuaNilError(L, "bad unix proxy; missing socket path");
+      }
+      if (proxyurl.path.n >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+        return LuaNilError(L, "bad unix proxy; socket path too long (max %zu)",
+                           sizeof(((struct sockaddr_un *)0)->sun_path) - 1);
+      }
+      if (!IsReasonablePath(proxyurl.path.p, proxyurl.path.n)) {
+        return LuaNilError(L, "bad unix proxy; path contains . or .. segments");
+      }
+      proxysockpath = gc(strndup(proxyurl.path.p, proxyurl.path.n));
+      DEBUGF("(ftch) using unix proxy %s", proxysockpath);
+    } else if (proxyurl.scheme.n == 4 &&
+               !memcasecmp(proxyurl.scheme.p, "http", 4)) {
+      if (!proxyurl.host.n)
+        return LuaNilError(L, "bad proxy; missing host");
+      proxyhost = gc(strndup(proxyurl.host.p, proxyurl.host.n));
+      proxyport = proxyurl.port.n
+                      ? gc(strndup(proxyurl.port.p, proxyurl.port.n))
+                      : "80";
+      if (!IsAcceptableHost(proxyhost, -1))
+        return LuaNilError(L, "bad proxy; invalid host");
+      if (!IsAcceptablePort(proxyport, -1))
+        return LuaNilError(L, "bad proxy; invalid port");
+      if (proxyurl.user.n) {
+        char *creds = gc(xasprintf("%.*s:%.*s",
+                                   (int)proxyurl.user.n, proxyurl.user.p,
+                                   (int)proxyurl.pass.n, proxyurl.pass.p));
+        char *b64 = gc(EncodeBase64(creds, strlen(creds), 0));
+        if (b64)
+          proxyauthhdr = gc(xasprintf("Proxy-Authorization: Basic %s\r\n", b64));
+      }
+    } else {
+      return LuaNilError(L, "bad proxy scheme; only http:// and unix:// supported");
     }
   }
 
@@ -803,7 +824,7 @@ int LuaFetchStream(lua_State *L) {
   url.fragment.p = 0, url.fragment.n = 0;
   url.user.p = 0, url.user.n = 0;
   url.pass.p = 0, url.pass.n = 0;
-  if (!proxyhost || usingssl) {
+  if ((!proxyhost && !proxyunix) || usingssl) {
     url.scheme.p = 0, url.scheme.n = 0;
     url.host.p = 0, url.host.n = 0;
     url.port.p = 0, url.port.n = 0;
@@ -833,7 +854,19 @@ int LuaFetchStream(lua_State *L) {
   gc(request);
 
   // ---- Connect ----
-  {
+  if (proxyunix) {
+    // Connect to proxy via Unix domain socket.
+    // Same HTTP proxy semantics as TCP (absolute URLs, CONNECT for HTTPS).
+    struct sockaddr_un addr_un = {.sun_family = AF_UNIX};
+    strlcpy(addr_un.sun_path, proxysockpath, sizeof(addr_un.sun_path));
+    if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+      return LuaNilError(L, "socket(AF_UNIX) failed: %s", strerror(errno));
+    if (connect(sock, (struct sockaddr *)&addr_un, sizeof(addr_un)) == -1) {
+      close(sock);
+      return LuaNilError(L, "connect(%s) failed: %s", proxysockpath,
+                         strerror(errno));
+    }
+  } else {
     const char *connecthost = proxyhost ? proxyhost : host;
     const char *connectport = proxyhost ? proxyport : port;
     if ((rc = getaddrinfo(connecthost, connectport, &hints, &addr)) != 0)
@@ -860,7 +893,7 @@ int LuaFetchStream(lua_State *L) {
   (void)bio;
 #ifndef UNSECURE
   // ---- HTTPS proxy CONNECT tunnel ----
-  if (usingssl && proxyhost) {
+  if (usingssl && (proxyhost || proxyunix)) {
     char *connectreq = 0;
     struct Buffer connectbuf = {0};
     struct HttpMessage connectmsg;

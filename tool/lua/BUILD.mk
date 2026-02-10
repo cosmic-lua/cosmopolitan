@@ -188,6 +188,10 @@ o/$(MODE)/tool/lua/test_isatty.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_isat
 	$< tool/lua/test_isatty.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_fetch_unix_proxy.lua
+	$< tool/lua/test_fetch_unix_proxy.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/cosmo/help/test.ok				\
@@ -207,7 +211,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_embed.ok				\
 	o/$(MODE)/tool/lua/test_embed_integration.ok			\
 	o/$(MODE)/tool/lua/test_unix_proc.ok				\
-	o/$(MODE)/tool/lua/test_isatty.ok
+	o/$(MODE)/tool/lua/test_isatty.ok				\
+	o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok
 
 .PHONY: o/$(MODE)/tool/lua
 o/$(MODE)/tool/lua:							\
