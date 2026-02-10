@@ -435,6 +435,64 @@ TEST(ParseHttpResponse, testHttp100) {
   EXPECT_EQ(10, req->version);
 }
 
+TEST(ParseHttpMessage, testBufferClampOnResume) {
+  // Verify that the parser clamps r->i correctly when pausing at the
+  // buffer boundary, so that resumption doesn't skip a byte. The inner
+  // loops may set r->i = n, then the outer for loop increments to n+1.
+  // Without the clamping fix, the first byte of new data gets skipped.
+  static const char m[] = "GET /hello HTTP/1.0\r\nHost: x\r\n\r\n";
+  size_t total = strlen(m);
+
+  // Feed the message one byte at a time to exercise boundary clamping.
+  // Each call except the last should return 0 (incomplete).
+  InitHttpMessage(req, kHttpRequest);
+  for (size_t i = 1; i <= total; i++) {
+    int rc = ParseHttpMessage(req, m, i, total);
+    if (i < total) {
+      EXPECT_EQ(0, rc);
+      // After returning 0, r->i must not exceed the number of bytes
+      // available (i), since we need to re-examine the last byte on
+      // the next call when more data is available.
+      EXPECT_LE(req->i, (int)i);
+    } else {
+      EXPECT_EQ((int)total, rc);
+    }
+  }
+  EXPECT_STREQ("GET", method());
+  EXPECT_STREQ("/hello", gc(slice(m, req->uri)));
+  EXPECT_EQ(10, req->version);
+  EXPECT_STREQ("x", gc(slice(m, req->headers[kHttpHost])));
+}
+
+TEST(ParseHttpMessage, testResumeAfterPartialMethod) {
+  // Feed a request where the method is split across two calls.
+  // This exercises the kHttpStateMethod inner loop boundary.
+  static const char m[] = "POST /data HTTP/1.1\r\n\r\n";
+  size_t total = strlen(m);
+  InitHttpMessage(req, kHttpRequest);
+  // First call: only "POS" available
+  EXPECT_EQ(0, ParseHttpMessage(req, m, 3, total));
+  EXPECT_LE(req->i, 3);
+  // Second call: full message available
+  EXPECT_EQ((int)total, ParseHttpMessage(req, m, total, total));
+  EXPECT_STREQ("POST", method());
+  EXPECT_STREQ("/data", gc(slice(m, req->uri)));
+}
+
+TEST(ParseHttpMessage, testResumeAfterPartialHeaderValue) {
+  // Feed a request where a header value is split at the boundary.
+  static const char m[] = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
+  size_t total = strlen(m);
+  InitHttpMessage(req, kHttpRequest);
+  // Feed up to partway through "example.com" value
+  size_t partial = 25; // "GET / HTTP/1.1\r\nHost: exa"
+  EXPECT_EQ(0, ParseHttpMessage(req, m, partial, total));
+  EXPECT_LE(req->i, (int)partial);
+  // Feed the rest
+  EXPECT_EQ((int)total, ParseHttpMessage(req, m, total, total));
+  EXPECT_STREQ("example.com", gc(slice(m, req->headers[kHttpHost])));
+}
+
 TEST(ParseHttpMessage, issue1315) {
   static const char m[] = "\
 HTTP/1.1 200 OK\r\n\
