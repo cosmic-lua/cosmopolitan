@@ -91,6 +91,15 @@ o/$(MODE)/test/tool/net/lfetch_test.lua.runs:			\
 o/$(MODE)/test/tool/net/lfetchstream_test.lua.runs:		\
 		private .PLEDGE = stdio rpath inet proc
 
+o/$(MODE)/test/tool/net/tcattr_test.lua.runs:			\
+		private .PLEDGE = stdio rpath tty
+
+o/$(MODE)/test/tool/net/execvp_test.lua.runs:			\
+		private .PLEDGE = stdio rpath proc exec
+
+o/$(MODE)/test/tool/net/daemon_test.lua.runs:			\
+		private .PLEDGE = stdio rpath wpath cpath proc
+
 o/$(MODE)/test/tool/net/sqlite_test.runs:			\
 		private .PLEDGE = flock
 
