@@ -364,7 +364,9 @@ int LuaFetch(lua_State *L) {
 
   if (proxyunix) {
     /*
-     * Connect via Unix domain socket proxy.
+     * Connect via Unix domain socket.
+     * The socket is the HTTP server itself (not a forward proxy),
+     * so TLS handshake (if needed) happens directly on this fd.
      */
     struct sockaddr_un addr_un = {.sun_family = AF_UNIX};
     strlcpy(addr_un.sun_path, proxysockpath, sizeof(addr_un.sun_path));
@@ -423,7 +425,7 @@ int LuaFetch(lua_State *L) {
   /*
    * For HTTPS through proxy, establish CONNECT tunnel first.
    */
-  if (usingssl && (proxyhost || proxyunix)) {
+  if (usingssl && proxyhost) {
     char *connectreq = 0;
     struct Buffer connectbuf = {0};
     struct HttpMessage connectmsg;
