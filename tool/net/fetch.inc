@@ -35,6 +35,8 @@ int LuaFetch(lua_State *L) {
   const char *proxyarg = 0;
   size_t proxyarglen = 0;
   char *proxyauthhdr = 0;
+  bool proxyunix = false;
+  char *proxysockpath = NULL;
   char *request;
   struct TlsBio *bio;
   mbedtls_ssl_context sslctx;
@@ -226,40 +228,53 @@ int LuaFetch(lua_State *L) {
   if (proxyarg && proxyarglen) {
     gc(ParseUrl(proxyarg, proxyarglen, &proxyurl, true));
     gc(proxyurl.params.p);
-    // Proxy must use http:// scheme (not https, socks, etc.)
-    if (!(proxyurl.scheme.n == 4 &&
-          !memcasecmp(proxyurl.scheme.p, "http", 4))) {
-      return LuaNilError(L, "bad proxy scheme; only http:// proxies supported");
-    }
-    if (!proxyurl.host.n) {
-      return LuaNilError(L, "bad proxy; missing host");
-    }
-    proxyhost = gc(strndup(proxyurl.host.p, proxyurl.host.n));
-    if (proxyurl.port.n) {
-      proxyport = gc(strndup(proxyurl.port.p, proxyurl.port.n));
-    } else {
-      proxyport = "80";
-    }
-    if (!IsAcceptableHost(proxyhost, -1)) {
-      return LuaNilError(L, "bad proxy; invalid host");
-    }
-    if (!IsAcceptablePort(proxyport, -1)) {
-      return LuaNilError(L, "bad proxy; invalid port");
-    }
-    DEBUGF("(ftch) using proxy %s:%s", proxyhost, proxyport);
-    // Disable keepalive when using proxy for simplicity
-    keepalive = kaNONE;
-    // Build Proxy-Authorization header if credentials present
-    if (proxyurl.user.n) {
-      char *creds = gc(xasprintf("%.*s:%.*s",
-                                 (int)proxyurl.user.n, proxyurl.user.p,
-                                 (int)proxyurl.pass.n, proxyurl.pass.p));
-      size_t credslen = strlen(creds);
-      char *b64 = gc(EncodeBase64(creds, credslen, 0));
-      if (b64) {
-        proxyauthhdr = gc(xasprintf("Proxy-Authorization: Basic %s\r\n", b64));
-        DEBUGF("(ftch) using proxy authentication");
+    // Check for unix:// scheme
+    if (proxyurl.scheme.n == 4 &&
+        !memcasecmp(proxyurl.scheme.p, "unix", 4)) {
+      proxyunix = true;
+      // Path is in url path, e.g. unix:///tmp/proxy.sock
+      if (proxyurl.path.n) {
+        proxysockpath = gc(strndup(proxyurl.path.p, proxyurl.path.n));
+      } else {
+        return LuaNilError(L, "bad unix proxy; missing socket path");
       }
+      DEBUGF("(ftch) using unix proxy %s", proxysockpath);
+      // Disable keepalive when using proxy for simplicity
+      keepalive = kaNONE;
+    } else if (proxyurl.scheme.n == 4 &&
+               !memcasecmp(proxyurl.scheme.p, "http", 4)) {
+      if (!proxyurl.host.n) {
+        return LuaNilError(L, "bad proxy; missing host");
+      }
+      proxyhost = gc(strndup(proxyurl.host.p, proxyurl.host.n));
+      if (proxyurl.port.n) {
+        proxyport = gc(strndup(proxyurl.port.p, proxyurl.port.n));
+      } else {
+        proxyport = "80";
+      }
+      if (!IsAcceptableHost(proxyhost, -1)) {
+        return LuaNilError(L, "bad proxy; invalid host");
+      }
+      if (!IsAcceptablePort(proxyport, -1)) {
+        return LuaNilError(L, "bad proxy; invalid port");
+      }
+      DEBUGF("(ftch) using proxy %s:%s", proxyhost, proxyport);
+      // Disable keepalive when using proxy for simplicity
+      keepalive = kaNONE;
+      // Build Proxy-Authorization header if credentials present
+      if (proxyurl.user.n) {
+        char *creds = gc(xasprintf("%.*s:%.*s",
+                                   (int)proxyurl.user.n, proxyurl.user.p,
+                                   (int)proxyurl.pass.n, proxyurl.pass.p));
+        size_t credslen = strlen(creds);
+        char *b64 = gc(EncodeBase64(creds, credslen, 0));
+        if (b64) {
+          proxyauthhdr = gc(xasprintf("Proxy-Authorization: Basic %s\r\n", b64));
+          DEBUGF("(ftch) using proxy authentication");
+        }
+      }
+    } else {
+      return LuaNilError(L, "bad proxy scheme; only http:// and unix:// supported");
     }
   }
 
@@ -347,7 +362,22 @@ int LuaFetch(lua_State *L) {
   requestlen = appendz(request).i;
   gc(request);
 
-  if (keepalive == kaNONE || keepalive == kaOPEN) {
+  if (proxyunix) {
+    /*
+     * Connect via Unix domain socket proxy.
+     */
+    struct sockaddr_un addr_un = {.sun_family = AF_UNIX};
+    strlcpy(addr_un.sun_path, proxysockpath, sizeof(addr_un.sun_path));
+    DEBUGF("(ftch) client connecting to unix:%s", proxysockpath);
+    if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+      return LuaNilError(L, "socket(AF_UNIX) failed: %s", strerror(errno));
+    }
+    if (connect(sock, (struct sockaddr *)&addr_un, sizeof(addr_un)) == -1) {
+      close(sock);
+      return LuaNilError(L, "connect(%s) failed: %s", proxysockpath,
+                         strerror(errno));
+    }
+  } else if (keepalive == kaNONE || keepalive == kaOPEN) {
     /*
      * Perform DNS lookup.
      * When using a proxy, resolve the proxy host instead of target.
@@ -393,7 +423,7 @@ int LuaFetch(lua_State *L) {
   /*
    * For HTTPS through proxy, establish CONNECT tunnel first.
    */
-  if (usingssl && proxyhost) {
+  if (usingssl && (proxyhost || proxyunix)) {
     char *connectreq = 0;
     struct Buffer connectbuf = {0};
     struct HttpMessage connectmsg;
