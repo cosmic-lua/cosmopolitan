@@ -328,7 +328,7 @@ int LuaFetch(lua_State *L) {
   url.pass.p = 0, url.pass.n = 0;
   // For HTTP proxy requests, keep scheme/host/port for absolute URL
   // For direct or HTTPS-through-proxy, clear them
-  if (!proxyhost || usingssl) {
+  if ((!proxyhost && !proxyunix) || usingssl) {
     url.scheme.p = 0, url.scheme.n = 0;
     url.host.p = 0, url.host.n = 0;
     url.port.p = 0, url.port.n = 0;
@@ -356,7 +356,7 @@ int LuaFetch(lua_State *L) {
               ? "close"
               : (connhdr ? connhdr : "keep-alive"),
           agenthdr, conlenhdr,
-          (proxyhost && !usingssl && proxyauthhdr) ? proxyauthhdr : "",
+          ((proxyhost || proxyunix) && !usingssl && proxyauthhdr) ? proxyauthhdr : "",
           headers ? headers : "");
   appendd(&request, body, bodylen);
   requestlen = appendz(request).i;
@@ -364,9 +364,8 @@ int LuaFetch(lua_State *L) {
 
   if (proxyunix) {
     /*
-     * Connect via Unix domain socket.
-     * The socket is the HTTP server itself (not a forward proxy),
-     * so TLS handshake (if needed) happens directly on this fd.
+     * Connect to proxy via Unix domain socket.
+     * Same HTTP proxy semantics as TCP (absolute URLs, CONNECT for HTTPS).
      */
     struct sockaddr_un addr_un = {.sun_family = AF_UNIX};
     strlcpy(addr_un.sun_path, proxysockpath, sizeof(addr_un.sun_path));
@@ -425,7 +424,7 @@ int LuaFetch(lua_State *L) {
   /*
    * For HTTPS through proxy, establish CONNECT tunnel first.
    */
-  if (usingssl && proxyhost) {
+  if (usingssl && (proxyhost || proxyunix)) {
     char *connectreq = 0;
     struct Buffer connectbuf = {0};
     struct HttpMessage connectmsg;
