@@ -879,6 +879,76 @@ function test_github_raw_file()
     print("test_github_raw_file: PASS")
 end
 
+-- Test: Timeout option triggers read timeout
+-- Uses a proxy that accepts but never sends a response, so read should time out
+function test_timeout_triggers_error()
+    local server = assert(unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0))
+    assert(unix.setsockopt(server, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1))
+    assert(unix.bind(server, ParseIp("127.0.0.1"), 0))
+    assert(unix.listen(server, 1))
+    local ip, port = unix.getsockname(server)
+
+    -- Fork: child accepts connection but never sends response
+    local pid = unix.fork()
+    if pid == 0 then
+        local client = unix.accept(server)
+        -- Read the request but never respond
+        if client then
+            unix.read(client, 4096)
+            unix.nanosleep(30)  -- hold connection open longer than timeout
+            unix.close(client)
+        end
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    local start = unix.clock_gettime()
+    -- Use proxy to bypass SSRF protection on loopback
+    local status, err = Fetch("http://example.com/test", {
+        proxy = "http://127.0.0.1:" .. port,
+        timeout = 2
+    })
+    local elapsed = unix.clock_gettime() - start
+
+    -- Clean up child
+    unix.kill(pid, unix.SIGTERM)
+    unix.wait(pid)
+
+    -- Should have failed (timeout on read)
+    assert(status == nil, "expected nil status for timed out request, got: " .. tostring(status))
+    -- Should have taken roughly 2 seconds (not the default 60)
+    assert(elapsed < 10, "expected timeout within 10s, took: " .. string.format("%.1f", elapsed) .. "s")
+    print("test_timeout_triggers_error: PASS (elapsed: " .. string.format("%.1f", elapsed) .. "s)")
+end
+
+-- Test: Timeout option with float value
+function test_timeout_float_value()
+    -- Just verify float timeout values are accepted without error
+    -- Use a known-good endpoint with generous timeout
+    local status, headers, body = Fetch("https://httpbin.org/get", {
+        timeout = 30.5
+    })
+    assert(status == 200, "expected 200, got: " .. tostring(status))
+    print("test_timeout_float_value: PASS")
+end
+
+-- Test: Timeout option with zero or negative is ignored (uses default)
+function test_timeout_invalid_values_ignored()
+    -- Zero timeout should use default (not error)
+    local status, headers, body = Fetch("https://httpbin.org/get", {
+        timeout = 0
+    })
+    assert(status == 200, "expected 200 with timeout=0, got: " .. tostring(status))
+
+    -- Negative timeout should use default (not error)
+    status, headers, body = Fetch("https://httpbin.org/get", {
+        timeout = -1
+    })
+    assert(status == 200, "expected 200 with timeout=-1, got: " .. tostring(status))
+    print("test_timeout_invalid_values_ignored: PASS")
+end
+
 -- Main test runner
 function main()
     print("Running lfetch tests...")
@@ -907,6 +977,10 @@ function main()
         test_invalid_scheme,
         test_bad_method,
         test_response_too_large_error_message,
+        -- Timeout tests
+        test_timeout_triggers_error,
+        test_timeout_float_value,
+        test_timeout_invalid_values_ignored,
         -- HTTP proxy tests (self-contained with local test server)
         test_proxy_connection_to_proxy,
         test_proxy_absolute_url,

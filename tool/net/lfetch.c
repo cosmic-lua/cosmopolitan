@@ -626,6 +626,7 @@ int LuaFetchStream(lua_State *L) {
   bool resettls = true;
 #endif
   size_t maxresponse = 100 * 1024 * 1024;
+  struct timeval fetchtimeout = timeout;   // local copy, may be overridden
   struct addrinfo hints = {.ai_family = AF_INET,
                            .ai_socktype = SOCK_STREAM,
                            .ai_protocol = IPPROTO_TCP,
@@ -658,6 +659,21 @@ int LuaFetchStream(lua_State *L) {
     lua_getfield(L, 2, "maxresponse");
     if (lua_isinteger(L, -1))
       maxresponse = lua_tointeger(L, -1);
+    lua_getfield(L, 2, "timeout");
+    if (lua_isinteger(L, -1)) {
+      int timeout_sec = lua_tointeger(L, -1);
+      if (timeout_sec > 0) {
+        fetchtimeout.tv_sec = timeout_sec;
+        fetchtimeout.tv_usec = 0;
+      }
+    } else if (lua_isnumber(L, -1)) {
+      double timeout_val = lua_tonumber(L, -1);
+      if (timeout_val > 0) {
+        fetchtimeout.tv_sec = (int64_t)timeout_val;
+        fetchtimeout.tv_usec =
+            (int64_t)((timeout_val - (int64_t)timeout_val) * 1e6);
+      }
+    }
 #ifndef UNSECURE
     lua_getfield(L, 2, "resettls");
     if (lua_isboolean(L, -1))
@@ -878,7 +894,7 @@ int LuaFetchStream(lua_State *L) {
       return LuaNilError(L, "request to private network blocked (SSRF protection)");
     }
     if ((sock = GoodSocket(addr->ai_family, addr->ai_socktype,
-                           addr->ai_protocol, false, &timeout)) == -1) {
+                           addr->ai_protocol, false, &fetchtimeout)) == -1) {
       freeaddrinfo(addr);
       return LuaNilError(L, "socket error: %s", strerror(errno));
     }
