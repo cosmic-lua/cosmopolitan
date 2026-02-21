@@ -240,6 +240,8 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"ParseUrl", LuaParseUrl},
     {"Popcnt", LuaPopcnt},
     {"Rand64", LuaRand64},
+    {"Rdrand", LuaRdrand},
+    {"Rdseed", LuaRdseed},
     {"ResolveIp", LuaResolveIp},
     {"Sleep", LuaSleep},
     {"Slurp", LuaSlurp},
