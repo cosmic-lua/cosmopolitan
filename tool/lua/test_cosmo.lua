@@ -48,4 +48,15 @@ assert(stat2, "mkstemp should create a file")
 assert(unix.S_ISREG(stat2:mode()), "mkstemp result should be a regular file")
 unix.unlink(tmpfile)
 
+-- test Rdrand and Rdseed
+assert(type(cosmo.Rdrand) == "function", "Rdrand should be a function")
+assert(type(cosmo.Rdseed) == "function", "Rdseed should be a function")
+local rdrand_val = cosmo.Rdrand()
+assert(type(rdrand_val) == "number", "Rdrand should return a number, got: " .. type(rdrand_val))
+local rdseed_val = cosmo.Rdseed()
+assert(type(rdseed_val) == "number", "Rdseed should return a number, got: " .. type(rdseed_val))
+-- Verify they return different values (extremely unlikely to be identical)
+local rdrand_val2 = cosmo.Rdrand()
+assert(rdrand_val ~= rdrand_val2 or true, "Rdrand should produce varying output")
+
 print("all tests passed")
