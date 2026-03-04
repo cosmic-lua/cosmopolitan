@@ -95,6 +95,7 @@ o/$(MODE)/tool/net/%.dbg:						\
 # The little web server that could!
 
 TOOL_NET_REDBEAN_LUA_MODULES =						\
+	o/$(MODE)/tool/net/lcrypto.o					\
 	o/$(MODE)/tool/net/lfuncs.o					\
 	o/$(MODE)/tool/net/lpath.o					\
 	o/$(MODE)/tool/net/lhttp.o					\

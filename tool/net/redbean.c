@@ -132,6 +132,7 @@
 #include "third_party/zlib/zlib.h"
 #include "tool/build/lib/case.h"
 #include "tool/net/lfinger.h"
+#include "tool/net/lcrypto.h"
 #include "tool/net/lfuncs.h"
 #include "tool/net/ljson.h"
 #include "tool/net/lpath.h"
@@ -5013,6 +5014,8 @@ static const char *const kDontAutoComplete[] = {
 // </SORTED>
 
 static const luaL_Reg kLuaFuncs[] = {
+    {"AeadDecrypt", LuaAeadDecrypt},                            //
+    {"AeadEncrypt", LuaAeadEncrypt},                            //
     {"Barf", LuaBarf},                                          //
     {"Benchmark", LuaBenchmark},                                //
     {"Bsf", LuaBsf},                                            //
@@ -5094,6 +5097,7 @@ static const luaL_Reg kLuaFuncs[] = {
     {"HasParam", LuaHasParam},                                  //
     {"HidePath", LuaHidePath},                                  //
     {"HighwayHash64", LuaHighwayHash64},                        //
+    {"Hkdf", LuaHkdf},                                          //
     {"IndentLines", LuaIndentLines},                            //
     {"Inflate", LuaInflate},                                    //
     {"IsAcceptableHost", LuaIsAcceptableHost},                  //
