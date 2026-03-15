@@ -20,10 +20,16 @@
 #include "libc/serialize.h"
 
 /**
+ * Returns true if executable image has APE magic (not ELF).
+ */
+bool IsApeBinary(char buf[8]) {
+  return READ64LE(buf) == READ64LE("MZqFpD='") ||
+         READ64LE(buf) == READ64LE("jartsr='");
+}
+
+/**
  * Returns true if executable image is supported by APE Loader.
  */
 bool IsApeLoadable(char buf[8]) {
-  return READ32LE(buf) == READ32LE("\177ELF") ||
-         READ64LE(buf) == READ64LE("MZqFpD='") ||
-         READ64LE(buf) == READ64LE("jartsr='");
+  return READ32LE(buf) == READ32LE("\177ELF") || IsApeBinary(buf);
 }

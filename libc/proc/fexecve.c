@@ -142,14 +142,20 @@ static int fd_to_mem_fd(const int infd, char *path) {
     bool success = readRc != -1;
     if (success && (st.st_size > 8) && IsApeLoadable(space)) {
       int flags = fcntl(fd, F_GETFD);
-      if ((success = (flags != -1) &&
-                     (fcntl(fd, F_SETFD, flags & (~FD_CLOEXEC)) != -1) &&
-                     ape_to_elf(space, st.st_size))) {
-        const int newfd = fcntl(fd, F_DUPFD, 9001);
-        if (newfd != -1) {
-          close(fd);
-          fd = newfd;
+      if (flags != -1 &&
+          fcntl(fd, F_SETFD, flags & (~FD_CLOEXEC)) != -1) {
+        if (IsApeBinary(space)) {
+          success = ape_to_elf(space, st.st_size);
         }
+        if (success) {
+          const int newfd = fcntl(fd, F_DUPFD, 9001);
+          if (newfd != -1) {
+            close(fd);
+            fd = newfd;
+          }
+        }
+      } else {
+        success = false;
       }
     }
     const int e = errno;

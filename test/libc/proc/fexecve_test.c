@@ -16,7 +16,6 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#if 0  // TODO(G4Vi): improve reliability of fexecve() implementation
 #include "libc/calls/calls.h"
 #include "libc/calls/syscall_support-sysv.internal.h"
 #include "libc/dce.h"
@@ -28,6 +27,8 @@
 #include "libc/testlib/subprocess.h"
 #include "libc/testlib/testlib.h"
 // clang-format off
+
+STATIC_YOINK("zipos");
 
 __static_yoink("zipos");
 
@@ -153,4 +154,3 @@ TEST(fexecve, ziposAPEHasZipos) {
   close(fd);
 }
 
-#endif
