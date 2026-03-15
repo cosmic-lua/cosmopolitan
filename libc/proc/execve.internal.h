@@ -3,6 +3,7 @@
 COSMOPOLITAN_C_START_
 
 bool IsApeLoadable(char[8]) libcesque;
+bool IsApeBinary(char[8]) libcesque;
 
 COSMOPOLITAN_C_END_
 #endif /* COSMOPOLITAN_LIBC_CALLS_EXECVE_SYSV_H_ */

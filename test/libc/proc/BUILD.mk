@@ -138,16 +138,6 @@ o/$(MODE)/test/libc/proc/life-pe.zip.o: private				\
 o/$(MODE)/test/libc/proc/vfork_test.runs:				\
 		private .UNVEIL = r:/dev/random r:/dev/urandom
 
-o/$(MODE)/test/libc/proc/fexecve_zipos_test.dbg:			\
-		$(TEST_LIBC_PROC_DEPS)					\
-		o/$(MODE)/test/libc/proc/fexecve_zipos_test.o		\
-		o/$(MODE)/test/libc/proc/proc.pkg			\
-		o/$(MODE)/test/libc/mem/prog/life.elf.zip.o		\
-		$(LIBC_TESTMAIN)					\
-		$(CRT)							\
-		$(APE_NO_MODIFY_SELF)
-	@$(APELINK)
-
 $(TEST_LIBC_PROC_OBJS): test/libc/proc/BUILD.mk
 
 .PHONY: o/$(MODE)/test/libc/proc
