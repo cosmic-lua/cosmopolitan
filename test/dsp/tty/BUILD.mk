@@ -31,6 +31,7 @@ TEST_DSP_TTY_DIRECTDEPS =				\
 	LIBC_STR					\
 	LIBC_TESTLIB					\
 	LIBC_TINYMATH					\
+	NET_HTTP					\
 
 TEST_DSP_TTY_DEPS :=					\
 	$(call uniq,$(foreach x,$(TEST_DSP_TTY_DIRECTDEPS),$($(x))))
