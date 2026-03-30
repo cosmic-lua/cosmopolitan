@@ -83,6 +83,11 @@ jobs:
             o/x86_64/tool/lua/lua.dbg \
             o/aarch64/tool/lua/lua.dbg
 
+      - name: Generate Lua amalgamated source
+        run: |
+          mkdir -p o/fat/bin
+          third_party/lua/amalgamate.sh o/fat/bin
+
       - name: Verify fat binaries
         run: |
           for bin in lua lua-debug assimilate make zip unzip; do
@@ -103,7 +108,7 @@ jobs:
       - name: Create checksums
         run: |
           cd o/fat/bin
-          sha256sum assimilate make zip unzip lua lua-debug cosmos.zip > SHA256SUMS
+          sha256sum assimilate make zip unzip lua lua-debug cosmos.zip lua-amalg.c lua-amalg.h > SHA256SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.2.0
@@ -118,6 +123,8 @@ jobs:
             o/fat/bin/lua
             o/fat/bin/lua-debug
             o/fat/bin/cosmos.zip
+            o/fat/bin/lua-amalg.c
+            o/fat/bin/lua-amalg.h
             o/fat/bin/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
