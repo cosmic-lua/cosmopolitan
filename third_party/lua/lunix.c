@@ -70,6 +70,7 @@
 #include "libc/sysv/consts/af.h"
 #include "libc/sysv/consts/at.h"
 #include "libc/sysv/consts/clock.h"
+#include "libc/sysv/consts/clone.h"
 #include "libc/sysv/consts/dt.h"
 #include "libc/sysv/consts/f.h"
 #include "libc/sysv/consts/ip.h"
@@ -877,6 +878,35 @@ static int LuaUnixSyslog(lua_State *L) {
 static int LuaUnixChroot(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "chroot", olderr, chroot(luaL_checkstring(L, 1)));
+}
+
+// unix.unshare(flags:int)
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Disassociates parts of the caller's execution context, e.g. placing
+// it into a fresh network, mount, pid, or user namespace. `flags` is a
+// bitwise OR of `unix.CLONE_NEW*` constants. Linux-only; returns ENOSYS
+// elsewhere.
+static int LuaUnixUnshare(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "unshare", olderr, unshare(luaL_checkinteger(L, 1)));
+}
+
+// unix.setns(fd:int[, nstype:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Reassociates the calling thread with the namespace referenced by
+// `fd`, which is typically obtained by opening one of the files under
+// `/proc/<pid>/ns/`. `nstype`, if nonzero, must match one of the
+// `unix.CLONE_NEW*` constants and asserts the kind of namespace.
+// Linux-only; returns ENOSYS elsewhere.
+static int LuaUnixSetns(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "setns", olderr,
+                    setns(luaL_checkinteger(L, 1),
+                          luaL_optinteger(L, 2, 0)));
 }
 
 // unix.setrlimit(resource:int, soft:int[, hard:int])
@@ -3766,6 +3796,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"setresgid", LuaUnixSetresgid},      // sets real/effective/saved gids
     {"setresuid", LuaUnixSetresuid},      // sets real/effective/saved uids
     {"setrlimit", LuaUnixSetrlimit},      // prevent cpu memory bombs
+    {"setns", LuaUnixSetns},              // enter existing namespace via fd
     {"setsid", LuaUnixSetsid},            // create a new session id
     {"setsockopt", LuaUnixSetsockopt},    // tune socket options
     {"setuid", LuaUnixSetuid},            // set real user id of process
@@ -3793,6 +3824,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"umask", LuaUnixUmask},              // set default file mask
     {"unlink", LuaUnixUnlink},            // remove file
     {"unsetenv", LuaUnixUnsetenv},        // unset environment variable
+    {"unshare", LuaUnixUnshare},          // create fresh namespaces
     {"unveil", LuaUnixUnveil},            // filesystem sandboxing
     {"utimensat", LuaUnixUtimensat},      // change access/modified time
     {"verynice", LuaUnixVerynice},        // lowest priority
@@ -4147,6 +4179,15 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "PLEDGE_PENALTY_KILL_PROCESS", PLEDGE_PENALTY_KILL_PROCESS);
   LuaSetIntField(L, "PLEDGE_PENALTY_RETURN_EPERM", PLEDGE_PENALTY_RETURN_EPERM);
   LuaSetIntField(L, "PLEDGE_STDERR_LOGGING", PLEDGE_STDERR_LOGGING);
+
+  // unshare()/setns() flags (Linux CLONE_NEW*)
+  LuaSetIntField(L, "CLONE_NEWNS", CLONE_NEWNS);
+  LuaSetIntField(L, "CLONE_NEWCGROUP", CLONE_NEWCGROUP);
+  LuaSetIntField(L, "CLONE_NEWUTS", CLONE_NEWUTS);
+  LuaSetIntField(L, "CLONE_NEWIPC", CLONE_NEWIPC);
+  LuaSetIntField(L, "CLONE_NEWUSER", CLONE_NEWUSER);
+  LuaSetIntField(L, "CLONE_NEWPID", CLONE_NEWPID);
+  LuaSetIntField(L, "CLONE_NEWNET", CLONE_NEWNET);
 
   // statfs::f_flags
   LuaSetIntField(L, "ST_RDONLY", ST_RDONLY);
