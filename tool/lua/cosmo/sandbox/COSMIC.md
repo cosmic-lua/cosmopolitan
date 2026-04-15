@@ -246,6 +246,141 @@ All `.tl`, all ≤500 lines — fits cosmic's rules.
    allow-listing for HTTPS). Teal types should make this explicit
    so callers don't assume MITM-style interception.
 
+## Changes to make on the cosmo side before cosmic starts wrapping
+
+Researching cosmic surfaced friction points that are cheaper to fix
+in `cosmo.sandbox.*` now than to paper over in the Teal wrappers.
+Roughly in order of payoff:
+
+### 1. Unify the error-return shape (HIGH)
+
+`netns.lua` rigorously returns `nil, unix.Errno`. `fs.lua` and
+`proxy.lua` wrap the Errno into a string with a context prefix
+(`"bind /usr: EACCES [13]"`) and lose the object. The cosmic Teal
+wrapper wants `value, string` — but if the lower layer has already
+stringified, the wrapper can't:
+
+- programmatically test `err:errno() == unix.EACCES`
+- re-contextualize without double-prefixing
+- present a consistent format to users
+
+**Recommendation:** change every non-netns helper to return
+`nil, unix.Errno`. Callers (examples, cosmic wrappers) add the
+context string at their call site, where they actually know what
+they were doing. Concrete sites to change:
+
+- `fs.lua:42, 73, 79, 109` (drop `"bind " .. src .. ": "` wraps)
+- `proxy.lua:52, 241, 245, 248, 252` (drop the syscall wraps —
+  keep the pure-string "eof", "short write", "header block exceeds
+  N bytes" because those have no Errno to preserve)
+
+One wrinkle: `fs.lua:42` "missing source: X" catches stat-EBADPATH
+before the mount — propagate the `unix.stat` errno instead of
+synthesizing a string.
+
+### 2. Promote `is_supported()` → `capabilities()` (MEDIUM)
+
+Today's binary `is_supported()` is true/false. Cosmic's
+`sandbox.capabilities()` wants a record:
+
+```lua
+{
+  linux        = true,    -- cosmo.GetHostOs() == "LINUX"
+  user_ns      = true,    -- unshare(CLONE_NEWUSER) works
+  mount_ns     = true,    -- unshare(CLONE_NEWNS) works
+  net_ns       = true,    -- unshare(CLONE_NEWNET) works
+  pivot_root   = true,    -- unix.pivot_root present
+  cap_net_admin = true,   -- for veth pair setup
+  newuidmap    = false,   -- helper binary in $PATH
+}
+```
+
+Make it a proper probe (attempt the syscalls in a child, cache the
+result), not a table of nils. Keeps `is_supported()` as
+`capabilities().linux and capabilities().mount_ns`.
+
+### 3. Extract `cosmo.sandbox.proc` (MEDIUM)
+
+Three primitives are duplicated across every example:
+
+- `unix.sethostname(name)`
+- `unix.prctl(PR_SET_NO_NEW_PRIVS, 1)` (fs-jail:132, claude-code:221)
+- `unix.setgid(gid); unix.setuid(uid)` (drop-privs sequence)
+
+Pull them into `cosmo.sandbox.proc`:
+
+```lua
+proc.set_hostname(name)           → true | nil, unix.Errno
+proc.no_new_privs()               → true | nil, unix.Errno
+proc.drop_privs(uid, gid)         → true | nil, unix.Errno
+proc.become_init(child_pid)       → exit_code | nil, unix.Errno
+                                    -- PID-1 reaper loop used in
+                                    -- netns-proxy and claude-code
+```
+
+The `become_init` one is the biggest win — the PID-1 supervisor
+loop (EINTR handling, waitpid, propagate exit status) currently
+lives inline in two examples and is the stuff we fixed bugs in
+during the review.
+
+### 4. Stabilize the proxy rule shape (LOW)
+
+Today: `{ ["host:port"] = rule_table }` with shorthand
+`{ ["host"] = true }` via string keys. This is flexible but
+under-specified. Commit to the schema now:
+
+```lua
+{
+  [host_spec] = {
+    methods   = { "GET", "CONNECT" },   -- or nil = any
+    auth      = { user = ..., pass = ... },  -- optional
+  }
+}
+```
+
+where `host_spec` is `host`, `host:port`, `*.suffix`, or
+`*.suffix:port`. The existing `parse_rule` / `build_index` already
+handle most of this; just document it and add tests pinning the
+behaviour so the Teal `.d.tl` author doesn't have to reverse-engineer.
+
+### 5. Convert comments to `---` doc-comments (LOW)
+
+cosmic's `cosmic --docs` pipeline extracts `---`-prefixed docstrings
+from `.tl` files. Our Lua files use `--` bodies today. The Teal
+wrappers will re-document anyway, so this is lowest-priority — but
+if the wrappers are mostly 1:1 passthroughs, mirroring the docs
+from here saves the wrapper author typing. Worth doing while the
+examples are still fresh in someone's head.
+
+### 6. Optional: `proxy.start(opts)` convenience (LOW)
+
+Today the caller forks, then in the parent calls
+`proxy.new(opts)`, `proxy.listen()`, `proxy.serve_forever()`. A
+one-liner would simplify both examples and the cosmic wrapper:
+
+```lua
+local p = proxy.start(opts)  -- forks, returns { pid, port, stop() }
+-- parent continues; child runs serve_forever
+```
+
+Small code reduction; only worth doing if #3's
+`proc.become_init` lands, since the cleanup story gets simpler.
+
+---
+
+### Suggested sequencing
+
+Before cosmic starts writing Teal wrappers:
+- **Do #1** — can't undo a string-errno once callers depend on it.
+- **Do #3** — keeps the proxy + claude-code examples' bug surface
+  from re-diverging.
+
+After cosmic starts (any time, non-breaking):
+- **Do #2** — additive.
+- **Do #4** — additive if the existing string-key shape is kept
+  as a shorthand.
+- **Do #5, #6** — polish.
+
 ## Acceptance criteria
 
 The high-level interface is done when:
