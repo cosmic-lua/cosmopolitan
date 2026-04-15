@@ -88,7 +88,8 @@ TOOL_LUA_ASSETS =							\
 	o/$(MODE)/tool/lua/cosmo/embed/init.lua.zip.o			\
 	o/$(MODE)/tool/lua/cosmo/embed/luarocks.lua.zip.o		\
 	o/$(MODE)/tool/lua/cosmo/sandbox/init.lua.zip.o		\
-	o/$(MODE)/tool/lua/cosmo/sandbox/netns.lua.zip.o
+	o/$(MODE)/tool/lua/cosmo/sandbox/netns.lua.zip.o	\
+	o/$(MODE)/tool/lua/cosmo/sandbox/proxy.lua.zip.o
 
 # Strip tool/lua/ prefix and prepend .lua/ so files end up at /zip/.lua/
 o/$(MODE)/tool/lua/cosmo/%.zip.o: private ZIPOBJ_FLAGS += -C2 -P.lua
@@ -198,9 +199,17 @@ o/$(MODE)/tool/lua/cosmo/sandbox/test.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/co
 	$< tool/lua/cosmo/sandbox/test.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/cosmo/sandbox/test_proxy.ok:				\
+		o/$(MODE)/tool/lua/lua.dbg				\
+		tool/lua/cosmo/sandbox/proxy.lua			\
+		tool/lua/cosmo/sandbox/test_proxy.lua
+	$< tool/lua/cosmo/sandbox/test_proxy.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/cosmo/sandbox/test_integration.ok:			\
 		o/$(MODE)/tool/lua/lua.dbg				\
 		tool/lua/cosmo/sandbox/netns.lua			\
+		tool/lua/cosmo/sandbox/proxy.lua			\
 		tool/lua/cosmo/sandbox/test_integration.lua
 	$< tool/lua/cosmo/sandbox/test_integration.lua
 	@touch $@
@@ -227,6 +236,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_isatty.ok				\
 	o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok			\
 	o/$(MODE)/tool/lua/cosmo/sandbox/test.ok			\
+	o/$(MODE)/tool/lua/cosmo/sandbox/test_proxy.ok			\
 	o/$(MODE)/tool/lua/cosmo/sandbox/test_integration.ok
 
 .PHONY: o/$(MODE)/tool/lua

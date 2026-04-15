@@ -9,6 +9,7 @@
 local unix = require "unix"
 local cosmo = require "cosmo"
 local netns = require "cosmo.sandbox.netns"
+local proxy = require "cosmo.sandbox.proxy"
 
 local LOOPBACK = cosmo.ParseIp("127.0.0.1")
 
@@ -216,6 +217,306 @@ do
   unix.close(parent_ns)
   assertf(rc == 0, "setns-hop test exited %d", rc)
   log("ok: setns() back to parent netns works")
+end
+
+--------------------------------------------------------------------------------
+-- Proxy integration tests
+--
+-- Topology:
+--   parent netns: tiny HTTP server bound on 127.0.0.1:<rand>
+--   child  netns: proxy bound on 127.0.0.1:3128, dials parent via setns
+--
+-- We exercise CONNECT (allowed/denied) and plain HTTP (allowed +
+-- header injection / denied). All within the same lua.com binary using
+-- forks; nothing is reached over the public internet.
+
+-- Bring up a minimal HTTP/1.1 server in the parent process. It returns
+-- 200 with a body that echoes back the request method, path, and any
+-- value of an "x-injected" header. Returns the listening port and the
+-- pid of the server process.
+local function start_test_server()
+  local srv = assert(unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0))
+  assert(unix.setsockopt(srv, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1))
+  assert(unix.bind(srv, LOOPBACK, 0))
+  assert(unix.listen(srv, 8))
+  local _, port = assert(unix.getsockname(srv))
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    -- Server child.
+    while true do
+      local cli = unix.accept(srv)
+      if cli then
+        local req = ""
+        while not req:find("\r\n\r\n", 1, true) do
+          local c = unix.recv(cli, 4096)
+          if not c or c == "" then break end
+          req = req .. c
+        end
+        local method, path = req:match("^(%u+) (%S+) HTTP/1")
+        local injected = req:match("\r\n[Xx]%-[Ii]njected:%s*([^\r\n]*)\r\n") or ""
+        local body = string.format("method=%s path=%s injected=%s",
+                                   method or "?", path or "?", injected)
+        local resp = "HTTP/1.1 200 OK\r\nContent-Length: " .. #body ..
+                     "\r\nConnection: close\r\n\r\n" .. body
+        unix.send(cli, resp)
+        unix.shutdown(cli, unix.SHUT_WR)
+        unix.close(cli)
+      end
+    end
+  end
+  return port, pid, srv
+end
+
+-- Drive a single HTTP request through the proxy. Returns the raw
+-- response body. `target` semantics:
+--
+--   method=="CONNECT", target=="host:port"
+--     - issue CONNECT, expect 200, then send `tunneled` (a complete
+--       inner HTTP request) through the tunnel and read the response.
+--     - if `expect_deny` is true, only the 4xx response is read.
+--   method!="CONNECT", target=="http://host:port/path"
+--     - send a normal proxy GET/POST, read the response.
+local function request_through_proxy(proxy_port, method, target, opts)
+  opts = opts or {}
+  local sk = assert(unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0))
+  assert(unix.connect(sk, LOOPBACK, proxy_port))
+  if method == "CONNECT" then
+    local req = "CONNECT " .. target .. " HTTP/1.1\r\nHost: " ..
+                target .. "\r\n\r\n"
+    assert(unix.send(sk, req))
+    -- Read just the CONNECT response status line + headers.
+    local buf = ""
+    while not buf:find("\r\n\r\n", 1, true) do
+      local c = unix.recv(sk, 4096)
+      if not c or c == "" then break end
+      buf = buf .. c
+    end
+    if opts.expect_deny then
+      unix.close(sk)
+      return buf
+    end
+    -- Tunnel up: send the inner HTTP request, then read everything.
+    if opts.tunneled then
+      assert(unix.send(sk, opts.tunneled))
+    end
+    while true do
+      local c = unix.recv(sk, 16384)
+      if not c or c == "" then break end
+      buf = buf .. c
+    end
+    unix.close(sk)
+    return buf
+  end
+  local req = method .. " " .. target .. " HTTP/1.1\r\n" ..
+              "Host: 127.0.0.1\r\n" ..
+              (opts.extra or "") ..
+              "\r\n"
+  assert(unix.send(sk, req))
+  local resp = ""
+  while true do
+    local c = unix.recv(sk, 16384)
+    if not c or c == "" then break end
+    resp = resp .. c
+  end
+  unix.close(sk)
+  return resp
+end
+
+-- Run the proxy in a forked child whose ONLY job is to listen and
+-- serve until parent kills it. Returns proxy_pid.
+local function start_proxy(opts, parent_ns_fd)
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    local ok, err = unix.unshare(unix.CLONE_NEWNET)
+    if not ok then
+      io.stderr:write("proxy: unshare failed: " .. tostring(err) .. "\n")
+      unix.exit(1)
+    end
+    if can_set_flags then assert(netns.bring_up("lo")) end
+    opts.upstream_ns_fd = parent_ns_fd
+    local p = proxy.new(opts)
+    local lfd, lerr = p:listen()
+    if not lfd then
+      io.stderr:write("proxy: listen failed: " .. tostring(lerr) .. "\n")
+      unix.exit(1)
+    end
+    p:serve_forever()
+    unix.exit(0)
+  end
+  return pid
+end
+
+-- The proxy listens INSIDE a fresh netns, so we can't reach it from
+-- the parent. Drive everything from a forked client that joins the
+-- proxy's netns via setns(). Returns the response string.
+local function exercise(proxy_ns_fd, method, target, opts)
+  local r, w = assert(unix.pipe())
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    unix.close(r)
+    assert(unix.setns(proxy_ns_fd, unix.CLONE_NEWNET))
+    local resp = request_through_proxy(3128, method, target, opts)
+    unix.write(w, resp)
+    unix.close(w)
+    unix.exit(0)
+  end
+  unix.close(w)
+  local buf = ""
+  while true do
+    local c = unix.read(r, 65536)
+    if not c or c == "" then break end
+    buf = buf .. c
+  end
+  unix.close(r)
+  unix.wait(pid)
+  return buf
+end
+
+if can_set_flags then
+  log("note: skipping proxy live tests "
+      .. "(kernel allows CAP_NET_ADMIN — full proxy tests TODO)")
+end
+
+-- The proxy live tests require us to (a) listen inside a child netns,
+-- and (b) reach that listener from another process. Easiest cross-
+-- namespace plumbing is via /proc/<pid>/ns/net. We can do this without
+-- CAP_NET_ADMIN since we don't need to bring lo up — the loopback in
+-- the child netns is up by default in modern containers.
+do
+  local server_port, server_pid, server_sk = start_test_server()
+  log("test server: port=%d pid=%d", server_port, server_pid)
+
+  local parent_ns = assert(netns.open())
+
+  -- Spawn the proxy.
+  local proxy_pid = start_proxy({
+    bind_ip = LOOPBACK,
+    bind_port = 3128,
+    log_level = "quiet",
+    allowed_hosts = {
+      ["127.0.0.1:" .. server_port] = {},
+      ["127.0.0.1:" .. server_port .. "/auth"] = nil,
+    },
+  }, parent_ns)
+  -- Add a header-injecting rule for plain HTTP under the same host.
+  -- (The match is per host:port not per path, so a second rule with
+  -- different headers doesn't make sense — instead we'll exercise the
+  -- single rule with both CONNECT and HTTP.)
+
+  -- Get an fd on the proxy's netns so we can run client requests there.
+  local proxy_ns = assert(netns.open(proxy_pid))
+
+  -- Give the proxy a moment to bind. Tight loop probing /proc.
+  local function wait_for_proxy(ns_fd)
+    for _ = 1, 200 do
+      local pid = assert(unix.fork())
+      if pid == 0 then
+        if unix.setns(ns_fd, unix.CLONE_NEWNET) then
+          local sk = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
+          if sk and unix.connect(sk, LOOPBACK, 3128) then
+            unix.close(sk); unix.exit(0)
+          end
+        end
+        unix.exit(1)
+      end
+      local _, ws = unix.wait(pid)
+      if unix.WIFEXITED(ws) and unix.WEXITSTATUS(ws) == 0 then
+        return true
+      end
+      unix.nanosleep(0, 20 * 1000 * 1000)  -- 20ms
+    end
+    return false
+  end
+  assertf(wait_for_proxy(proxy_ns), "proxy never came up")
+  log("ok: proxy is listening")
+
+  -- Test 6: CONNECT to allowlisted host succeeds (200) and tunnels
+  -- a real HTTP request.
+  do
+    local resp = exercise(proxy_ns, "CONNECT",
+                          "127.0.0.1:" .. server_port,
+                          {tunneled = "GET /tun HTTP/1.1\r\nHost: x\r\n" ..
+                                      "Connection: close\r\n\r\n"})
+    assertf(resp:find("HTTP/1.1 200 Connection Established", 1, true),
+            "CONNECT did not return 200: %q", resp:sub(1, 80))
+    assertf(resp:find("path=/tun", 1, true),
+            "tunneled body missing: %q", resp:sub(-100))
+    log("ok: CONNECT allowed -> 200 + tunnel works")
+  end
+
+  -- Test 7: CONNECT to a denied host returns 403.
+  do
+    local resp = exercise(proxy_ns, "CONNECT", "evil.example.com:443",
+                          {expect_deny = true})
+    assertf(resp:find("^HTTP/1.1 403 ", 1, false),
+            "CONNECT to denied host did not return 403: %q",
+            resp:sub(1, 80))
+    log("ok: CONNECT denied -> 403")
+  end
+
+  -- Test 8: plain HTTP to allowlisted host is forwarded.
+  do
+    local resp = exercise(proxy_ns, "GET",
+                          "http://127.0.0.1:" .. server_port .. "/hello")
+    assertf(resp:find("^HTTP/1.1 200 ", 1, false),
+            "HTTP GET to allowed did not return 200: %q",
+            resp:sub(1, 80))
+    assertf(resp:find("path=/hello", 1, true),
+            "echo body missing: %q", resp:sub(-100))
+    log("ok: HTTP GET allowed -> forwarded, body echoed")
+  end
+
+  -- Test 9: plain HTTP to denied host returns 403.
+  do
+    local resp = exercise(proxy_ns, "GET", "http://evil.example.com/hello")
+    assertf(resp:find("^HTTP/1.1 403 ", 1, false),
+            "HTTP GET to denied did not return 403: %q",
+            resp:sub(1, 80))
+    log("ok: HTTP GET denied -> 403")
+  end
+
+  -- Test 10: header injection — restart proxy with a header rule.
+  do
+    unix.kill(proxy_pid, unix.SIGKILL)
+    unix.wait(proxy_pid)
+    unix.close(proxy_ns)
+    -- Drain any zombie proxy workers so they don't get inherited.
+    while true do
+      local pid = unix.wait(-1, unix.WNOHANG)
+      if not pid or pid == 0 then break end
+    end
+
+    proxy_pid = start_proxy({
+      bind_ip = LOOPBACK,
+      bind_port = 3128,
+      log_level = "quiet",
+      allowed_hosts = {
+        ["127.0.0.1:" .. server_port] = {
+          type = "header",
+          header_name = "x-injected",
+          header_value = "secret-token",
+        },
+      },
+    }, parent_ns)
+    proxy_ns = assert(netns.open(proxy_pid))
+    assertf(wait_for_proxy(proxy_ns), "proxy (test 10) never came up")
+
+    local resp = exercise(proxy_ns, "GET",
+                          "http://127.0.0.1:" .. server_port .. "/inj")
+    assertf(resp:find("injected=secret%-token"),
+            "injected header not visible at server: %q",
+            resp:sub(-150))
+    log("ok: HTTP header injection reaches upstream")
+  end
+
+  -- Cleanup.
+  unix.close(proxy_ns)
+  unix.close(parent_ns)
+  unix.kill(proxy_pid, unix.SIGTERM)
+  unix.wait(proxy_pid)
+  unix.kill(server_pid, unix.SIGTERM)
+  unix.wait(server_pid)
+  unix.close(server_sk)
 end
 
 print("cosmo.sandbox integration tests passed")
