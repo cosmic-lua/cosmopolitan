@@ -352,6 +352,19 @@ delivery (e.g. ship to a syslog or to a queue).
 | `p:handle(client_fd)`    | one connection synchronously              |
 | `p:serve_forever()`      | accept loop, fork-per-connection         |
 
+## Examples
+
+Two worked end-to-end programs ship under `examples/`:
+
+| Script             | What it demonstrates                                         |
+| ------------------ | ------------------------------------------------------------ |
+| `netns-proxy.lua`  | Network-isolation sandbox with HTTP CONNECT + plain-HTTP allowlist proxy. End-to-end equivalent of the Go `sandbox` reference design. |
+| `fs-jail.lua`      | Filesystem-isolation sandbox: private mount namespace + tmpfs root + read-only bind-mounts of `/usr`/`/lib`/etc. + writable `/tmp` + `pivot_root` + `PR_SET_NO_NEW_PRIVS`. |
+
+The two are independent — combine them by composing your own
+top-level script that runs the FS-jail steps first, then the netns
++ proxy steps.
+
 ## Example: `examples/netns-proxy.lua`
 
 The reference assembly. Reads a Lua-table config, sets up the netns
@@ -400,6 +413,38 @@ Exit codes:
 | 5    | bad usage or config                            |
 | 6    | non-Linux host                                 |
 | 128+N | child died from signal N                      |
+
+## Example: `examples/fs-jail.lua`
+
+Wraps a command in a private mount namespace whose root is a fresh
+tmpfs containing only the read-only-bound paths the user lists.
+
+```bash
+sudo lua.com fs-jail.lua -- ls /
+# bin etc lib lib64 tmp usr      (no /home, /root, /proc, etc.)
+
+sudo lua.com fs-jail.lua -bind /etc/passwd -bind /home/user/project \
+    -- /home/user/project/build.sh
+```
+
+What the example does, step by step:
+
+1. `unshare(CLONE_NEWNS)` — fresh mount namespace.
+2. Remount `/` as `MS_PRIVATE` so subsequent mounts don't leak.
+3. `mount("tmpfs", "/tmp/fs-jail-<pid>", "tmpfs", ...)` — fresh root.
+4. For each path: `mount(src, jail/src, MS_BIND|MS_REC)` then a
+   `MS_REMOUNT|MS_RDONLY` pass to lock it down.
+5. A separate writable tmpfs mounted at `jail/tmp`.
+6. `pivot_root(jail, jail/.old)` then `unmount("/.old", MNT_DETACH)`
+   so the old root is dropped.
+7. `prctl(PR_SET_NO_NEW_PRIVS, 1)` — setuid binaries can't escalate.
+8. `execvp(cmd[1], cmd)` — replace this process with the user's
+   command, now running in the jail.
+
+This is a useful starting point if you want filesystem isolation
+without netns. To get both, write a wrapper script that invokes
+`fs-jail.lua` from inside `netns-proxy.lua -- ...` (or just combine
+the relevant code paths).
 
 ## Tests
 
