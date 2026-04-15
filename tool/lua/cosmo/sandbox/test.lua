@@ -32,6 +32,10 @@ assertf(unix.CLONE_NEWCGROUP == 0x02000000, "CLONE_NEWCGROUP wrong")
 assertf(type(unix.unshare) == "function", "unix.unshare missing")
 assertf(type(unix.setns)   == "function", "unix.setns missing")
 assertf(type(unix.ioctl)   == "function", "unix.ioctl missing")
+assertf(type(unix.mount)   == "function", "unix.mount missing")
+assertf(type(unix.unmount) == "function", "unix.unmount missing")
+assertf(type(unix.pivot_root) == "function", "unix.pivot_root missing")
+assertf(type(unix.prctl)   == "function", "unix.prctl missing")
 
 -- SIOC/IFF constants are present.
 assertf(unix.IFNAMSIZ == 16, "IFNAMSIZ expected 16, got %s",
@@ -40,6 +44,20 @@ assertf(unix.IFF_UP == 1, "IFF_UP expected 1, got %s",
         tostring(unix.IFF_UP))
 assertf(type(unix.SIOCGIFFLAGS) == "number", "SIOCGIFFLAGS missing")
 assertf(type(unix.SIOCSIFFLAGS) == "number", "SIOCSIFFLAGS missing")
+
+-- MS_* mount-flag constants.
+assertf(unix.MS_RDONLY == 1, "MS_RDONLY expected 1, got %s",
+        tostring(unix.MS_RDONLY))
+assertf(type(unix.MS_BIND) == "number", "MS_BIND missing")
+assertf(type(unix.MS_REC) == "number", "MS_REC missing")
+assertf(type(unix.MS_PRIVATE) == "number", "MS_PRIVATE missing")
+assertf(type(unix.MS_SLAVE) == "number", "MS_SLAVE missing")
+
+-- PR_* prctl constants.
+assertf(unix.PR_SET_PDEATHSIG == 1, "PR_SET_PDEATHSIG expected 1, got %s",
+        tostring(unix.PR_SET_PDEATHSIG))
+assertf(unix.PR_SET_NO_NEW_PRIVS == 38, "PR_SET_NO_NEW_PRIVS expected 38")
+assertf(unix.PR_SET_DUMPABLE == 4, "PR_SET_DUMPABLE expected 4")
 
 -- Calling unshare with an invalid flag should fail cleanly, not raise.
 -- (unshare(0) is a no-op success; we use a value that's never a flag.)
@@ -76,6 +94,31 @@ do
   local buf = string.rep("\0", 40)
   local ok, err = unix.ioctl(-1, unix.SIOCGIFFLAGS, buf)  -- string arg
   assertf(ok == nil and err:errno() == unix.EBADF, "ioctl(str) wrong")
+end
+
+-- unmount on a path that isn't a mount point fails cleanly.
+do
+  local ok, err = unix.unmount("/does/not/exist", 0)
+  assertf(ok == nil, "unmount of bogus path should fail")
+  assertf(type(err:errno()) == "number", "unmount errno missing")
+end
+
+-- mount with nil/nil/nil just defers to the kernel; on a bogus target
+-- it must fail, not crash.
+do
+  local ok, err = unix.mount(nil, "/does/not/exist", nil, 0, nil)
+  assertf(ok == nil, "mount of bogus target should fail")
+  assertf(type(err:errno()) == "number", "mount errno missing")
+end
+
+-- prctl(PR_GET_PDEATHSIG, &buf) is the classic reader; we use the simpler
+-- form that returns the value via the syscall's return-in-ax fallback,
+-- so instead probe a bogus option.
+do
+  local ok, err = unix.prctl(-999, 0)
+  assertf(ok == nil, "prctl(-999) should fail")
+  assertf(err:errno() == unix.EINVAL,
+          "prctl(-999) expected EINVAL, got %s", err:name())
 end
 
 -- cosmo.sandbox.netns loads and its helpers do what they claim offline.

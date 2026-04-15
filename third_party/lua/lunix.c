@@ -22,6 +22,7 @@
 #include "libc/calls/calls.h"
 #include "libc/calls/cp.internal.h"
 #include "libc/calls/makedev.h"
+#include "libc/calls/mount.h"
 #include "libc/calls/pledge.h"
 #include "libc/calls/struct/bpf.internal.h"
 #include "libc/calls/struct/dirent.h"
@@ -81,6 +82,8 @@
 #include "libc/sysv/consts/limits.h"
 #include "libc/sysv/consts/log.h"
 #include "libc/sysv/consts/map.h"
+#include "libc/sysv/consts/mount.h"
+#include "libc/sysv/consts/pr.h"
 #include "libc/sysv/consts/msg.h"
 #include "libc/sysv/consts/nr.h"
 #include "libc/sysv/consts/o.h"
@@ -909,6 +912,97 @@ static int LuaUnixSetns(lua_State *L) {
   return SysretBool(L, "setns", olderr,
                     setns(luaL_checkinteger(L, 1),
                           luaL_optinteger(L, 2, 0)));
+}
+
+// unix.mount(source:str, target:str, fstype:str, flags:int[, data:str])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Mounts a filesystem. `flags` is a bitwise OR of `unix.MS_*`
+// constants. `data` is a filesystem-specific options string (may be
+// omitted). Typical uses for sandboxing:
+//
+//     -- Private mount namespace (so our mounts don't leak out)
+//     unix.unshare(unix.CLONE_NEWNS)
+//     unix.mount("none", "/", nil, unix.MS_REC | unix.MS_PRIVATE, nil)
+//
+//     -- Read-only bind of a host directory
+//     unix.mount("/etc/project", "/tmp/sandbox/etc",
+//                nil, unix.MS_BIND | unix.MS_REC, nil)
+//     unix.mount("none", "/tmp/sandbox/etc", nil,
+//                unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY, nil)
+//
+//     -- A fresh tmpfs
+//     unix.mount("tmpfs", "/tmp/sandbox/tmp", "tmpfs", 0, "size=64m")
+static int LuaUnixMount(lua_State *L) {
+  int olderr = errno;
+  const char *source = luaL_optstring(L, 1, NULL);
+  const char *target = luaL_checkstring(L, 2);
+  const char *fstype = luaL_optstring(L, 3, NULL);
+  unsigned long flags = (unsigned long)luaL_optinteger(L, 4, 0);
+  const char *data = luaL_optstring(L, 5, NULL);
+  return SysretBool(L, "mount", olderr,
+                    mount(source, target, fstype, flags, data));
+}
+
+// unix.unmount(target:str[, flags:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Unmounts a filesystem. The BSD-style name (`unmount`) is used for
+// cross-platform compatibility; on Linux this is the `umount2`
+// syscall. Flags may include MNT_FORCE, MNT_DETACH, MNT_EXPIRE,
+// UMOUNT_NOFOLLOW.
+static int LuaUnixUnmount(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "unmount", olderr,
+                    unmount(luaL_checkstring(L, 1),
+                            luaL_optinteger(L, 2, 0)));
+}
+
+// unix.pivot_root(new_root:str, put_old:str)
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Moves the root filesystem of the current mount namespace to
+// `put_old` and makes `new_root` the new root. Usually paired with
+// `chdir("/")` in the child. Requires a private mount namespace.
+static int LuaUnixPivotRoot(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "pivot_root", olderr,
+                    pivot_root(luaL_checkstring(L, 1),
+                               luaL_checkstring(L, 2)));
+}
+
+// unix.prctl(option:int[, arg2:int[, arg3:int[, arg4:int[, arg5:int]]]])
+//     ├─→ rc:int
+//     └─→ nil, unix.Errno
+//
+// Performs an operation on the calling process. `option` is one of
+// the `unix.PR_*` constants. The remaining arguments are
+// option-specific.
+//
+// For "getter" prctl options that return a value, the return is the
+// integer result. For "setter" options it's typically 0 on success.
+//
+// Common sandbox-relevant uses:
+//
+//     -- Kill this process when the parent dies
+//     unix.prctl(unix.PR_SET_PDEATHSIG, unix.SIGTERM)
+//
+//     -- Forbid gaining new privileges via setuid binaries
+//     unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1)
+//
+//     -- Prevent core dumps / PTRACE
+//     unix.prctl(unix.PR_SET_DUMPABLE, 0)
+static int LuaUnixPrctl(lua_State *L) {
+  int olderr = errno;
+  int option = luaL_checkinteger(L, 1);
+  unsigned long a2 = (unsigned long)luaL_optinteger(L, 2, 0);
+  unsigned long a3 = (unsigned long)luaL_optinteger(L, 3, 0);
+  unsigned long a4 = (unsigned long)luaL_optinteger(L, 4, 0);
+  unsigned long a5 = (unsigned long)luaL_optinteger(L, 5, 0);
+  return SysretInteger(L, "prctl", olderr, prctl(option, a2, a3, a4, a5));
 }
 
 // unix.setrlimit(resource:int, soft:int[, hard:int])
@@ -3831,6 +3925,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"mapshared", LuaUnixMapshared},      // mmap(MAP_SHARED) w/ mutex+atomics
     {"minor", LuaUnixMinor},              // extract device info
     {"mkdir", LuaUnixMkdir},              // make directory
+    {"mount", LuaUnixMount},              // mount filesystem
     {"mkdtemp", LuaUnixMkdtemp},          // create temporary directory
     {"mkstemp", LuaUnixMkstemp},          // create temporary file
     {"nanosleep", LuaUnixNanosleep},      // sleep w/ nano precision
@@ -3838,8 +3933,10 @@ static const luaL_Reg kLuaUnix[] = {
     {"open", LuaUnixOpen},                // open file fd at lowest slot
     {"opendir", LuaUnixOpendir},          // read directory entry list
     {"pipe", LuaUnixPipe},                // create two anon fifo fds
+    {"pivot_root", LuaUnixPivotRoot},     // replace root fs of namespace
     {"pledge", LuaUnixPledge},            // enables syscall sandbox
     {"poll", LuaUnixPoll},                // waits for file descriptor events
+    {"prctl", LuaUnixPrctl},              // process-control operations
     {"raise", LuaUnixRaise},              // signal this process
     {"read", LuaUnixRead},                // read from file or socket
     {"readlink", LuaUnixReadlink},        // reads symbolic link
@@ -3890,6 +3987,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"truncate", LuaUnixTruncate},        // shrink or extend file medium
     {"umask", LuaUnixUmask},              // set default file mask
     {"unlink", LuaUnixUnlink},            // remove file
+    {"unmount", LuaUnixUnmount},          // unmount filesystem
     {"unsetenv", LuaUnixUnsetenv},        // unset environment variable
     {"unshare", LuaUnixUnshare},          // create fresh namespaces
     {"unveil", LuaUnixUnveil},            // filesystem sandboxing
@@ -4274,6 +4372,46 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "IFF_PORTSEL", IFF_PORTSEL);
   LuaSetIntField(L, "IFF_AUTOMEDIA", IFF_AUTOMEDIA);
   LuaSetIntField(L, "IFF_DYNAMIC", IFF_DYNAMIC);
+
+  // mount() flags (Linux MS_*)
+  LuaSetIntField(L, "MS_RDONLY", MS_RDONLY);
+  LuaSetIntField(L, "MS_NOSUID", MS_NOSUID);
+  LuaSetIntField(L, "MS_NODEV", MS_NODEV);
+  LuaSetIntField(L, "MS_NOEXEC", MS_NOEXEC);
+  LuaSetIntField(L, "MS_SYNCHRONOUS", MS_SYNCHRONOUS);
+  LuaSetIntField(L, "MS_REMOUNT", MS_REMOUNT);
+  LuaSetIntField(L, "MS_MANDLOCK", MS_MANDLOCK);
+  LuaSetIntField(L, "MS_DIRSYNC", MS_DIRSYNC);
+  LuaSetIntField(L, "MS_NOATIME", MS_NOATIME);
+  LuaSetIntField(L, "MS_NODIRATIME", MS_NODIRATIME);
+  LuaSetIntField(L, "MS_BIND", MS_BIND);
+  LuaSetIntField(L, "MS_MOVE", MS_MOVE);
+  LuaSetIntField(L, "MS_REC", MS_REC);
+  LuaSetIntField(L, "MS_SILENT", MS_SILENT);
+  LuaSetIntField(L, "MS_POSIXACL", MS_POSIXACL);
+  LuaSetIntField(L, "MS_UNBINDABLE", MS_UNBINDABLE);
+  LuaSetIntField(L, "MS_PRIVATE", MS_PRIVATE);
+  LuaSetIntField(L, "MS_SLAVE", MS_SLAVE);
+  LuaSetIntField(L, "MS_SHARED", MS_SHARED);
+  LuaSetIntField(L, "MS_RELATIME", MS_RELATIME);
+  LuaSetIntField(L, "MS_STRICTATIME", MS_STRICTATIME);
+  LuaSetIntField(L, "MS_LAZYTIME", MS_LAZYTIME);
+
+  // prctl() options (commonly-used subset)
+  LuaSetIntField(L, "PR_SET_PDEATHSIG", PR_SET_PDEATHSIG);
+  LuaSetIntField(L, "PR_GET_PDEATHSIG", PR_GET_PDEATHSIG);
+  LuaSetIntField(L, "PR_SET_NO_NEW_PRIVS", PR_SET_NO_NEW_PRIVS);
+  LuaSetIntField(L, "PR_GET_NO_NEW_PRIVS", PR_GET_NO_NEW_PRIVS);
+  LuaSetIntField(L, "PR_SET_DUMPABLE", PR_SET_DUMPABLE);
+  LuaSetIntField(L, "PR_GET_DUMPABLE", PR_GET_DUMPABLE);
+  LuaSetIntField(L, "PR_SET_KEEPCAPS", PR_SET_KEEPCAPS);
+  LuaSetIntField(L, "PR_GET_KEEPCAPS", PR_GET_KEEPCAPS);
+  LuaSetIntField(L, "PR_SET_NAME", PR_SET_NAME);
+  LuaSetIntField(L, "PR_GET_NAME", PR_GET_NAME);
+  LuaSetIntField(L, "PR_SET_CHILD_SUBREAPER", PR_SET_CHILD_SUBREAPER);
+  LuaSetIntField(L, "PR_GET_CHILD_SUBREAPER", PR_GET_CHILD_SUBREAPER);
+  LuaSetIntField(L, "PR_CAPBSET_READ", PR_CAPBSET_READ);
+  LuaSetIntField(L, "PR_CAPBSET_DROP", PR_CAPBSET_DROP);
 
   // ioctl(SIOC*) requests for network interface manipulation
   LuaSetIntField(L, "SIOCGIFFLAGS", SIOCGIFFLAGS);

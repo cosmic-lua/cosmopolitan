@@ -123,6 +123,59 @@ Generic ioctl. Argument dispatch:
 For struct-arg ioctls (e.g. `SIOCSIFFLAGS`), use `string.pack` to
 build the buffer.
 
+#### `unix.mount(source, target, fstype, flags[, data]) → true | nil, unix.Errno`
+
+Mount a filesystem. `flags` is a bitwise OR of `unix.MS_*` constants.
+`source` and `fstype` may be nil (e.g. for `MS_REMOUNT`). `data` is a
+filesystem-specific options string.
+
+```lua
+-- Private mount namespace (our mounts don't leak out)
+assert(unix.unshare(unix.CLONE_NEWNS))
+assert(unix.mount("none", "/", nil, unix.MS_REC | unix.MS_PRIVATE, nil))
+
+-- Read-only bind
+assert(unix.mount("/etc/project", "/tmp/sandbox/etc",
+                  nil, unix.MS_BIND | unix.MS_REC, nil))
+assert(unix.mount("none", "/tmp/sandbox/etc", nil,
+                  unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY, nil))
+
+-- A fresh tmpfs
+assert(unix.mount("tmpfs", "/tmp/sandbox/tmp", "tmpfs", 0, "size=64m"))
+```
+
+#### `unix.unmount(target[, flags]) → true | nil, unix.Errno`
+
+Unmount. BSD-style name (on Linux this is the `umount2` syscall).
+Flags: `MNT_FORCE`, `MNT_DETACH`, `MNT_EXPIRE`, `UMOUNT_NOFOLLOW`.
+
+#### `unix.pivot_root(new_root, put_old) → true | nil, unix.Errno`
+
+Replace the root filesystem of the current mount namespace. Typically
+paired with `unix.chdir("/")` in the child. Requires a private mount
+namespace (use `unix.unshare(unix.CLONE_NEWNS)` first).
+
+#### `unix.prctl(option[, arg2, arg3, arg4, arg5]) → rc | nil, unix.Errno`
+
+Process-control operations. `option` is one of the `unix.PR_*`
+constants; remaining arguments are option-specific integers.
+
+Common sandbox-relevant uses:
+
+```lua
+-- Child gets SIGTERM when its parent dies
+unix.prctl(unix.PR_SET_PDEATHSIG, unix.SIGTERM)
+
+-- Forbid gaining new privileges via setuid binaries
+unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1)
+
+-- Prevent core dumps / PTRACE
+unix.prctl(unix.PR_SET_DUMPABLE, 0)
+
+-- Read back
+local np = unix.prctl(unix.PR_GET_NO_NEW_PRIVS)  -- 1
+```
+
 #### Constants
 
 - Namespaces: `CLONE_NEWNS`, `CLONE_NEWCGROUP`, `CLONE_NEWUTS`,
@@ -137,6 +190,17 @@ build the buffer.
   `SIOCGIFBRDADDR`, `SIOCSIFBRDADDR`, `SIOCGIFNETMASK`,
   `SIOCSIFNETMASK`, `SIOCGIFMTU`, `SIOCSIFMTU`, `SIOCGIFMETRIC`,
   `SIOCSIFMETRIC`, `SIOCGIFINDEX`, `SIOCGIFNAME`
+- Mount flags: `MS_RDONLY`, `MS_NOSUID`, `MS_NODEV`, `MS_NOEXEC`,
+  `MS_SYNCHRONOUS`, `MS_REMOUNT`, `MS_MANDLOCK`, `MS_DIRSYNC`,
+  `MS_NOATIME`, `MS_NODIRATIME`, `MS_BIND`, `MS_MOVE`, `MS_REC`,
+  `MS_SILENT`, `MS_POSIXACL`, `MS_UNBINDABLE`, `MS_PRIVATE`,
+  `MS_SLAVE`, `MS_SHARED`, `MS_RELATIME`, `MS_STRICTATIME`,
+  `MS_LAZYTIME`
+- prctl options: `PR_SET_PDEATHSIG`, `PR_GET_PDEATHSIG`,
+  `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`, `PR_SET_DUMPABLE`,
+  `PR_GET_DUMPABLE`, `PR_SET_KEEPCAPS`, `PR_GET_KEEPCAPS`,
+  `PR_SET_NAME`, `PR_GET_NAME`, `PR_SET_CHILD_SUBREAPER`,
+  `PR_GET_CHILD_SUBREAPER`, `PR_CAPBSET_READ`, `PR_CAPBSET_DROP`
 
 ### `cosmo.sandbox`
 
