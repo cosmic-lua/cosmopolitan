@@ -25,6 +25,8 @@ i32 __sys_openat(i32, const char *, i32, u32);
 i32 __sys_openat_nc(i32, const char *, i32, u32);
 i32 __sys_pipe2(i32[hasatleast 2], u32);
 i32 sys_arch_prctl(i32, i64);
+i32 sys_capget(void *, void *);
+i32 sys_capset(void *, const void *);
 i32 sys_chdir(const char *);
 i32 sys_chroot(const char *);
 i32 sys_close(i32);

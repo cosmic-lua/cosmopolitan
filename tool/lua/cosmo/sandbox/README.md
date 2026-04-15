@@ -176,6 +176,34 @@ unix.prctl(unix.PR_SET_DUMPABLE, 0)
 local np = unix.prctl(unix.PR_GET_NO_NEW_PRIVS)  -- 1
 ```
 
+#### `unix.capget([pid]) → eff, perm, inh | nil, unix.Errno`
+
+Returns the calling thread's (or `pid`'s) capability sets as 64-bit
+bitmasks (`Linux _LINUX_CAPABILITY_VERSION_3` ABI). Bit position N
+corresponds to `unix.CAP_*` constant N.
+
+```lua
+local eff, perm, inh = assert(unix.capget())
+if (eff & (1 << unix.CAP_NET_ADMIN)) ~= 0 then
+  -- we currently have CAP_NET_ADMIN
+end
+```
+
+#### `unix.capset(eff, perm, inh[, pid]) → true | nil, unix.Errno`
+
+Sets the calling thread's capability sets. Constraints:
+
+- `effective` ⊆ `permitted`
+- `inheritable` ⊆ `permitted ∪ current_inheritable`
+- you cannot add bits to `permitted` that aren't already there
+
+```lua
+-- Drop everything except CAP_NET_BIND_SERVICE.
+local _, perm, inh = assert(unix.capget())
+local keep = 1 << unix.CAP_NET_BIND_SERVICE
+assert(unix.capset(perm & keep, perm & keep, inh & keep))
+```
+
 #### Constants
 
 - Namespaces: `CLONE_NEWNS`, `CLONE_NEWCGROUP`, `CLONE_NEWUTS`,
@@ -201,6 +229,19 @@ local np = unix.prctl(unix.PR_GET_NO_NEW_PRIVS)  -- 1
   `PR_GET_DUMPABLE`, `PR_SET_KEEPCAPS`, `PR_GET_KEEPCAPS`,
   `PR_SET_NAME`, `PR_GET_NAME`, `PR_SET_CHILD_SUBREAPER`,
   `PR_GET_CHILD_SUBREAPER`, `PR_CAPBSET_READ`, `PR_CAPBSET_DROP`
+- Capabilities: `CAP_CHOWN`, `CAP_DAC_OVERRIDE`,
+  `CAP_DAC_READ_SEARCH`, `CAP_FOWNER`, `CAP_FSETID`, `CAP_KILL`,
+  `CAP_SETGID`, `CAP_SETUID`, `CAP_SETPCAP`, `CAP_LINUX_IMMUTABLE`,
+  `CAP_NET_BIND_SERVICE`, `CAP_NET_BROADCAST`, `CAP_NET_ADMIN`,
+  `CAP_NET_RAW`, `CAP_IPC_LOCK`, `CAP_IPC_OWNER`, `CAP_SYS_MODULE`,
+  `CAP_SYS_RAWIO`, `CAP_SYS_CHROOT`, `CAP_SYS_PTRACE`,
+  `CAP_SYS_PACCT`, `CAP_SYS_ADMIN`, `CAP_SYS_BOOT`, `CAP_SYS_NICE`,
+  `CAP_SYS_RESOURCE`, `CAP_SYS_TIME`, `CAP_SYS_TTY_CONFIG`,
+  `CAP_MKNOD`, `CAP_LEASE`, `CAP_AUDIT_WRITE`, `CAP_AUDIT_CONTROL`,
+  `CAP_SETFCAP`, `CAP_MAC_OVERRIDE`, `CAP_MAC_ADMIN`, `CAP_SYSLOG`,
+  `CAP_WAKE_ALARM`, `CAP_BLOCK_SUSPEND`, `CAP_AUDIT_READ`,
+  `CAP_PERFMON`, `CAP_BPF`, `CAP_CHECKPOINT_RESTORE`,
+  `CAP_LAST_CAP`
 
 ### `cosmo.sandbox`
 

@@ -36,6 +36,8 @@ assertf(type(unix.mount)   == "function", "unix.mount missing")
 assertf(type(unix.unmount) == "function", "unix.unmount missing")
 assertf(type(unix.pivot_root) == "function", "unix.pivot_root missing")
 assertf(type(unix.prctl)   == "function", "unix.prctl missing")
+assertf(type(unix.capget)  == "function", "unix.capget missing")
+assertf(type(unix.capset)  == "function", "unix.capset missing")
 
 -- SIOC/IFF constants are present.
 assertf(unix.IFNAMSIZ == 16, "IFNAMSIZ expected 16, got %s",
@@ -58,6 +60,32 @@ assertf(unix.PR_SET_PDEATHSIG == 1, "PR_SET_PDEATHSIG expected 1, got %s",
         tostring(unix.PR_SET_PDEATHSIG))
 assertf(unix.PR_SET_NO_NEW_PRIVS == 38, "PR_SET_NO_NEW_PRIVS expected 38")
 assertf(unix.PR_SET_DUMPABLE == 4, "PR_SET_DUMPABLE expected 4")
+
+-- CAP_* constants (well-known indices).
+assertf(unix.CAP_CHOWN          == 0,  "CAP_CHOWN")
+assertf(unix.CAP_SETUID         == 7,  "CAP_SETUID")
+assertf(unix.CAP_NET_ADMIN      == 12, "CAP_NET_ADMIN")
+assertf(unix.CAP_SYS_ADMIN      == 21, "CAP_SYS_ADMIN")
+assertf(unix.CAP_NET_BIND_SERVICE == 10, "CAP_NET_BIND_SERVICE")
+assertf(type(unix.CAP_LAST_CAP) == "number", "CAP_LAST_CAP missing")
+
+-- capget should always work when called for self, even unprivileged.
+do
+  local eff, perm, inh = unix.capget()
+  assertf(type(eff)  == "number", "capget eff not int")
+  assertf(type(perm) == "number", "capget perm not int")
+  assertf(type(inh)  == "number", "capget inh not int")
+  -- effective is always a subset of permitted.
+  assertf((eff & ~perm) == 0,
+          "effective has bits not in permitted: eff=%x perm=%x", eff, perm)
+end
+
+-- capset with the current values (a no-op) should succeed.
+do
+  local eff, perm, inh = assert(unix.capget())
+  local ok, err = unix.capset(eff, perm, inh)
+  assertf(ok, "capset(self) failed: %s", tostring(err))
+end
 
 -- Calling unshare with an invalid flag should fail cleanly, not raise.
 -- (unshare(0) is a no-op success; we use a value that's never a flag.)

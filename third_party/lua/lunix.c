@@ -20,6 +20,7 @@
 #include "libc/assert.h"
 #include "libc/atomic.h"
 #include "libc/calls/calls.h"
+#include "libc/calls/cap.h"
 #include "libc/calls/cp.internal.h"
 #include "libc/calls/makedev.h"
 #include "libc/calls/mount.h"
@@ -79,6 +80,7 @@
 #include "libc/sysv/consts/ip.h"
 #include "libc/sysv/consts/ipproto.h"
 #include "libc/sysv/consts/itimer.h"
+#include "libc/sysv/consts/cap.h"
 #include "libc/sysv/consts/limits.h"
 #include "libc/sysv/consts/log.h"
 #include "libc/sysv/consts/map.h"
@@ -1003,6 +1005,65 @@ static int LuaUnixPrctl(lua_State *L) {
   unsigned long a4 = (unsigned long)luaL_optinteger(L, 4, 0);
   unsigned long a5 = (unsigned long)luaL_optinteger(L, 5, 0);
   return SysretInteger(L, "prctl", olderr, prctl(option, a2, a3, a4, a5));
+}
+
+// unix.capget([pid:int])
+//     ├─→ effective:int, permitted:int, inheritable:int
+//     └─→ nil, unix.Errno
+//
+// Returns the calling thread's (or `pid`'s) capability sets as
+// 64-bit bitmasks. Each bit position N in the returned masks
+// corresponds to `unix.CAP_*` constant N. Linux-only.
+//
+//     local eff, perm, inh = assert(unix.capget())
+//     if (eff & (1 << unix.CAP_NET_ADMIN)) ~= 0 then
+//       -- we have CAP_NET_ADMIN
+//     end
+static int LuaUnixCapget(lua_State *L) {
+  int olderr = errno;
+  struct __user_cap_header_struct hdr;
+  struct __user_cap_data_struct data[2];
+  hdr.version = _LINUX_CAPABILITY_VERSION_3;
+  hdr.pid = luaL_optinteger(L, 1, 0);
+  if (capget(&hdr, data) == -1) {
+    return LuaUnixSysretErrno(L, "capget", olderr);
+  }
+  lua_pushinteger(L, ((uint64_t)data[1].effective   << 32) | data[0].effective);
+  lua_pushinteger(L, ((uint64_t)data[1].permitted   << 32) | data[0].permitted);
+  lua_pushinteger(L, ((uint64_t)data[1].inheritable << 32) | data[0].inheritable);
+  return 3;
+}
+
+// unix.capset(effective:int, permitted:int, inheritable:int[, pid:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Sets the calling thread's (or `pid`'s) capability sets. Each
+// argument is a 64-bit bitmask of `1 << unix.CAP_*` bits. Note that
+// `effective` must be a subset of `permitted`, `inheritable` must be
+// a subset of `permitted UNION current_inheritable`, and you cannot
+// add bits to `permitted` that aren't already there. Linux-only.
+//
+//     local _, perm, inh = assert(unix.capget())
+//     -- Drop everything except CAP_NET_BIND_SERVICE.
+//     local keep = 1 << unix.CAP_NET_BIND_SERVICE
+//     assert(unix.capset(perm & keep, perm & keep, inh & keep))
+static int LuaUnixCapset(lua_State *L) {
+  int olderr = errno;
+  struct __user_cap_header_struct hdr;
+  struct __user_cap_data_struct data[2];
+  uint64_t eff = (uint64_t)luaL_checkinteger(L, 1);
+  uint64_t per = (uint64_t)luaL_checkinteger(L, 2);
+  uint64_t inh = (uint64_t)luaL_checkinteger(L, 3);
+  hdr.version = _LINUX_CAPABILITY_VERSION_3;
+  hdr.pid = luaL_optinteger(L, 4, 0);
+  data[0].effective   = (uint32_t)(eff & 0xffffffff);
+  data[0].permitted   = (uint32_t)(per & 0xffffffff);
+  data[0].inheritable = (uint32_t)(inh & 0xffffffff);
+  data[1].effective   = (uint32_t)(eff >> 32);
+  data[1].permitted   = (uint32_t)(per >> 32);
+  data[1].inheritable = (uint32_t)(inh >> 32);
+  return SysretBool(L, "capset", olderr, capset(&hdr, data));
 }
 
 // unix.setrlimit(resource:int, soft:int[, hard:int])
@@ -3867,6 +3928,8 @@ static const luaL_Reg kLuaUnix[] = {
     {"accept", LuaUnixAccept},            // create client fd for client
     {"access", LuaUnixAccess},            // check my file authorization
     {"bind", LuaUnixBind},                // reserve network interface address
+    {"capget", LuaUnixCapget},            // read capability bitmasks
+    {"capset", LuaUnixCapset},            // set capability bitmasks
     {"chdir", LuaUnixChdir},              // change directory
     {"chmod", LuaUnixChmod},              // change mode of file
     {"chown", LuaUnixChown},              // change owner of file
@@ -4396,6 +4459,50 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "MS_RELATIME", MS_RELATIME);
   LuaSetIntField(L, "MS_STRICTATIME", MS_STRICTATIME);
   LuaSetIntField(L, "MS_LAZYTIME", MS_LAZYTIME);
+
+  // capget()/capset() capability indices (CAP_*)
+  LuaSetIntField(L, "CAP_CHOWN", CAP_CHOWN);
+  LuaSetIntField(L, "CAP_DAC_OVERRIDE", CAP_DAC_OVERRIDE);
+  LuaSetIntField(L, "CAP_DAC_READ_SEARCH", CAP_DAC_READ_SEARCH);
+  LuaSetIntField(L, "CAP_FOWNER", CAP_FOWNER);
+  LuaSetIntField(L, "CAP_FSETID", CAP_FSETID);
+  LuaSetIntField(L, "CAP_KILL", CAP_KILL);
+  LuaSetIntField(L, "CAP_SETGID", CAP_SETGID);
+  LuaSetIntField(L, "CAP_SETUID", CAP_SETUID);
+  LuaSetIntField(L, "CAP_SETPCAP", CAP_SETPCAP);
+  LuaSetIntField(L, "CAP_LINUX_IMMUTABLE", CAP_LINUX_IMMUTABLE);
+  LuaSetIntField(L, "CAP_NET_BIND_SERVICE", CAP_NET_BIND_SERVICE);
+  LuaSetIntField(L, "CAP_NET_BROADCAST", CAP_NET_BROADCAST);
+  LuaSetIntField(L, "CAP_NET_ADMIN", CAP_NET_ADMIN);
+  LuaSetIntField(L, "CAP_NET_RAW", CAP_NET_RAW);
+  LuaSetIntField(L, "CAP_IPC_LOCK", CAP_IPC_LOCK);
+  LuaSetIntField(L, "CAP_IPC_OWNER", CAP_IPC_OWNER);
+  LuaSetIntField(L, "CAP_SYS_MODULE", CAP_SYS_MODULE);
+  LuaSetIntField(L, "CAP_SYS_RAWIO", CAP_SYS_RAWIO);
+  LuaSetIntField(L, "CAP_SYS_CHROOT", CAP_SYS_CHROOT);
+  LuaSetIntField(L, "CAP_SYS_PTRACE", CAP_SYS_PTRACE);
+  LuaSetIntField(L, "CAP_SYS_PACCT", CAP_SYS_PACCT);
+  LuaSetIntField(L, "CAP_SYS_ADMIN", CAP_SYS_ADMIN);
+  LuaSetIntField(L, "CAP_SYS_BOOT", CAP_SYS_BOOT);
+  LuaSetIntField(L, "CAP_SYS_NICE", CAP_SYS_NICE);
+  LuaSetIntField(L, "CAP_SYS_RESOURCE", CAP_SYS_RESOURCE);
+  LuaSetIntField(L, "CAP_SYS_TIME", CAP_SYS_TIME);
+  LuaSetIntField(L, "CAP_SYS_TTY_CONFIG", CAP_SYS_TTY_CONFIG);
+  LuaSetIntField(L, "CAP_MKNOD", CAP_MKNOD);
+  LuaSetIntField(L, "CAP_LEASE", CAP_LEASE);
+  LuaSetIntField(L, "CAP_AUDIT_WRITE", CAP_AUDIT_WRITE);
+  LuaSetIntField(L, "CAP_AUDIT_CONTROL", CAP_AUDIT_CONTROL);
+  LuaSetIntField(L, "CAP_SETFCAP", CAP_SETFCAP);
+  LuaSetIntField(L, "CAP_MAC_OVERRIDE", CAP_MAC_OVERRIDE);
+  LuaSetIntField(L, "CAP_MAC_ADMIN", CAP_MAC_ADMIN);
+  LuaSetIntField(L, "CAP_SYSLOG", CAP_SYSLOG);
+  LuaSetIntField(L, "CAP_WAKE_ALARM", CAP_WAKE_ALARM);
+  LuaSetIntField(L, "CAP_BLOCK_SUSPEND", CAP_BLOCK_SUSPEND);
+  LuaSetIntField(L, "CAP_AUDIT_READ", CAP_AUDIT_READ);
+  LuaSetIntField(L, "CAP_PERFMON", CAP_PERFMON);
+  LuaSetIntField(L, "CAP_BPF", CAP_BPF);
+  LuaSetIntField(L, "CAP_CHECKPOINT_RESTORE", CAP_CHECKPOINT_RESTORE);
+  LuaSetIntField(L, "CAP_LAST_CAP", CAP_LAST_CAP);
 
   // prctl() options (commonly-used subset)
   LuaSetIntField(L, "PR_SET_PDEATHSIG", PR_SET_PDEATHSIG);
