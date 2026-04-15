@@ -90,6 +90,7 @@ TOOL_LUA_ASSETS =							\
 	o/$(MODE)/tool/lua/cosmo/sandbox/init.lua.zip.o		\
 	o/$(MODE)/tool/lua/cosmo/sandbox/netns.lua.zip.o	\
 	o/$(MODE)/tool/lua/cosmo/sandbox/fs.lua.zip.o		\
+	o/$(MODE)/tool/lua/cosmo/sandbox/proc.lua.zip.o		\
 	o/$(MODE)/tool/lua/cosmo/sandbox/proxy.lua.zip.o
 
 # Strip tool/lua/ prefix and prepend .lua/ so files end up at /zip/.lua/
@@ -201,6 +202,7 @@ o/$(MODE)/tool/lua/cosmo/sandbox/test.ok:				\
 		tool/lua/cosmo/sandbox/init.lua				\
 		tool/lua/cosmo/sandbox/netns.lua			\
 		tool/lua/cosmo/sandbox/fs.lua				\
+		tool/lua/cosmo/sandbox/proc.lua				\
 		tool/lua/cosmo/sandbox/test.lua
 	$< tool/lua/cosmo/sandbox/test.lua
 	@touch $@
@@ -217,6 +219,7 @@ o/$(MODE)/tool/lua/cosmo/sandbox/test_integration.ok:			\
 		tool/lua/cosmo/sandbox/init.lua				\
 		tool/lua/cosmo/sandbox/netns.lua			\
 		tool/lua/cosmo/sandbox/fs.lua				\
+		tool/lua/cosmo/sandbox/proc.lua				\
 		tool/lua/cosmo/sandbox/proxy.lua			\
 		tool/lua/cosmo/sandbox/test_integration.lua
 	$< tool/lua/cosmo/sandbox/test_integration.lua

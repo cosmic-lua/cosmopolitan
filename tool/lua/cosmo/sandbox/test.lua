@@ -25,6 +25,21 @@ assertf(sandbox.is_supported() == IS_LINUX,
         "is_supported() = %s on host=%s",
         tostring(sandbox.is_supported()), cosmo.GetHostOs())
 
+-- capabilities() returns a fine-grained record; fields all booleans.
+do
+  local c = sandbox.capabilities()
+  assertf(type(c) == "table", "capabilities() did not return table")
+  for _, k in ipairs{"linux", "user_ns", "mount_ns", "net_ns",
+                     "uts_ns", "pid_ns", "pivot_root",
+                     "cap_net_admin"} do
+    assertf(type(c[k]) == "boolean",
+            "capabilities().%s = %s (expected boolean)", k, tostring(c[k]))
+  end
+  assertf(c.linux == IS_LINUX, "capabilities().linux mismatch")
+  -- Result is cached — second call returns the same table.
+  assertf(sandbox.capabilities() == c, "capabilities() not cached")
+end
+
 -- CLONE_NEW* constants are present and have the expected Linux values.
 assertf(unix.CLONE_NEWNET == 0x40000000, "CLONE_NEWNET wrong")
 assertf(unix.CLONE_NEWNS   == 0x00020000, "CLONE_NEWNS wrong")
@@ -178,6 +193,29 @@ do
                       "private_root", "pivot_to"} do
     assertf(type(fs[fn]) == "function", "fs.%s missing", fn)
   end
+end
+
+--------------------------------------------------------------------------------
+-- cosmo.sandbox.proc
+
+do
+  local proc = require "cosmo.sandbox.proc"
+  -- Function-shape sanity.
+  for _, fn in ipairs{"set_hostname", "no_new_privs",
+                      "drop_privs", "become_init"} do
+    assertf(type(proc[fn]) == "function", "proc.%s missing", fn)
+  end
+  -- DEFAULT_SIGNALS is a sane set.
+  assertf(type(proc.DEFAULT_SIGNALS) == "table",
+          "proc.DEFAULT_SIGNALS missing")
+  assertf(#proc.DEFAULT_SIGNALS == 3,
+          "proc.DEFAULT_SIGNALS wrong size")
+  -- drop_privs(nil) and drop_privs(0) are documented no-ops.
+  assertf(proc.drop_privs(nil) == true, "drop_privs(nil) should succeed")
+  assertf(proc.drop_privs(0)   == true, "drop_privs(0) should succeed")
+  -- set_hostname(bad input) raises a clear message (programmer error).
+  local ok = pcall(proc.set_hostname, 42)
+  assertf(not ok, "set_hostname(42) should assert on non-string")
 end
 
 print("cosmo.sandbox smoke tests passed")

@@ -246,11 +246,12 @@ All `.tl`, all ≤500 lines — fits cosmic's rules.
    allow-listing for HTTPS). Teal types should make this explicit
    so callers don't assume MITM-style interception.
 
-## Changes to make on the cosmo side before cosmic starts wrapping
+## Changes made on the cosmo side (v0.0.3)
 
-Researching cosmic surfaced friction points that are cheaper to fix
-in `cosmo.sandbox.*` now than to paper over in the Teal wrappers.
-Roughly in order of payoff:
+Researching cosmic surfaced friction points that were cheaper to fix
+here than to paper over in the Teal wrappers. All six landed before
+any cosmic code depends on the API; the list below is kept for
+reference / changelog purposes. Roughly in order of payoff:
 
 ### 1. Unify the error-return shape (HIGH)
 
@@ -368,18 +369,29 @@ Small code reduction; only worth doing if #3's
 
 ---
 
-### Suggested sequencing
+### Status
 
-Before cosmic starts writing Teal wrappers:
-- **Do #1** — can't undo a string-errno once callers depend on it.
-- **Do #3** — keeps the proxy + claude-code examples' bug surface
-  from re-diverging.
+All six changes landed in v0.0.3:
 
-After cosmic starts (any time, non-breaking):
-- **Do #2** — additive.
-- **Do #4** — additive if the existing string-key shape is kept
-  as a shorthand.
-- **Do #5, #6** — polish.
+- **#1** (error shape): `fs.bind/bind_ro/tmpfs` and `proxy.dial`
+  now return `nil, unix.Errno`. No more string wrapping for syscall
+  errors.
+- **#2** (capabilities): `cosmo.sandbox.capabilities()` returns a
+  fine-grained record; `is_supported()` becomes a convenience over
+  it. Result is cached.
+- **#3** (proc module): `cosmo.sandbox.proc` now exports
+  `set_hostname`, `no_new_privs`, `drop_privs`, and `become_init`.
+  Both example supervisors collapse to one `proc.become_init(...)`
+  call; claude-code's `drop_privileges` function is gone.
+- **#4** (proxy rules): rule schema documented in-source and tested.
+  `*.suffix` and `*.suffix:port` wildcard matching implemented with
+  tail-anchored matching (apex + substring hosts correctly miss).
+- **#5** (`---` docs): all public docstrings in `init`, `fs`,
+  `netns`, `proc`, `proxy` use the triple-dash prefix so cosmic's
+  `--docs` pipeline can extract them.
+- **#6** (`proxy.start`): forks, listens, reports the bound port
+  back via a pipe, and returns `{pid, port, stop()}`. Useful as a
+  one-liner in cosmic's Jail builder.
 
 ## Acceptance criteria
 

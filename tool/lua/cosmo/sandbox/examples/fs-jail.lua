@@ -28,7 +28,8 @@
 
 local unix = require "unix"
 local cosmo = require "cosmo"
-local fs = require "cosmo.sandbox.fs"
+local fs   = require "cosmo.sandbox.fs"
+local proc = require "cosmo.sandbox.proc"
 
 local function die(fmt, ...)
   io.stderr:write("fs-jail: " .. string.format(fmt, ...) .. "\n")
@@ -129,8 +130,8 @@ local function main(argv)
   if not ok then die("pivot_to(%s): %s", jail, tostring(err)) end
 
   -- Step 4: harden. NO_NEW_PRIVS prevents setuid escalation.
-  ok, err = unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1)
-  if not ok then die("prctl(NO_NEW_PRIVS): %s", tostring(err)) end
+  ok, err = proc.no_new_privs()
+  if not ok then die("no_new_privs: %s", tostring(err)) end
 
   -- Step 5: exec the user's command.
   local _, eerr = unix.execvp(cmd[1], cmd)

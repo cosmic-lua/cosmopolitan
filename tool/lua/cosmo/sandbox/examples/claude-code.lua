@@ -37,6 +37,7 @@ local unix  = require "unix"
 local cosmo = require "cosmo"
 local netns = require "cosmo.sandbox.netns"
 local fs    = require "cosmo.sandbox.fs"
+local proc  = require "cosmo.sandbox.proc"
 local proxy = require "cosmo.sandbox.proxy"
 
 local LOOPBACK = cosmo.ParseIp("127.0.0.1")
@@ -206,22 +207,6 @@ local function build_jail(opts, real_home)
 end
 
 --------------------------------------------------------------------------------
--- Capability + UID drop.
-
-local function drop_privileges(real_uid, real_gid)
-  -- Order: KEEPCAPS so dropping UID doesn't auto-clear our caps;
-  -- then setresgid/setresuid to become the invoking user; then drop
-  -- caps; then NO_NEW_PRIVS so setuid bins can't get them back.
-  if real_uid ~= 0 then
-    assert(unix.prctl(unix.PR_SET_KEEPCAPS, 1))
-    assert(unix.setresgid(real_gid, real_gid, real_gid))
-    assert(unix.setresuid(real_uid, real_uid, real_uid))
-  end
-  assert(unix.capset(0, 0, 0))
-  assert(unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1))
-end
-
---------------------------------------------------------------------------------
 -- Environment construction.
 
 local function build_env()
@@ -285,7 +270,8 @@ local function main(argv)
     unix.read(pipe_r, 1)
     unix.close(pipe_r)
     -- Drop privileges last, so build_jail/etc. could use root.
-    drop_privileges(real_uid, real_gid)
+    assert(proc.drop_privs(real_uid, real_gid))
+    assert(proc.no_new_privs())
     unix.chdir(opts.project)
     local env = build_env()
     local argv = {claude_bin}
@@ -337,43 +323,15 @@ local function main(argv)
   unix.close(child_ns)
   unix.close(parent_ns)
 
-  -- Forward signals; propagate the wrapper's exit code.
-  local function forward(sig)
-    pcall(unix.kill, cmd_pid, sig)
-    pcall(unix.kill, proxy_pid, sig)
-  end
-  unix.sigaction(unix.SIGINT,  function() forward(unix.SIGINT)  end)
-  unix.sigaction(unix.SIGTERM, function() forward(unix.SIGTERM) end)
-  unix.sigaction(unix.SIGHUP,  function() forward(unix.SIGHUP)  end)
-
-  while true do
-    local pid, ws = unix.wait()
-    if not pid then
-      -- ws is a unix.Errno on failure. EINTR = our forwarded signal
-      -- arrived; loop and reap.
-      if ws:errno() == unix.EINTR then
-        -- continue
-      else
-        io.stderr:write("claude-sandbox: wait: " .. tostring(ws) .. "\n")
-        os.exit(1)
-      end
-    elseif pid == cmd_pid then
-      pcall(unix.kill, proxy_pid, unix.SIGTERM)
-      pcall(unix.wait, proxy_pid)
-      if unix.WIFEXITED(ws) then
-        os.exit(unix.WEXITSTATUS(ws))
-      elseif unix.WIFSIGNALED(ws) then
-        os.exit(128 + unix.WTERMSIG(ws))
-      else
-        os.exit(1)
-      end
-    elseif pid == proxy_pid then
+  -- Become PID-1 for the jail: forward SIGINT/SIGTERM/SIGHUP to the
+  -- child, reap zombies, propagate the child's exit status, and kill
+  -- the proxy if it dies first.
+  os.exit(proc.become_init(cmd_pid, {
+    sidecars = { proxy_pid },
+    on_sidecar_exit = function(_, _)
       io.stderr:write("claude-sandbox: proxy died unexpectedly\n")
-      pcall(unix.kill, cmd_pid, unix.SIGTERM)
-      pcall(unix.wait, cmd_pid)
-      os.exit(1)
-    end
-  end
+    end,
+  }))
 end
 
 main(arg)

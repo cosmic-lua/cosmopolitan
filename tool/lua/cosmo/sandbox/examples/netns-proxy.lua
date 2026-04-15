@@ -33,6 +33,7 @@
 local unix = require "unix"
 local cosmo = require "cosmo"
 local netns = require "cosmo.sandbox.netns"
+local proc  = require "cosmo.sandbox.proc"
 local proxy = require "cosmo.sandbox.proxy"
 
 local EXIT_OK         = 0
@@ -281,41 +282,14 @@ local function main(argv)
   unix.close(child_ns)
   unix.close(parent_ns)
 
-  local function forward(sig)
-    pcall(unix.kill, cmd_pid, sig)
-    pcall(unix.kill, proxy_pid, sig)
-  end
-  unix.sigaction(unix.SIGINT,  function() forward(unix.SIGINT)  end)
-  unix.sigaction(unix.SIGTERM, function() forward(unix.SIGTERM) end)
-  unix.sigaction(unix.SIGHUP,  function() forward(unix.SIGHUP)  end)
-
-  while true do
-    local pid, ws = unix.wait()
-    if not pid then
-      -- ws is a unix.Errno on failure. EINTR = signal arrived; loop.
-      if ws:errno() == unix.EINTR then
-        -- continue
-      else
-        io.stderr:write("netns-proxy: wait: " .. tostring(ws) .. "\n")
-        os.exit(EXIT_CHILD_FAIL)
-      end
-    elseif pid == cmd_pid then
-      pcall(unix.kill, proxy_pid, unix.SIGTERM)
-      pcall(unix.wait, proxy_pid)
-      if unix.WIFEXITED(ws) then
-        os.exit(unix.WEXITSTATUS(ws))
-      elseif unix.WIFSIGNALED(ws) then
-        os.exit(128 + unix.WTERMSIG(ws))
-      else
-        os.exit(EXIT_CHILD_FAIL)
-      end
-    elseif pid == proxy_pid then
+  -- Become PID-1 for the jail: forward interrupts to the command,
+  -- reap zombies, propagate exit status, clean up the proxy sidecar.
+  os.exit(proc.become_init(cmd_pid, {
+    sidecars = { proxy_pid },
+    on_sidecar_exit = function(_, _)
       io.stderr:write("netns-proxy: proxy exited unexpectedly\n")
-      pcall(unix.kill, cmd_pid, unix.SIGTERM)
-      pcall(unix.wait, cmd_pid)
-      os.exit(EXIT_PROXY)
-    end
-  end
+    end,
+  }))
 end
 
 main(arg)

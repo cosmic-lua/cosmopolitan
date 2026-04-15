@@ -1,28 +1,28 @@
--- cosmo.sandbox.proxy: an HTTP CONNECT + plain-HTTP allowlist proxy.
---
--- Designed for the netns-isolated sandbox use case: the proxy listens
--- inside a child network namespace (the only thing the sandboxed
--- process can reach) and dials upstream in a *different* namespace —
--- typically the parent's. Cross-namespace dialing is handled by setns()
--- in per-connection forks, so a slow upstream never blocks others and
--- there is no global namespace-state contention.
---
--- Features (v1):
---   - HTTP/1.1 CONNECT method (HTTPS tunnels — opaque, allowlist only)
---   - HTTP/1.1 GET/POST/HEAD/PUT/DELETE/PATCH forwarding with auth
---     header injection
---   - Allowlist with exact host:port, host (any port), and host:*
---     matching
---   - Per-host auth rules: bearer / basic / arbitrary header
---   - Configurable logging: level (quiet/info/debug), format
---     (text/json), destination (callable / file path / stderr)
---
--- Out of scope (v1): keep-alive reuse upstream, HTTP/2, MITM TLS
--- interception. Chunked-encoded request bodies are detected and
--- rejected with 411 Length Required.
---
--- Returns nil,unix.Errno on failure for non-fatal API; raises on
--- programmer errors (bad config schema).
+--- cosmo.sandbox.proxy: an HTTP CONNECT + plain-HTTP allowlist proxy.
+---
+--- Designed for the netns-isolated sandbox use case: the proxy listens
+--- inside a child network namespace (the only thing the sandboxed
+--- process can reach) and dials upstream in a *different* namespace —
+--- typically the parent's. Cross-namespace dialing is handled by setns()
+--- in per-connection forks, so a slow upstream never blocks others and
+--- there is no global namespace-state contention.
+---
+--- Features (v1):
+---   - HTTP/1.1 CONNECT method (HTTPS tunnels — opaque, allowlist only)
+---   - HTTP/1.1 GET/POST/HEAD/PUT/DELETE/PATCH forwarding with auth
+---     header injection
+---   - Allowlist with exact host:port, host (any port), and host:*
+---     matching
+---   - Per-host auth rules: bearer / basic / arbitrary header
+---   - Configurable logging: level (quiet/info/debug), format
+---     (text/json), destination (callable / file path / stderr)
+---
+--- Out of scope (v1): keep-alive reuse upstream, HTTP/2, MITM TLS
+--- interception. Chunked-encoded request bodies are detected and
+--- rejected with 411 Length Required.
+---
+--- Returns nil,unix.Errno on failure for non-fatal API; raises on
+--- programmer errors (bad config schema).
 
 local unix = require "unix"
 local cosmo = require "cosmo"
@@ -107,24 +107,49 @@ end
 M._parse_rule = parse_rule
 
 -- Build a fast lookup index from a {[key]=rule} table.
--- The result maps host -> {[port|"*"] = rule}.
+-- The result is a table with two shapes:
+--   idx.exact[host][port|"*"]  = rule   (exact-host matches)
+--   idx.suffix[i]              = {suffix = ".x", port = p|"*", rule = ...}
+--                                       (wildcard *.suffix matches)
+-- Suffixes are stored with a leading "." and matched via string.sub
+-- at the tail of the candidate host. The list is kept in insertion
+-- order; match() walks it and returns the first hit.
 local function build_index(allowed_hosts)
-  local idx = {}
+  local idx = {exact = {}, suffix = {}}
   for k, rule in pairs(allowed_hosts or {}) do
-    local h, p = parse_rule(k)
-    idx[h] = idx[h] or {}
-    idx[h][p or "*"] = rule
+    -- Detect "*.suffix" or "*.suffix:port" form.
+    local wild = k:match("^%*%.(.+)$")
+    if wild then
+      local h, p = parse_rule(wild)
+      idx.suffix[#idx.suffix + 1] = {
+        suffix = "." .. h, port = p or "*", rule = rule,
+      }
+    else
+      local h, p = parse_rule(k)
+      idx.exact[h] = idx.exact[h] or {}
+      idx.exact[h][p or "*"] = rule
+    end
   end
   return idx
 end
 M._build_index = build_index
 
 -- Look up a (host, port) pair. Returns the rule table on a hit, or nil.
+-- Tries exact-host match first, then walks suffix patterns.
 local function match(idx, host, port)
   host = host:lower()
-  local entry = idx[host]
-  if not entry then return nil end
-  return entry[port] or entry["*"]
+  local entry = idx.exact[host]
+  if entry then
+    local hit = entry[port] or entry["*"]
+    if hit then return hit end
+  end
+  for _, s in ipairs(idx.suffix) do
+    if host:sub(-#s.suffix) == s.suffix
+       and (s.port == "*" or s.port == port) then
+      return s.rule
+    end
+  end
+  return nil
 end
 M._match = match
 
@@ -238,18 +263,16 @@ end
 local function dial(host, port, upstream_ns_fd)
   if upstream_ns_fd then
     local ok, err = unix.setns(upstream_ns_fd, unix.CLONE_NEWNET)
-    if not ok then return nil, "setns(parent): " .. tostring(err) end
+    if not ok then return nil, err end
   end
   local ip, rerr = resolve_v4(host)
-  if not ip then
-    return nil, "resolve " .. host .. ": " .. tostring(rerr)
-  end
+  if not ip then return nil, rerr end
   local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
-  if not sk then return nil, "socket: " .. tostring(serr) end
+  if not sk then return nil, serr end
   local ok, cerr = unix.connect(sk, ip, port)
   if not ok then
     unix.close(sk)
-    return nil, "connect " .. host .. ":" .. port .. ": " .. tostring(cerr)
+    return nil, cerr
   end
   return sk
 end
@@ -548,23 +571,56 @@ end
 --------------------------------------------------------------------------------
 -- Public Proxy object
 
+--- Allowlist rule schema
+--- ----------------------
+---
+--- `opts.allowed_hosts` is a map from host-spec string to a rule table:
+---
+---     opts.allowed_hosts = {
+---       ["api.anthropic.com"]      = { methods = {"CONNECT"} },
+---       ["*.githubusercontent.com"] = true,  -- shorthand: any port, any method
+---       ["raw.githubusercontent.com:443"] = {
+---         methods = {"CONNECT"},
+---         auth    = {user = "u", pass = "p"},
+---       },
+---     }
+---
+--- Host-spec forms:
+---   host              any port on exact host
+---   host:port         exact host + exact port
+---   host:*            any port on exact host (explicit)
+---   *.suffix          any host ending in ".suffix", any port
+---   *.suffix:port     any host ending in ".suffix", exact port
+---
+--- Rule-table fields (all optional):
+---   methods           {string}    allowed HTTP methods (uppercase)
+---                                 For HTTPS (CONNECT-tunneled), use
+---                                 "CONNECT". nil = any method.
+---   auth              {user, pass} upstream basic-auth credentials
+---                                 injected as a Proxy-Authorization
+---                                 header when proxying.
+---
+--- The shorthand `true` means "any method, no auth injection". Rule
+--- tables are validated lazily; unknown fields are ignored (forward
+--- compatibility).
+
 local Proxy = {}
 Proxy.__index = Proxy
 
--- Create a new proxy. `opts` fields:
---
---   bind_ip          uint32 IPv4 (default cosmo.ParseIp("127.0.0.1"))
---   bind_port        uint16 (default 3128)
---   allowed_hosts    table {key = rule}
---   upstream_ns_fd   int (open fd to the netns to dial in; default
---                    nil means dial in the current namespace)
---   on_log           function(fields) — overrides default sink
---   log_level        "quiet"|"info"|"debug"  (default "info")
---   log_format       "text"|"json"           (default "text")
---   log_file         path                    (default stderr)
---   accept_backlog   int                     (default 32)
---
--- Returns the Proxy object.
+--- Create a new proxy. `opts` fields:
+---
+---   bind_ip          uint32 IPv4 (default cosmo.ParseIp("127.0.0.1"))
+---   bind_port        uint16 (default 3128; 0 = ephemeral)
+---   allowed_hosts    table {host_spec = rule} — see schema above
+---   upstream_ns_fd   int (open fd to the netns to dial in; default
+---                    nil means dial in the current namespace)
+---   on_log           function(fields) — overrides default sink
+---   log_level        "quiet"|"info"|"debug"  (default "info")
+---   log_format       "text"|"json"           (default "text")
+---   log_file         path                    (default stderr)
+---   accept_backlog   int                     (default 32)
+---
+--- Returns the Proxy object.
 function M.new(opts)
   opts = opts or {}
   local logger, lerr = make_logger(opts)
@@ -580,7 +636,7 @@ function M.new(opts)
   }, Proxy)
 end
 
--- Bind + listen. Returns the listening fd, or nil, unix.Errno.
+--- Bind + listen. Returns the listening fd, or nil, unix.Errno.
 function Proxy:listen()
   local fd, err = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
   if not fd then return nil, err end
@@ -599,20 +655,20 @@ function Proxy:listen()
   return fd
 end
 
--- Accept one connection. Returns the client fd | nil, unix.Errno.
+--- Accept one connection. Returns the client fd | nil, unix.Errno.
 function Proxy:accept()
   return unix.accept(self._listen_fd)
 end
 
--- Handle one accepted fd in this process. Does NOT fork.
+--- Handle one accepted fd in this process. Does NOT fork.
 function Proxy:handle(client_fd)
   return handle(self, client_fd)
 end
 
--- Run the accept loop forever, forking per connection. Reaps zombies
--- non-blockingly between accepts. Breaks out of the loop on EBADF
--- (listening fd was closed externally) or other persistent errors;
--- the caller is responsible for SIGTERM/SIGINT handling.
+--- Run the accept loop forever, forking per connection. Reaps zombies
+--- non-blockingly between accepts. Breaks out of the loop on EBADF
+--- (listening fd was closed externally) or other persistent errors;
+--- the caller is responsible for SIGTERM/SIGINT handling.
 function Proxy:serve_forever()
   if not self._listen_fd then assert(self:listen()) end
   local function reap()
@@ -647,6 +703,73 @@ function Proxy:serve_forever()
       end
     end
   end
+end
+
+--------------------------------------------------------------------------------
+-- Convenience: fork + listen + serve in one call.
+
+--- proxy.start(opts) → {pid, port, stop()} | nil, unix.Errno
+---
+--- Fork a child process, bring the proxy up in it, and return a
+--- handle the caller can use to address the listening proxy:
+---
+---   p.pid     child pid (for waitpid / signal forwarding)
+---   p.port    the port the proxy is listening on (resolved even if
+---             opts.bind_port was 0)
+---   p:stop()  send SIGTERM and waitpid(p.pid)
+---
+--- The parent blocks until the child has bound-and-listened, so
+--- p.port is valid immediately. The port is communicated back via a
+--- pipe so the parent doesn't have to poll.
+---
+--- This is the common case: spawn a proxy alongside a jailed
+--- workload. Callers that need finer control (custom dispatch,
+--- non-forking mode, shared listener) should use proxy.new() +
+--- listen() + serve_forever() directly.
+function M.start(opts)
+  local r, w, perr = unix.pipe()
+  if not r then return nil, w or perr end
+  local pid, ferr = unix.fork()
+  if not pid then
+    unix.close(r); unix.close(w)
+    return nil, ferr
+  end
+  if pid == 0 then
+    -- Child: listen, report the bound port to the parent, then serve.
+    unix.close(r)
+    local p = M.new(opts)
+    local fd, lerr = p:listen()
+    if not fd then
+      unix.write(w, string.pack("<i4", -1))
+      unix.close(w)
+      io.stderr:write("proxy.start: listen: " .. tostring(lerr) .. "\n")
+      unix.exit(1)
+    end
+    unix.write(w, string.pack("<i4", p._bind_port))
+    unix.close(w)
+    p:serve_forever()
+    unix.exit(0)
+  end
+  -- Parent: read the bound port, then return the handle.
+  unix.close(w)
+  local packed = unix.read(r, 4)
+  unix.close(r)
+  if not packed or #packed < 4 then
+    pcall(unix.kill, pid, unix.SIGTERM)
+    pcall(unix.wait, pid)
+    return nil, unix.EIO
+  end
+  local port = string.unpack("<i4", packed)
+  if port < 0 then
+    pcall(unix.wait, pid)
+    return nil, unix.EIO
+  end
+  local handle = {pid = pid, port = port}
+  function handle:stop()
+    pcall(unix.kill, self.pid, unix.SIGTERM)
+    pcall(unix.wait, self.pid)
+  end
+  return handle
 end
 
 return M

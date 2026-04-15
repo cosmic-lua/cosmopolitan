@@ -42,6 +42,43 @@ do
           "evil.com should not match")
 end
 
+-- match: suffix wildcards (*.domain.com / *.domain.com:port).
+do
+  local idx = proxy._build_index{
+    ["*.githubusercontent.com"]          = true,
+    ["*.anthropic.com:443"]              = {type = "bearer", token = "x"},
+    ["api.anthropic.com:443"]            = {type = "bearer", token = "exact"},
+  }
+  -- *.githubusercontent.com matches any subdomain on any port.
+  assertf(proxy._match(idx, "raw.githubusercontent.com", 443),
+          "*.x.com should match raw.x.com:443")
+  assertf(proxy._match(idx, "objects.githubusercontent.com", 80),
+          "*.x.com should match any port")
+  -- Tail-matching must be anchored at a dot — "evilxcom" must miss
+  -- *.x.com, and "githubusercontent.com" (the apex) must miss the
+  -- subdomain pattern.
+  assertf(not proxy._match(idx, "githubusercontent.com", 443),
+          "apex should not match *.suffix")
+  assertf(not proxy._match(idx, "evil-githubusercontent.com", 443),
+          "substring should not match *.suffix")
+  -- *.anthropic.com:443 is port-restricted.
+  assertf(proxy._match(idx, "statsig.anthropic.com", 443),
+          "*.x.com:443 should match on port 443")
+  assertf(not proxy._match(idx, "statsig.anthropic.com", 80),
+          "*.x.com:443 should not match on port 80")
+  -- Exact match takes precedence over suffix match.
+  local hit = proxy._match(idx, "api.anthropic.com", 443)
+  assertf(hit and hit.token == "exact",
+          "exact match should win over suffix")
+end
+
+-- Rule-table shorthand: `true` means "any method, no auth injection".
+do
+  local idx = proxy._build_index{["allow.example"] = true}
+  local hit = proxy._match(idx, "allow.example", 443)
+  assertf(hit == true, "shorthand rule should be passed through as-is")
+end
+
 -- auth_header for each rule type.
 do
   local n, v = proxy._auth_header{type = "bearer", token = "ghp_x"}
