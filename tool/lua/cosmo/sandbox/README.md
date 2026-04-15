@@ -67,20 +67,31 @@ Requires Linux + root (or `CAP_SYS_ADMIN` + `CAP_NET_ADMIN`).
 
 ## Library layout
 
-| Module                        | Purpose                                         |
-| ----------------------------- | ----------------------------------------------- |
-| `unix.*` (cosmo)              | Stable syscall wrappers (`unshare`, `setns`, `ioctl`, etc.) |
-| `cosmo.sandbox`               | Library entry point + `is_supported()` probe    |
-| `cosmo.sandbox.netns`         | Net namespace helpers (loopback, namespace fds) |
-| `cosmo.sandbox.proxy`         | HTTP CONNECT + plain-HTTP allowlist proxy       |
-| `cosmo.sandbox.examples.*`    | Worked end-to-end programs                      |
+| Module                  | Purpose                                                  |
+| ----------------------- | -------------------------------------------------------- |
+| `unix.*` (cosmo)        | Stable syscall wrappers (`unshare`, `setns`, `ioctl`, …) |
+| `cosmo.sandbox`         | Library entry point + `is_supported()` probe             |
+| `cosmo.sandbox.netns`   | Network-namespace helpers (loopback, namespace fds)      |
+| `cosmo.sandbox.fs`      | Filesystem helpers (bind, tmpfs, pivot_root)             |
+| `cosmo.sandbox.proxy`   | HTTP CONNECT + plain-HTTP allowlist proxy                |
+
+End-to-end worked examples live in [`examples/`](examples/) — they
+are scripts on disk you copy and adapt, not require()-able modules.
+
+## Return-value convention
+
+All `unix.*` syscall wrappers and all `cosmo.sandbox.*` helpers
+return `nil, unix.Errno` on failure. `unix.Errno` is a userdata with
+`:errno()` for the integer, `:name()` for the symbolic name (e.g.
+`"EBADF"`), `:doc()` for a short description, and a `__tostring`
+metamethod for nice error messages.
+
+Linux-only operations return `ENOSYS` on non-Linux hosts so callers
+can degrade cleanly via `if not ok and err:errno() == unix.ENOSYS`.
 
 ## API reference
 
 ### New `unix.*` syscall bindings
-
-All are Linux-only; on other hosts they return
-`nil, "ENOSYS", unix.ENOSYS`.
 
 #### `unix.unshare(flags) → true | nil, unix.Errno`
 
@@ -253,24 +264,49 @@ sandbox.is_supported() -- true on Linux with the bindings present
 
 ### `cosmo.sandbox.netns`
 
-All helpers return `nil, errstr, errno` on failure.
-
-| Function                            | Returns                |
-| ----------------------------------- | ---------------------- |
-| `netns.build_ifreq(name, flags)`    | `string` (40 bytes)    |
-| `netns.parse_ifreq_flags(ifr)`      | `int`                  |
-| `netns.control_socket()`            | `fd`                   |
-| `netns.get_flags(name)`             | `int`                  |
-| `netns.set_flags(name, flags)`      | `true`                 |
-| `netns.bring_up(name)`              | `true`                 |
-| `netns.bring_down(name)`            | `true`                 |
-| `netns.open([pid])`                 | `fd` (defaults to self)|
+| Function                            | Returns (success / failure)             |
+| ----------------------------------- | --------------------------------------- |
+| `netns.build_ifreq(name, flags)`    | `string` (40 bytes); raises on bad arg  |
+| `netns.parse_ifreq_flags(ifr)`      | `int`                                   |
+| `netns.control_socket()`            | `fd` / `nil, unix.Errno`                |
+| `netns.get_flags(name)`             | `int` / `nil, unix.Errno`               |
+| `netns.set_flags(name, flags)`      | `true` / `nil, unix.Errno`              |
+| `netns.bring_up(name)`              | `true` / `nil, unix.Errno`              |
+| `netns.bring_down(name)`            | `true` / `nil, unix.Errno`              |
+| `netns.open([pid])`                 | `fd` / `nil, unix.Errno` (default self) |
 
 ```lua
 local netns = require "cosmo.sandbox.netns"
 local parent_ns = assert(netns.open())  -- /proc/self/ns/net
 -- ... fork+unshare ...
 assert(netns.bring_up("lo"))
+```
+
+### `cosmo.sandbox.fs`
+
+| Function                              | Returns (success / failure)         |
+| ------------------------------------- | ----------------------------------- |
+| `fs.exists(path)`                     | `boolean`                           |
+| `fs.bind(src, dst[, opts])`           | `true` / `nil, err`                 |
+| `fs.bind_ro(src, dst)`                | `true` / `nil, err`                 |
+| `fs.tmpfs(dst, size_or_data)`         | `true` / `nil, err`                 |
+| `fs.private_root()`                   | `true` / `nil, unix.Errno`          |
+| `fs.pivot_to(jail)`                   | `true` / `nil, unix.Errno`          |
+| `fs.MODE_DIR` / `MODE_DIR_PRIV`       | int constants (octal modes)         |
+| `fs.MODE_FILE` / `MODE_TMP_STICKY`    | int constants (octal modes)         |
+
+`bind` opts: `{ro=true}` for a read-only remount; `{rec=false}` to
+omit `MS_REC`. `tmpfs` accepts either a size string (`"128m"`) or a
+full mount-data string (`"size=128m,mode=755"`).
+
+```lua
+local fs = require "cosmo.sandbox.fs"
+assert(unix.unshare(unix.CLONE_NEWNS))
+assert(fs.private_root())
+assert(fs.tmpfs("/tmp/jail", "128m"))
+assert(fs.bind_ro("/usr", "/tmp/jail/usr"))
+assert(fs.tmpfs("/tmp/jail/tmp", "size=64m,mode=1777"))
+assert(fs.pivot_to("/tmp/jail"))
 ```
 
 ### `cosmo.sandbox.proxy`

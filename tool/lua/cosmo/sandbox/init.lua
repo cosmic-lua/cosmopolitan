@@ -1,31 +1,35 @@
 -- cosmo.sandbox: Linux process-isolation primitives.
 --
--- This module re-exports thin wrappers around the Cosmopolitan `unix.*`
--- isolation syscalls and will progressively surface higher-level helpers
--- (e.g. `cosmo.sandbox.netns`, `cosmo.sandbox.proxy`) as they land.
+-- This module is the entry point for the Cosmopolitan Lua sandbox
+-- library. The pieces it exposes are thin wrappers around `unix.*`
+-- syscalls plus higher-level helpers:
 --
--- The whole library is Linux-only; calling any primitive on a non-Linux
--- host returns nil,"ENOSYS",unix.ENOSYS so callers can degrade cleanly.
+--     cosmo.sandbox.netns   network namespace helpers
+--     cosmo.sandbox.fs      filesystem (bind/tmpfs/pivot) helpers
+--     cosmo.sandbox.proxy   HTTP CONNECT + plain-HTTP allowlist proxy
 --
--- Status: unix.* wrappers are the stable API tier; everything under
--- cosmo.sandbox.* is experimental and may change shape between
--- cosmopolitan releases.
+-- All helpers and their underlying `unix.*` syscalls return
+-- `nil, unix.Errno` on failure (matching the rest of cosmo's lunix
+-- conventions). Callers can `:errno()` the Errno object for the
+-- integer code or `tostring()` for a human-readable string.
+--
+-- The whole library is Linux-only. On non-Linux hosts the syscalls
+-- return ENOSYS and `is_supported()` returns false.
+--
+-- Status: `unix.*` wrappers are the stable API tier; everything under
+-- `cosmo.sandbox.*` is experimental and may evolve based on usage.
 
 local unix = require "unix"
+local cosmo = require "cosmo"
 
 local M = {
-  _VERSION = "0.0.1",
+  _VERSION = "0.0.2",
 }
 
--- True when the primitives in this module can do real work.
+-- True when the primitives in this module can do real work — i.e.
+-- we're running on Linux and the namespace bindings are linked in.
 function M.is_supported()
-  local u = unix.uname and unix.uname() or nil
-  if u and u.sysname and u.sysname ~= "Linux" then
-    return false
-  end
-  -- Presence of CLONE_NEWNET is our compile-time indicator that the
-  -- namespace bindings are linked in.
-  return unix.CLONE_NEWNET ~= nil
+  return cosmo.GetHostOs() == "LINUX" and unix.CLONE_NEWNET ~= nil
 end
 
 return M

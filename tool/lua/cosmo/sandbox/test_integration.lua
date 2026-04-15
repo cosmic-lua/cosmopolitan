@@ -27,11 +27,8 @@ local function assertf(cond, fmt, ...)
 end
 
 -- Precondition: running on Linux with CLONE_NEWNET available.
-do
-  local u = unix.uname and unix.uname() or nil
-  if u and u.sysname and u.sysname ~= "Linux" then
-    skip("non-Linux host (%s)", u.sysname)
-  end
+if cosmo.GetHostOs() ~= "LINUX" then
+  skip("non-Linux host (%s)", cosmo.GetHostOs())
 end
 
 -- Preflight: try to open /proc/self/ns/net. If the fork+unshare path
@@ -372,11 +369,6 @@ local function exercise(proxy_ns_fd, method, target, opts)
   return buf
 end
 
-if can_set_flags then
-  log("note: skipping proxy live tests "
-      .. "(kernel allows CAP_NET_ADMIN — full proxy tests TODO)")
-end
-
 -- The proxy live tests require us to (a) listen inside a child netns,
 -- and (b) reach that listener from another process. Easiest cross-
 -- namespace plumbing is via /proc/<pid>/ns/net. We can do this without
@@ -395,13 +387,8 @@ do
     log_level = "quiet",
     allowed_hosts = {
       ["127.0.0.1:" .. server_port] = {},
-      ["127.0.0.1:" .. server_port .. "/auth"] = nil,
     },
   }, parent_ns)
-  -- Add a header-injecting rule for plain HTTP under the same host.
-  -- (The match is per host:port not per path, so a second rule with
-  -- different headers doesn't make sense — instead we'll exercise the
-  -- single rule with both CONNECT and HTTP.)
 
   -- Get an fd on the proxy's netns so we can run client requests there.
   local proxy_ns = assert(netns.open(proxy_pid))

@@ -86,6 +86,12 @@
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/mount.h"
 #include "libc/sysv/consts/pr.h"
+/* sysv/consts/unmount.h shares its include guard with sysv/consts/mount.h
+   in upstream cosmo, so we can't include it. Declare what we need: */
+extern const int MNT_FORCE;
+extern const int MNT_DETACH;
+extern const int MNT_EXPIRE;
+extern const int UMOUNT_NOFOLLOW;
 #include "libc/sysv/consts/msg.h"
 #include "libc/sysv/consts/nr.h"
 #include "libc/sysv/consts/o.h"
@@ -4459,6 +4465,12 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "MS_RELATIME", MS_RELATIME);
   LuaSetIntField(L, "MS_STRICTATIME", MS_STRICTATIME);
   LuaSetIntField(L, "MS_LAZYTIME", MS_LAZYTIME);
+
+  // unmount() flags (Linux umount2 flags + BSD MNT_*)
+  LuaSetIntField(L, "MNT_FORCE", MNT_FORCE);
+  LuaSetIntField(L, "MNT_DETACH", MNT_DETACH);
+  LuaSetIntField(L, "MNT_EXPIRE", MNT_EXPIRE);
+  LuaSetIntField(L, "UMOUNT_NOFOLLOW", UMOUNT_NOFOLLOW);
 
   // capget()/capset() capability indices (CAP_*)
   LuaSetIntField(L, "CAP_CHOWN", CAP_CHOWN);

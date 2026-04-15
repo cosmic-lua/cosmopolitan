@@ -27,6 +27,8 @@
 -- Linux-only. Requires CAP_SYS_ADMIN (root).
 
 local unix = require "unix"
+local cosmo = require "cosmo"
+local fs = require "cosmo.sandbox.fs"
 
 local function die(fmt, ...)
   io.stderr:write("fs-jail: " .. string.format(fmt, ...) .. "\n")
@@ -34,7 +36,7 @@ local function die(fmt, ...)
 end
 
 local function usage()
-  io.stderr:write([[
+  io.stderr:write([==[
 Usage: fs-jail [-bind PATH]... -- COMMAND ARGS...
 
 Runs COMMAND in a private mount namespace whose root is a fresh
@@ -44,7 +46,7 @@ visible inside the jail. /tmp is a fresh writable tmpfs.
 
 NO_NEW_PRIVS is set in the child so dropped privileges cannot be
 regained via setuid binaries. Linux-only; requires CAP_SYS_ADMIN.
-]])
+]==])
 end
 
 local function parse_args(argv)
@@ -80,40 +82,9 @@ local DEFAULT_BINDS = {
   "/etc/resolv.conf",  -- needed for DNS-using tools
 }
 
-local function exists(path)
-  local st = unix.stat(path)
-  return st ~= nil
-end
-
--- Bind-mount `src` onto `dst` (creating dst as a file or directory
--- as needed), then remount as read-only. Idempotent.
-local function bind_ro(src, dst)
-  local st = unix.stat(src)
-  if not st then return false, "source missing: " .. src end
-  -- Create the mount point. Linux requires the destination to exist
-  -- and be a file for file binds, a directory for directory binds.
-  if (st:mode() & 0xf000) == 0x4000 then  -- directory
-    unix.makedirs(dst, 0x755)
-  else
-    unix.makedirs(string.match(dst, "(.+)/[^/]+$") or "/", 0x755)
-    local fd = unix.open(dst, unix.O_WRONLY | unix.O_CREAT, 0x644)
-    if fd then unix.close(fd) end
-  end
-  local ok, err = unix.mount(src, dst, nil,
-                             unix.MS_BIND | unix.MS_REC, nil)
-  if not ok then return false, "bind " .. src .. ": " .. tostring(err) end
-  -- Remount read-only.
-  ok, err = unix.mount("none", dst, nil,
-                       unix.MS_REMOUNT | unix.MS_BIND |
-                       unix.MS_RDONLY | unix.MS_REC, nil)
-  if not ok then return false, "ro-remount " .. dst .. ": " .. tostring(err) end
-  return true
-end
-
 local function main(argv)
-  local u = unix.uname and unix.uname() or nil
-  if u and u.sysname and u.sysname ~= "Linux" then
-    die("Linux only (this is %s)", u.sysname)
+  if cosmo.GetHostOs() ~= "LINUX" then
+    die("Linux only (this is %s)", cosmo.GetHostOs())
   end
 
   local extra_binds, cmd = parse_args(argv)
@@ -121,13 +92,13 @@ local function main(argv)
   -- Build the full list of paths to bind, deduplicated.
   local binds, seen = {}, {}
   for _, p in ipairs(DEFAULT_BINDS) do
-    if not seen[p] and exists(p) then
+    if not seen[p] and fs.exists(p) then
       seen[p] = true; binds[#binds + 1] = p
     end
   end
   for _, p in ipairs(extra_binds) do
     if not seen[p] then
-      if not exists(p) then die("-bind %s does not exist", p) end
+      if not fs.exists(p) then die("-bind %s does not exist", p) end
       seen[p] = true; binds[#binds + 1] = p
     end
   end
@@ -136,44 +107,30 @@ local function main(argv)
   -- back to the parent.
   local ok, err = unix.unshare(unix.CLONE_NEWNS)
   if not ok then die("unshare(CLONE_NEWNS): %s", tostring(err)) end
-  -- Mark the existing root as PRIVATE so subsequent mounts under it
-  -- don't propagate to the host. (Many distros default to "shared".)
-  ok, err = unix.mount("none", "/", nil,
-                       unix.MS_REC | unix.MS_PRIVATE, nil)
+  ok, err = fs.private_root()
   if not ok then die("mount-private /: %s", tostring(err)) end
 
   -- Step 2: build the jail under a fresh tmpfs.
   local jail = "/tmp/fs-jail-" .. unix.getpid()
-  unix.makedirs(jail, 0x700)
-  ok, err = unix.mount("tmpfs", jail, "tmpfs", 0, "size=64m")
-  if not ok then die("tmpfs at %s: %s", jail, tostring(err)) end
+  ok, err = fs.tmpfs(jail, "64m")
+  if not ok then die("%s", err) end
 
   for _, p in ipairs(binds) do
-    local ok, err = bind_ro(p, jail .. p)
+    local ok, err = fs.bind_ro(p, jail .. p)
     if not ok then die("%s", err) end
   end
 
-  -- Writable /tmp inside the jail.
-  unix.makedirs(jail .. "/tmp", 0x755)
-  ok, err = unix.mount("tmpfs", jail .. "/tmp", "tmpfs", 0, "size=16m")
-  if not ok then die("tmpfs /tmp: %s", tostring(err)) end
+  -- Writable /tmp inside the jail (sticky-bit, world-writable).
+  ok, err = fs.tmpfs(jail .. "/tmp", "size=16m,mode=1777")
+  if not ok then die("%s", err) end
 
-  -- Step 3: pivot_root into the jail. Save the old root under jail/.old.
-  local old = jail .. "/.old"
-  unix.makedirs(old, 0x700)
-  ok, err = unix.chdir(jail)
-  if not ok then die("chdir %s: %s", jail, tostring(err)) end
-  ok, err = unix.pivot_root(".", ".old")
-  if not ok then die("pivot_root: %s", tostring(err)) end
-  ok, err = unix.chdir("/")
-  if not ok then die("chdir /: %s", tostring(err)) end
-  -- Detach the old root and remove the empty mount point.
-  ok, err = unix.unmount("/.old", 2)  -- MNT_DETACH = 2 on Linux
-  if not ok then die("unmount /.old: %s", tostring(err)) end
-  unix.rmdir("/.old")
+  -- Step 3: pivot_root into the jail.
+  ok, err = fs.pivot_to(jail)
+  if not ok then die("pivot_to(%s): %s", jail, tostring(err)) end
 
   -- Step 4: harden. NO_NEW_PRIVS prevents setuid escalation.
-  unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1)
+  ok, err = unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1)
+  if not ok then die("prctl(NO_NEW_PRIVS): %s", tostring(err)) end
 
   -- Step 5: exec the user's command.
   local _, eerr = unix.execvp(cmd[1], cmd)

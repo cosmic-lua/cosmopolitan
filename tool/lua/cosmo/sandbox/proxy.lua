@@ -15,18 +15,19 @@
 --     matching
 --   - Per-host auth rules: bearer / basic / arbitrary header
 --   - Configurable logging: level (quiet/info/debug), format
---     (text/json), destination (callable / fd / file path)
+--     (text/json), destination (callable / file path / stderr)
 --
--- Out of scope (v1): keep-alive reuse upstream, HTTP/2, response
--- streaming with chunked trailers, MITM TLS interception.
+-- Out of scope (v1): keep-alive reuse upstream, HTTP/2, MITM TLS
+-- interception. Chunked-encoded request bodies are detected and
+-- rejected with 411 Length Required.
 --
--- Returns nil,errstr,errno on failure for non-fatal API; raises on
+-- Returns nil,unix.Errno on failure for non-fatal API; raises on
 -- programmer errors (bad config schema).
 
 local unix = require "unix"
 local cosmo = require "cosmo"
 
-local M = {_VERSION = "0.0.1"}
+local M = {_VERSION = "0.0.2"}
 
 --------------------------------------------------------------------------------
 -- Logging
@@ -43,6 +44,7 @@ local function make_logger(opts)
   local format = opts.log_format or "text"
   local sink = opts.on_log
   local out
+  -- Only set up an output stream when no callable sink was supplied.
   if not sink then
     if type(opts.log_file) == "string" then
       local f, err = io.open(opts.log_file, "a")
@@ -85,7 +87,6 @@ local function make_logger(opts)
     info  = function(ev, f) if level >= 1 then emit(ev, f or {}) end end,
     debug = function(ev, f) if level >= 2 then emit(ev, f or {}) end end,
     warn  = function(ev, f) if level >= 1 then emit(ev, f or {}) end end,
-    deny  = function(ev, f) if level >= 1 then emit(ev, f or {}) end end,
   }
 end
 
@@ -94,7 +95,6 @@ end
 
 -- Normalize a rule key into ("host", port_or_nil) where port is nil if any.
 local function parse_rule(key)
-  -- "host:port", "host:*", or "host"
   local h, p = key:match("^(.-):(.-)$")
   if not h then
     return key:lower(), nil
@@ -104,6 +104,7 @@ local function parse_rule(key)
   end
   return h:lower(), tonumber(p)
 end
+M._parse_rule = parse_rule
 
 -- Build a fast lookup index from a {[key]=rule} table.
 -- The result maps host -> {[port|"*"] = rule}.
@@ -116,17 +117,15 @@ local function build_index(allowed_hosts)
   end
   return idx
 end
+M._build_index = build_index
 
--- Look up a (host, port) pair. Port is the integer port for HTTPS
--- (CONNECT) or HTTP. Returns the rule table on a hit, or nil.
+-- Look up a (host, port) pair. Returns the rule table on a hit, or nil.
 local function match(idx, host, port)
   host = host:lower()
   local entry = idx[host]
   if not entry then return nil end
   return entry[port] or entry["*"]
 end
-M._parse_rule = parse_rule
-M._build_index = build_index
 M._match = match
 
 --------------------------------------------------------------------------------
@@ -181,35 +180,37 @@ local function send_all(fd, data)
 end
 M._send_all = send_all
 
+-- Helper: shutdown one direction, mark side closed, drop from poll set.
+local function close_side(fds, fd, peer, sides, which)
+  pcall(unix.shutdown, peer, unix.SHUT_WR)
+  fds[fd] = nil
+  sides[which] = false
+end
+
 -- Bidirectional byte pump between two TCP fds. Returns when both
 -- sides hit EOF or one side errors. Uses unix.poll so the work
 -- happens in a single process. shutdown(SHUT_WR) is issued in the
 -- appropriate direction so the peer sees a clean half-close.
 local function pump(a, b)
   local fds = {[a] = unix.POLLIN, [b] = unix.POLLIN}
-  local a_open, b_open = true, true
-  while a_open or b_open do
+  local sides = {a = true, b = true}
+  while sides.a or sides.b do
     local ready = unix.poll(fds)
     if not ready then return end
     for fd, ev in pairs(ready) do
-      local hup = (ev & (unix.POLLHUP | unix.POLLERR | unix.POLLNVAL)) ~= 0
+      local which = (fd == a) and "a" or "b"
+      local peer = (fd == a) and b or a
       local readable = (ev & unix.POLLIN) ~= 0
+      local hup = (ev & (unix.POLLHUP | unix.POLLERR | unix.POLLNVAL)) ~= 0
       if readable then
         local chunk = unix.recv(fd, 16384)
         if not chunk or chunk == "" then
-          if fd == a then a_open = false else b_open = false end
-          local peer = (fd == a) and b or a
-          pcall(unix.shutdown, peer, unix.SHUT_WR)
-          fds[fd] = nil
+          close_side(fds, fd, peer, sides, which)
         else
-          local peer = (fd == a) and b or a
           if not send_all(peer, chunk) then return end
         end
       elseif hup then
-        if fd == a then a_open = false else b_open = false end
-        local peer = (fd == a) and b or a
-        pcall(unix.shutdown, peer, unix.SHUT_WR)
-        fds[fd] = nil
+        close_side(fds, fd, peer, sides, which)
       end
     end
   end
@@ -223,8 +224,8 @@ M._pump = pump
 -- cosmo.ResolveIp which goes through the system resolver in the
 -- *current* netns (so call this AFTER setns() to the upstream netns).
 --
--- Note: cosmo.ParseIp returns -1 (not nil) when the string isn't a
--- literal IP, so we explicitly fall back to ResolveIp on -1.
+-- cosmo.ParseIp returns -1 (not nil) when the string isn't a literal
+-- IP, so we explicitly fall back to ResolveIp on -1.
 local function resolve_v4(host)
   local ip = cosmo.ParseIp(host)
   if ip and ip ~= -1 then return ip end
@@ -234,12 +235,6 @@ end
 -- Open a TCP connection to (host, port) in the namespace identified by
 -- `upstream_ns_fd`, falling back to the current namespace if the fd is
 -- nil. Returns fd | nil,err.
---
--- Resolution is done via cosmo.ResolveIp which calls into the system
--- resolver and reads /etc/resolv.conf. Some libc resolvers cache the
--- resolver state across the setns() call; ResolveIp re-reads
--- /etc/resolv.conf each time so that switching namespaces (and thus
--- DNS reachability) Just Works.
 local function dial(host, port, upstream_ns_fd)
   if upstream_ns_fd then
     local ok, err = unix.setns(upstream_ns_fd, unix.CLONE_NEWNET)
@@ -270,6 +265,10 @@ local DENY = "HTTP/1.1 403 Forbidden\r\n" ..
 local BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n" ..
                     "Content-Length: 0\r\n" ..
                     "Connection: close\r\n\r\n"
+
+local LENGTH_REQUIRED = "HTTP/1.1 411 Length Required\r\n" ..
+                        "Content-Length: 0\r\n" ..
+                        "Connection: close\r\n\r\n"
 
 local UPSTREAM_FAIL = "HTTP/1.1 502 Bad Gateway\r\n" ..
                       "Content-Length: 0\r\n" ..
@@ -309,53 +308,79 @@ local function parse_absolute_uri(t)
 end
 M._parse_absolute_uri = parse_absolute_uri
 
--- Iterate over header lines in a header block (does not include the
--- request line). Yields name, value with the name lowercased.
-local function each_header(block)
-  local lines = {}
+-- Parse a header block (everything after the request line, up to the
+-- blank \r\n) into a list of {orig_name, lower_name, value} triples.
+-- Cheaper than re-scanning the block multiple times.
+local function parse_headers(block)
+  local out = {}
+  -- Skip the request line, then iterate header lines.
+  local skip = true
   for line in block:gmatch("([^\r\n]+)\r\n") do
-    lines[#lines + 1] = line
-  end
-  table.remove(lines, 1)  -- drop the request line
-  return coroutine.wrap(function()
-    for _, line in ipairs(lines) do
+    if skip then
+      skip = false
+    else
       local n, v = line:match("^([^:]+):%s*(.*)$")
-      if n then coroutine.yield(n:lower(), v, n) end
+      if n then out[#out + 1] = {n, n:lower(), v} end
     end
-  end)
+  end
+  return out
 end
-M._each_header = each_header
+M._parse_headers = parse_headers
+
+-- Find the first header value (case-insensitive). Returns nil if absent.
+local function header_get(headers, lower_name)
+  for _, h in ipairs(headers) do
+    if h[2] == lower_name then return h[3] end
+  end
+  return nil
+end
+M._header_get = header_get
+
+-- Parse Content-Length out of a parsed header list (or a raw block,
+-- for backward compat / convenience). Returns 0 if absent.
+local function content_length(headers)
+  if type(headers) == "string" then headers = parse_headers(headers) end
+  local v = header_get(headers, "content-length")
+  return v and tonumber(v) or 0
+end
+M._content_length = content_length
+
+-- Hop-by-hop headers per RFC 7230 §6.1, plus content-length (which we
+-- always reissue ourselves to avoid duplicates) and host (which we
+-- rewrite). transfer-encoding triggers a 411 path before we get here.
+local HOP_BY_HOP = {
+  ["connection"] = true,
+  ["proxy-connection"] = true,
+  ["keep-alive"] = true,
+  ["te"] = true,
+  ["trailer"] = true,
+  ["transfer-encoding"] = true,
+  ["upgrade"] = true,
+  ["content-length"] = true,
+  ["host"] = true,
+}
 
 -- Construct the forwarded HTTP request: method + origin-form target +
 -- HTTP/1.1, with our injected auth header (replacing any existing one
--- of the same name) and Connection: close. Strips proxy-only headers.
-local function rebuild_request(method, path, headers, body, inject_name, inject_value, host_hdr)
-  local hop_by_hop = {
-    ["connection"] = true,
-    ["proxy-connection"] = true,
-    ["keep-alive"] = true,
-    ["te"] = true,
-    ["trailer"] = true,
-    ["transfer-encoding"] = true,
-    ["upgrade"] = true,
-  }
+-- of the same name), Host rewritten to the upstream target, and
+-- Connection: close. Strips proxy-only headers.
+local function rebuild_request(method, path, headers, body,
+                               inject_name, inject_value, host_hdr)
+  -- `headers` may be either a parsed list (from parse_headers) or a
+  -- raw block — accept both for backward compat.
+  if type(headers) == "string" then headers = parse_headers(headers) end
   local injected_lower = inject_name and inject_name:lower() or nil
   local out = {string.format("%s %s HTTP/1.1\r\n", method, path)}
-  local saw_host = false
-  for lname, value, oname in each_header(headers) do
-    if hop_by_hop[lname] then
+  out[#out + 1] = "Host: " .. host_hdr .. "\r\n"
+  for _, h in ipairs(headers) do
+    local oname, lname, value = h[1], h[2], h[3]
+    if HOP_BY_HOP[lname] then
       -- skip
     elseif injected_lower and lname == injected_lower then
       -- replaced below
-    elseif lname == "host" then
-      saw_host = true
-      out[#out + 1] = oname .. ": " .. host_hdr .. "\r\n"
     else
       out[#out + 1] = oname .. ": " .. value .. "\r\n"
     end
-  end
-  if not saw_host then
-    out[#out + 1] = "Host: " .. host_hdr .. "\r\n"
   end
   if inject_name then
     out[#out + 1] = inject_name .. ": " .. inject_value .. "\r\n"
@@ -363,6 +388,8 @@ local function rebuild_request(method, path, headers, body, inject_name, inject_
   out[#out + 1] = "Connection: close\r\n"
   if body and #body > 0 then
     out[#out + 1] = "Content-Length: " .. #body .. "\r\n"
+  else
+    out[#out + 1] = "Content-Length: 0\r\n"
   end
   out[#out + 1] = "\r\n"
   if body then out[#out + 1] = body end
@@ -370,17 +397,8 @@ local function rebuild_request(method, path, headers, body, inject_name, inject_
 end
 M._rebuild_request = rebuild_request
 
--- Parse Content-Length out of a header block. Returns 0 if absent.
-local function content_length(headers)
-  for n, v in each_header(headers) do
-    if n == "content-length" then return tonumber(v) or 0 end
-  end
-  return 0
-end
-M._content_length = content_length
-
 -- Read exactly `n` bytes from `fd`, given an optional already-buffered
--- prefix. Returns the body string.
+-- prefix. Returns the body string, plus any leftover from `prefix`.
 local function read_body(fd, n, prefix)
   local buf = prefix or ""
   while #buf < n do
@@ -430,7 +448,7 @@ local function handle(self, client_fd)
     end
     local rule = match(self._index, host, port)
     if not rule then
-      logger.deny("deny", {method = "CONNECT", host = host, port = port})
+      logger.warn("deny", {method = "CONNECT", host = host, port = port})
       send_all(client_fd, DENY)
       unix.close(client_fd)
       return
@@ -468,16 +486,26 @@ local function handle(self, client_fd)
     unix.close(client_fd)
     return
   end
+  local parsed = parse_headers(hdr)
+  -- Reject chunked-encoded request bodies — we don't dechunk in v1.
+  local te = header_get(parsed, "transfer-encoding")
+  if te and te:lower():find("chunked", 1, true) then
+    logger.warn("chunked_unsupported",
+                {method = method, host = host, path = path})
+    send_all(client_fd, LENGTH_REQUIRED)
+    unix.close(client_fd)
+    return
+  end
   local rule = match(self._index, host, port)
   if not rule then
-    logger.deny("deny",
+    logger.warn("deny",
                 {method = method, host = host, port = port, path = path})
     send_all(client_fd, DENY)
     unix.close(client_fd)
     return
   end
-  -- Read the request body (Content-Length only; chunked not supported).
-  local clen = content_length(hdr)
+  -- Read the request body (Content-Length only).
+  local clen = content_length(parsed)
   local body
   if clen > 0 then
     local b, err = read_body(client_fd, clen, leftover)
@@ -502,17 +530,16 @@ local function handle(self, client_fd)
      (scheme == "https" and port ~= 443) then
     host_hdr = host .. ":" .. port
   end
-  local req = rebuild_request(method, path, hdr, body, injn, injv, host_hdr)
+  local req = rebuild_request(method, path, parsed, body, injn, injv, host_hdr)
   if not send_all(up, req) then
     unix.close(up); unix.close(client_fd); return
   end
   logger.info("allow", {method = method, host = host, port = port,
                         path = path,
                         injected = injn ~= nil and injn or false})
-  -- Stream the response back. We pump bidirectionally because some
-  -- servers may continue reading from the request body even though we
-  -- already forwarded it; the simple approach is to pump until EOF on
-  -- both sides.
+  -- Stream the response back. We pump bidirectionally for symmetry;
+  -- after the client's body is forwarded the cli→up direction quickly
+  -- EOFs.
   pump(client_fd, up)
   unix.close(up)
   unix.close(client_fd)
@@ -553,31 +580,26 @@ function M.new(opts)
   }, Proxy)
 end
 
--- Bind + listen. Returns the listening fd, or nil,err,errno.
+-- Bind + listen. Returns the listening fd, or nil, unix.Errno.
 function Proxy:listen()
   local fd, err = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
-  if not fd then return nil, tostring(err), err and err:errno() end
+  if not fd then return nil, err end
   unix.setsockopt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
   local ok, berr = unix.bind(fd, self._bind_ip, self._bind_port)
-  if not ok then
-    unix.close(fd)
-    return nil, tostring(berr), berr and berr:errno()
-  end
+  if not ok then unix.close(fd); return nil, berr end
   ok, err = unix.listen(fd, self._backlog)
-  if not ok then
-    unix.close(fd)
-    return nil, tostring(err), err and err:errno()
-  end
+  if not ok then unix.close(fd); return nil, err end
   -- Refresh bind_port if the caller asked for 0.
   local _, port = unix.getsockname(fd)
-  self._bind_port = port
+  if port then self._bind_port = port end
   self._listen_fd = fd
   self._logger.info("listen",
-                    {ip = cosmo.FormatIp(self._bind_ip), port = port})
+                    {ip = cosmo.FormatIp(self._bind_ip),
+                     port = self._bind_port})
   return fd
 end
 
--- Accept one connection. Returns the client fd | nil,err.
+-- Accept one connection. Returns the client fd | nil, unix.Errno.
 function Proxy:accept()
   return unix.accept(self._listen_fd)
 end
@@ -588,11 +610,9 @@ function Proxy:handle(client_fd)
 end
 
 -- Run the accept loop forever, forking per connection. Reaps zombies
--- non-blockingly between accepts. The signal-handling story is left
--- to the caller; if no handler is installed, SIGTERM kills us as
--- usual. If you need a custom shutdown, install a SIGTERM handler
--- with unix.sigaction before calling serve_forever and have it
--- exit() the process directly.
+-- non-blockingly between accepts. Breaks out of the loop on EBADF
+-- (listening fd was closed externally) or other persistent errors;
+-- the caller is responsible for SIGTERM/SIGINT handling.
 function Proxy:serve_forever()
   if not self._listen_fd then assert(self:listen()) end
   local function reap()
@@ -604,8 +624,14 @@ function Proxy:serve_forever()
   while true do
     local cli, aerr = self:accept()
     if not cli then
-      if aerr and aerr:errno() == unix.EINTR then
+      local errno = aerr and aerr:errno()
+      if errno == unix.EINTR then
         reap()
+      elseif errno == unix.EBADF or errno == unix.EINVAL then
+        -- Listener went away. Stop the loop; the supervisor will
+        -- decide what to do next.
+        self._logger.warn("accept_fatal", {err = tostring(aerr)})
+        return
       else
         self._logger.warn("accept_fail", {err = tostring(aerr)})
       end

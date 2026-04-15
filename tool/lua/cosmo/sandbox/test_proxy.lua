@@ -95,6 +95,21 @@ do
           "absent content-length should be 0")
 end
 
+-- parse_headers splits the block, ignores the request line, lowercases
+-- the names, preserves the original-case in [1], and yields {orig, lower, value}.
+do
+  local hdr = "GET / HTTP/1.1\r\nHost: a\r\nX-Foo: bar\r\n\r\n"
+  local h = proxy._parse_headers(hdr)
+  assertf(#h == 2, "parsed %d headers, expected 2", #h)
+  assertf(h[1][1] == "Host" and h[1][2] == "host" and h[1][3] == "a",
+          "host header parsed wrong")
+  assertf(h[2][1] == "X-Foo" and h[2][2] == "x-foo" and h[2][3] == "bar",
+          "x-foo header parsed wrong")
+  -- header_get is case-insensitive on the lowercased index.
+  assertf(proxy._header_get(h, "host") == "a", "header_get host")
+  assertf(proxy._header_get(h, "missing") == nil, "header_get missing")
+end
+
 -- rebuild_request strips hop-by-hop headers, replaces auth, sets Host.
 do
   local hdr = table.concat{
@@ -137,6 +152,37 @@ do
   assertf(out:find("\r\nContent-Length: 5\r\n", 1, true),
           "content-length not added")
   assertf(out:sub(-5) == "hello", "body not appended")
+end
+
+-- Regression: rebuild_request must NOT emit duplicate Content-Length
+-- when the original request already had one. This was the bug in
+-- proxy.lua v0.0.1.
+do
+  local hdr = "POST /x HTTP/1.1\r\nHost: api.x\r\nContent-Length: 5\r\n\r\n"
+  local out = proxy._rebuild_request("POST", "/x", hdr, "hello",
+                                     nil, nil, "api.x")
+  local n = 0
+  for _ in out:lower():gmatch("\r\ncontent%-length:") do n = n + 1 end
+  assertf(n == 1,
+          "Content-Length appeared %d times (expected 1):\n%s", n, out)
+end
+
+-- Regression: Host header must not be duplicated either; rebuild
+-- always emits exactly one Host: line whether or not the original
+-- request had one.
+do
+  for _, hdr in ipairs{
+    "GET /a HTTP/1.1\r\nHost: orig.example\r\n\r\n",
+    "GET /a HTTP/1.1\r\n\r\n",                   -- no Host in original
+  } do
+    local out = proxy._rebuild_request("GET", "/a", hdr, nil,
+                                       nil, nil, "new.example")
+    local n = 0
+    for _ in out:lower():gmatch("\r\nhost:") do n = n + 1 end
+    assertf(n == 1, "Host appeared %d times:\n%s", n, out)
+    assertf(out:find("\r\nHost: new.example\r\n", 1, true),
+            "Host not rewritten to upstream")
+  end
 end
 
 -- New() should accept minimal config and not raise.

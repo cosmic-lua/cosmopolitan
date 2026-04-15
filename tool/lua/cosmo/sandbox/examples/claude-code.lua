@@ -17,8 +17,8 @@
 --     invoking user (so `sudo lua.com claude-code.lua ...` doesn't
 --     give Claude root inside the sandbox).
 --
--- This script is ~250 lines and uses every cosmo.sandbox primitive.
--- Read it as a worked tutorial; copy and adapt for your own app.
+-- This script uses every cosmo.sandbox primitive. Read it as a worked
+-- tutorial; copy and adapt for your own app.
 --
 -- Usage:
 --
@@ -36,6 +36,7 @@
 local unix  = require "unix"
 local cosmo = require "cosmo"
 local netns = require "cosmo.sandbox.netns"
+local fs    = require "cosmo.sandbox.fs"
 local proxy = require "cosmo.sandbox.proxy"
 
 local LOOPBACK = cosmo.ParseIp("127.0.0.1")
@@ -86,10 +87,10 @@ package registries (extend with -allow).
 end
 
 --------------------------------------------------------------------------------
--- The default policy. Edit these tables to retune.
+-- Default policy. Edit these tables to retune.
 
--- Hosts the proxy will allow. Plain `{}` means allowlisted with no
--- header injection (the default — TLS auth is end-to-end).
+-- Hosts the proxy will allow. `{}` means allowlisted with no header
+-- injection (the default — TLS auth is end-to-end).
 local DEFAULT_ALLOWED = {
   ["api.anthropic.com:443"]              = {},
   ["api.github.com:443"]                 = {},
@@ -97,7 +98,6 @@ local DEFAULT_ALLOWED = {
   ["objects.githubusercontent.com:443"]  = {},
   ["codeload.github.com:443"]            = {},
   ["raw.githubusercontent.com:443"]      = {},
-  -- Package managers Claude often uses
   ["registry.npmjs.org:443"]             = {},
   ["pypi.org:443"]                       = {},
   ["files.pythonhosted.org:443"]         = {},
@@ -109,14 +109,13 @@ local DEFAULT_ALLOWED = {
 local DEFAULT_READONLY = {
   "/usr", "/lib", "/lib64", "/bin",
   "/etc/resolv.conf",
-  "/etc/ssl",         -- TLS root certs
+  "/etc/ssl",
   "/etc/ca-certificates", "/usr/share/ca-certificates",
-  "/etc/pki",         -- Red Hat / Fedora cert dir
-  "/etc/nsswitch.conf", "/etc/passwd", "/etc/group",  -- minimal
+  "/etc/pki",
+  "/etc/nsswitch.conf", "/etc/passwd", "/etc/group",
 }
 
--- Env vars to pass through. Anything else is dropped — the child
--- doesn't see ANTHROPIC_API_KEY unless it's whitelisted here.
+-- Env vars to pass through. Anything else is dropped.
 local PASS_ENV = {
   "HOME", "USER", "LOGNAME", "TERM", "LANG", "LC_ALL", "TZ",
   "PATH",
@@ -126,146 +125,117 @@ local PASS_ENV = {
 }
 
 --------------------------------------------------------------------------------
--- Filesystem isolation helper.
+-- FS jail. Built on cosmo.sandbox.fs primitives.
 --
--- Builds a fresh tmpfs root containing the listed read-only binds, a
--- writable bind to the project, a writable bind to ~/.claude, and a
--- writable /tmp. Then pivot_root into it.
+-- Order is load-bearing:
+--   1. Compute the full bind list (defaults + user -bind + auto-bind
+--      for the claude binary's parent dir if it lives outside any
+--      already-bound path). Doing this up front avoids
+--      "destination already exists" errors when -bind shadows a
+--      later auto-bind.
+--   2. Mount tmpfs root, then bind everything in.
+--   3. Mount writable /tmp last so it doesn't shadow earlier binds.
+--   4. pivot_root.
 
-local function exists(path)
-  return unix.stat(path) ~= nil
-end
-
-local function bind(src, dst, readonly)
-  local st = unix.stat(src)
-  if not st then return false, "missing source: " .. src end
-  -- Create dst as a file or directory matching src.
-  if (st:mode() & 0xf000) == 0x4000 then
-    unix.makedirs(dst, 0x755)
-  else
-    local parent = string.match(dst, "(.+)/[^/]+$") or "/"
-    unix.makedirs(parent, 0x755)
-    local fd = unix.open(dst, unix.O_WRONLY | unix.O_CREAT, 0x644)
-    if fd then unix.close(fd) end
-  end
-  local flags = unix.MS_BIND | unix.MS_REC
-  local ok, err = unix.mount(src, dst, nil, flags, nil)
-  if not ok then return false, "bind " .. src .. ": " .. tostring(err) end
-  if readonly then
-    ok, err = unix.mount("none", dst, nil,
-                         unix.MS_REMOUNT | unix.MS_BIND |
-                         unix.MS_RDONLY  | unix.MS_REC, nil)
-    if not ok then
-      return false, "ro-remount " .. dst .. ": " .. tostring(err)
+local function plan_binds(opts)
+  -- Build {{src=..., ro=true|false}, ...} preserving user order.
+  local seen, plan = {}, {}
+  local function add(src, ro)
+    if not seen[src] and fs.exists(src) then
+      seen[src] = true
+      plan[#plan + 1] = {src = src, ro = ro}
     end
   end
-  return true
-end
+  for _, p in ipairs(DEFAULT_READONLY) do add(p, true) end
+  for _, p in ipairs(opts.bind)        do add(p, true) end
 
--- Builds + pivots into the jail. Must be called after
--- unshare(CLONE_NEWNS) + private remount of /.
-local function build_jail(opts, real_home)
-  local jail = "/tmp/claude-jail-" .. unix.getpid()
-  unix.makedirs(jail, 0x700)
-  assert(unix.mount("tmpfs", jail, "tmpfs", 0, "size=128m"))
-
-  -- Read-only system paths.
-  for _, p in ipairs(DEFAULT_READONLY) do
-    if exists(p) then
-      local ok, err = bind(p, jail .. p, true)
-      if not ok then die("ro-bind %s: %s", p, err) end
-    end
-  end
-
-  -- Extra read-only paths the user named.
-  for _, p in ipairs(opts.bind) do
-    if not exists(p) then die("-bind %s: not found", p) end
-    local ok, err = bind(p, jail .. p, true)
-    if not ok then die("%s", err) end
-  end
-
-  -- Make sure the claude binary itself is reachable inside the jail.
-  -- If it lives in a path not already covered (e.g. /opt/claude or
-  -- somewhere in /tmp during testing), ro-bind its parent.
+  -- If the claude binary lives outside any already-bound path, bind
+  -- its parent directory. Resolve this BEFORE adding the project /
+  -- ~/.claude binds (so user -bind never shadows the auto-bind).
   if opts.claude_bin then
-    local already = false
-    for _, p in ipairs(DEFAULT_READONLY) do
-      if opts.claude_bin:sub(1, #p) == p then already = true; break end
-    end
-    if not already then
-      local pdir = string.match(opts.claude_bin, "(.+)/[^/]+$")
-      if pdir and exists(pdir) then
-        local ok, err = bind(pdir, jail .. pdir, true)
-        if not ok then die("auto-bind %s: %s", pdir, err) end
+    local covered = false
+    for _, ent in ipairs(plan) do
+      if opts.claude_bin:sub(1, #ent.src) == ent.src then
+        covered = true; break
       end
     end
+    if not covered then
+      local pdir = string.match(opts.claude_bin, "(.+)/[^/]+$")
+      if pdir and fs.exists(pdir) then add(pdir, true) end
+    end
+  end
+
+  return plan
+end
+
+local function build_jail(opts, real_home)
+  local jail = "/tmp/claude-jail-" .. unix.getpid()
+  assert(fs.tmpfs(jail, "128m"))
+
+  for _, ent in ipairs(plan_binds(opts)) do
+    local ok, err = fs.bind(ent.src, jail .. ent.src, {ro = ent.ro})
+    if not ok then die("ro-bind %s: %s", ent.src, err) end
   end
 
   -- The project, writable.
-  local proj = opts.project
-  local proj_in_jail = jail .. proj
-  local ok, err = bind(proj, proj_in_jail, false)
-  if not ok then die("project bind %s: %s", proj, err) end
+  local ok, err = fs.bind(opts.project, jail .. opts.project)
+  if not ok then die("project bind: %s", err) end
 
   -- ~/.claude (writable so Claude can persist its state).
+  -- IMPORTANT: do not create it on the host as a side effect — if
+  -- the user has no ~/.claude yet, give them an empty one inside the
+  -- jail's tmpfs only. Their host home stays clean.
   if real_home then
     local cdir = real_home .. "/.claude"
-    if not exists(cdir) then unix.makedirs(cdir, 0x700) end
-    local ok, err = bind(cdir, jail .. cdir, false)
-    if not ok then die("~/.claude bind: %s", err) end
+    if fs.exists(cdir) then
+      ok, err = fs.bind(cdir, jail .. cdir)
+      if not ok then die("~/.claude bind: %s", err) end
+    else
+      -- Jail-only directory; gone when the sandbox exits.
+      assert(unix.makedirs(jail .. cdir, fs.MODE_DIR_PRIV))
+    end
   end
 
-  -- A writable /tmp (separate from the rest of the tmpfs root so
-  -- Claude can drop big things in /tmp without filling our 128m).
-  unix.makedirs(jail .. "/tmp", 0x1777)
-  assert(unix.mount("tmpfs", jail .. "/tmp", "tmpfs", 0, "size=512m"))
+  -- Writable /tmp inside the jail, sticky-bit world-writable.
+  ok, err = fs.tmpfs(jail .. "/tmp", "size=512m,mode=1777")
+  if not ok then die("tmpfs /tmp: %s", err) end
 
   -- pivot_root.
-  unix.makedirs(jail .. "/.old", 0x700)
-  assert(unix.chdir(jail))
-  assert(unix.pivot_root(".", ".old"))
-  assert(unix.chdir("/"))
-  assert(unix.unmount("/.old", 2))  -- MNT_DETACH
-  unix.rmdir("/.old")
+  ok, err = fs.pivot_to(jail)
+  if not ok then die("pivot_to: %s", err) end
 end
 
 --------------------------------------------------------------------------------
 -- Capability + UID drop.
 
 local function drop_privileges(real_uid, real_gid)
-  -- Order matters: prctl(KEEPCAPS) so dropping UID doesn't auto-clear
-  -- our caps, then setresgid/setresuid, then drop the caps we don't
-  -- want. We're a sandbox runner, not a service that needs caps in
-  -- its sandboxed payload — so drop them all.
+  -- Order: KEEPCAPS so dropping UID doesn't auto-clear our caps;
+  -- then setresgid/setresuid to become the invoking user; then drop
+  -- caps; then NO_NEW_PRIVS so setuid bins can't get them back.
   if real_uid ~= 0 then
-    unix.prctl(unix.PR_SET_KEEPCAPS, 1)
+    assert(unix.prctl(unix.PR_SET_KEEPCAPS, 1))
     assert(unix.setresgid(real_gid, real_gid, real_gid))
     assert(unix.setresuid(real_uid, real_uid, real_uid))
   end
-  -- Empty cap sets — child runs with no Linux capabilities at all.
   assert(unix.capset(0, 0, 0))
-  -- Block setuid escalation.
   assert(unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1))
 end
 
 --------------------------------------------------------------------------------
 -- Environment construction.
 
-local function build_env(opts)
+local function build_env()
   local out = {}
   local host = unix.environ()
   for _, k in ipairs(PASS_ENV) do
     if host[k] then out[k] = host[k] end
   end
-  -- Make HOME point inside the jail too if the user has one.
-  -- Anthropic-specific: tell Claude where its config lives if needed.
   out.HTTP_PROXY  = "http://127.0.0.1:" .. PROXY_PORT
   out.HTTPS_PROXY = out.HTTP_PROXY
   out.http_proxy  = out.HTTP_PROXY
   out.https_proxy = out.HTTP_PROXY
   out.NO_PROXY    = ""           -- don't exempt loopback
   out.no_proxy    = ""
-  -- Flatten to "K=V" array.
   local env = {}
   for k, v in pairs(out) do env[#env + 1] = k .. "=" .. v end
   return env
@@ -275,57 +245,49 @@ end
 -- Main.
 
 local function main(argv)
-  local u = unix.uname and unix.uname() or nil
-  if u and u.sysname and u.sysname ~= "Linux" then
-    die("Linux only (this is %s)", u.sysname)
+  if cosmo.GetHostOs() ~= "LINUX" then
+    die("Linux only (this is %s)", cosmo.GetHostOs())
   end
 
   local opts = parse_args(argv)
 
-  -- Resolve the claude binary.
-  local claude_bin = opts.claude_bin or unix.commandv("claude")
-                                     or unix.commandv("claude-code")
+  local claude_bin = opts.claude_bin
+                  or unix.commandv("claude")
+                  or unix.commandv("claude-code")
   if not claude_bin then die("can't find `claude` binary on PATH") end
+  opts.claude_bin = claude_bin
 
-  -- Capture the invoking user's identity BEFORE we fork — we want to
-  -- drop privileges to *them* inside the sandbox, not to root.
+  -- Capture the invoking user's identity BEFORE we fork.
   local real_uid = tonumber(os.getenv("SUDO_UID")) or unix.getuid()
   local real_gid = tonumber(os.getenv("SUDO_GID")) or unix.getgid()
   local real_home = os.getenv("SUDO_USER")
                     and ("/home/" .. os.getenv("SUDO_USER"))
                     or os.getenv("HOME")
 
-  -- Save the parent netns fd so the proxy can dial through it.
   local parent_ns = assert(netns.open())
-
-  -- Pipe gates the wrapper: it blocks until the proxy is listening.
   local pipe_r, pipe_w = assert(unix.pipe())
 
   -- Merge default + user allowlist additions.
   local allowed = {}
   for k, v in pairs(DEFAULT_ALLOWED) do allowed[k] = v end
-  for _, h in ipairs(opts.allow) do allowed[h] = {} end
+  for _, h in ipairs(opts.allow)    do allowed[h] = {} end
 
   -- Fork the WRAPPER (becomes Claude after exec).
-  local cmd_pid = assert(unix.fork())
+  local cmd_pid, ferr = unix.fork()
+  if not cmd_pid then die("fork(wrapper): %s", tostring(ferr)) end
   if cmd_pid == 0 then
     unix.close(pipe_w)
     -- Both isolation namespaces in one shot.
     assert(unix.unshare(unix.CLONE_NEWNET | unix.CLONE_NEWNS))
-    -- Mark / private so our mounts don't leak back.
-    assert(unix.mount("none", "/", nil,
-                      unix.MS_REC | unix.MS_PRIVATE, nil))
-    -- Build the FS jail (mounts + pivot_root).
+    assert(fs.private_root())
     build_jail(opts, real_home)
     -- Wait for the proxy to come up.
     unix.read(pipe_r, 1)
     unix.close(pipe_r)
     -- Drop privileges last, so build_jail/etc. could use root.
     drop_privileges(real_uid, real_gid)
-    -- Settle in the project dir so `claude` opens there by default.
     unix.chdir(opts.project)
-    -- Build env (after drop, so HOME et al. still readable).
-    local env = build_env(opts)
+    local env = build_env()
     local argv = {claude_bin}
     if opts.args then
       for _, a in ipairs(opts.args) do argv[#argv + 1] = a end
@@ -337,11 +299,18 @@ local function main(argv)
 
   unix.close(pipe_r)
 
-  -- Open the wrapper's netns so the proxy can join it.
-  local child_ns = assert(netns.open(cmd_pid))
+  local child_ns, cerr = netns.open(cmd_pid)
+  if not child_ns then
+    unix.kill(cmd_pid, unix.SIGKILL)
+    die("open child netns: %s", tostring(cerr))
+  end
 
   -- Fork the PROXY.
-  local proxy_pid = assert(unix.fork())
+  local proxy_pid, pferr = unix.fork()
+  if not proxy_pid then
+    unix.kill(cmd_pid, unix.SIGKILL)
+    die("fork(proxy): %s", tostring(pferr))
+  end
   if proxy_pid == 0 then
     assert(unix.setns(child_ns, unix.CLONE_NEWNET))
     netns.bring_up("lo")  -- best-effort; lo is usually UP already
@@ -351,12 +320,12 @@ local function main(argv)
       upstream_ns_fd = parent_ns,
       allowed_hosts  = allowed,
       log_level      = "info",
-      log_format     = "json",  -- machine-readable for audit
+      log_format     = "json",
     }
     assert(p:listen())
-    unix.close(pipe_w)         -- signal wrapper to exec
-    -- Have the proxy also drop to the invoking user — it doesn't
-    -- need root either, only its already-bound listening fd.
+    unix.close(pipe_w)
+    -- Drop UID for the proxy too — it doesn't need root, only its
+    -- already-bound listening fd.
     if real_uid ~= 0 then
       unix.setresgid(real_gid, real_gid, real_gid)
       unix.setresuid(real_uid, real_uid, real_uid)
@@ -379,7 +348,16 @@ local function main(argv)
 
   while true do
     local pid, ws = unix.wait()
-    if pid == cmd_pid then
+    if not pid then
+      -- ws is a unix.Errno on failure. EINTR = our forwarded signal
+      -- arrived; loop and reap.
+      if ws:errno() == unix.EINTR then
+        -- continue
+      else
+        io.stderr:write("claude-sandbox: wait: " .. tostring(ws) .. "\n")
+        os.exit(1)
+      end
+    elseif pid == cmd_pid then
       pcall(unix.kill, proxy_pid, unix.SIGTERM)
       pcall(unix.wait, proxy_pid)
       if unix.WIFEXITED(ws) then

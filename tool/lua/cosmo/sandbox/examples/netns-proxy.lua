@@ -31,6 +31,7 @@
 --   6    non-Linux host
 
 local unix = require "unix"
+local cosmo = require "cosmo"
 local netns = require "cosmo.sandbox.netns"
 local proxy = require "cosmo.sandbox.proxy"
 
@@ -112,7 +113,10 @@ end
 
 local function load_config(path)
   if not path then return {} end
-  local chunk, err = loadfile(path, "t", {})
+  -- Use the full _G env so configs can call os.getenv, string.format,
+  -- etc. The config file is Lua code the user owns, not untrusted
+  -- input — treat it like any require()'d module.
+  local chunk, err = loadfile(path, "t")
   if not chunk then
     die(EXIT_USAGE, "cannot load config %q: %s", path, tostring(err))
   end
@@ -170,10 +174,8 @@ end
 -- Main.
 
 local function main(argv)
-  -- Platform check.
-  local u = unix.uname and unix.uname() or nil
-  if u and u.sysname and u.sysname ~= "Linux" then
-    die(EXIT_PLATFORM, "Linux only (this is %s)", u.sysname)
+  if cosmo.GetHostOs() ~= "LINUX" then
+    die(EXIT_PLATFORM, "Linux only (this is %s)", cosmo.GetHostOs())
   end
 
   local opts = parse_args(argv)
@@ -191,23 +193,23 @@ local function main(argv)
   -- cross-namespace upstream dialing.
   local parent_ns, popen_err = netns.open()
   if not parent_ns then
-    die(EXIT_NETNS, "open(/proc/self/ns/net): %s", popen_err)
+    die(EXIT_NETNS, "open(/proc/self/ns/net): %s", tostring(popen_err))
   end
 
   -- Pipe used to gate the child: it blocks on read until we close the
   -- write end after the proxy is up.
-  local r, w = unix.pipe()
+  local r, w, perr = unix.pipe()
   if not r then
-    die(EXIT_NETNS, "pipe: %s", tostring(w))
+    die(EXIT_NETNS, "pipe: %s", tostring(w or perr))
   end
 
   -- Fork the sandboxed shell wrapper. It will unshare(CLONE_NEWNET),
   -- wait for the parent to set up the proxy, then exec the user's
   -- command. The parent observes the wrapper's pid in /proc to get
   -- a netns fd.
-  local cmd_pid = unix.fork()
+  local cmd_pid, ferr = unix.fork()
   if not cmd_pid then
-    die(EXIT_NETNS, "fork: %s", tostring(unix.environ()))
+    die(EXIT_NETNS, "fork: %s", tostring(ferr))
   end
   if cmd_pid == 0 then
     unix.close(w)
@@ -237,10 +239,10 @@ local function main(argv)
 
   -- Fork the proxy. It enters the child's netns via setns(), brings
   -- up loopback if it has CAP_NET_ADMIN, binds, then serves forever.
-  local proxy_pid = unix.fork()
+  local proxy_pid, pferr = unix.fork()
   if not proxy_pid then
     unix.kill(cmd_pid, unix.SIGKILL)
-    die(EXIT_PROXY, "fork(proxy)")
+    die(EXIT_PROXY, "fork(proxy): %s", tostring(pferr))
   end
   if proxy_pid == 0 then
     local ok, err = unix.setns(child_ns, unix.CLONE_NEWNET)
@@ -252,7 +254,7 @@ local function main(argv)
     -- is often UP by default in fresh netns anyway.
     netns.bring_up("lo")
     local p = proxy.new{
-      bind_ip = require("cosmo").ParseIp(proxy_host),
+      bind_ip = cosmo.ParseIp(proxy_host),
       bind_port = proxy_port,
       allowed_hosts = cfg.allowed_hosts or {},
       upstream_ns_fd = parent_ns,
@@ -260,10 +262,11 @@ local function main(argv)
       log_format = cfg.log_format or "text",
       log_file = cfg.log_file,
     }
-    local lfd, lerr, lerrno = p:listen()
+    local lfd, lerr = p:listen()
     if not lfd then
       io.stderr:write("netns-proxy: proxy listen: " .. tostring(lerr) .. "\n")
-      unix.exit(lerrno == unix.EACCES and EXIT_PERM or EXIT_PROXY)
+      unix.exit(lerr and lerr:errno() == unix.EACCES
+                and EXIT_PERM or EXIT_PROXY)
     end
     -- Signal the wrapper that it's safe to exec.
     unix.close(w)
@@ -289,8 +292,9 @@ local function main(argv)
   while true do
     local pid, ws = unix.wait()
     if not pid then
-      if ws and ws.errno and ws:errno() == unix.EINTR then
-        -- got a signal we forwarded; loop and reap
+      -- ws is a unix.Errno on failure. EINTR = signal arrived; loop.
+      if ws:errno() == unix.EINTR then
+        -- continue
       else
         io.stderr:write("netns-proxy: wait: " .. tostring(ws) .. "\n")
         os.exit(EXIT_CHILD_FAIL)
