@@ -71,6 +71,8 @@
 #include "libc/sysv/consts/at.h"
 #include "libc/sysv/consts/clock.h"
 #include "libc/sysv/consts/clone.h"
+#include "libc/sysv/consts/iff.h"
+#include "libc/sysv/consts/sio.h"
 #include "libc/sysv/consts/dt.h"
 #include "libc/sysv/consts/f.h"
 #include "libc/sysv/consts/ip.h"
@@ -1028,6 +1030,70 @@ static int LuaUnixFcntl(lua_State *L) {
   } else {
     return SysretBool(L, "fcntl", olderr,
                       fcntl(fd, cmd, luaL_optinteger(L, 3, 0)));
+  }
+}
+
+// unix.ioctl(fd:int, request:int[, arg:int|str])
+//     ├─→ true               -- when arg is absent or an integer
+//     ├─→ buf:str            -- when arg is a string (possibly modified in place)
+//     └─→ nil, unix.Errno
+//
+// Performs a device-specific control operation on `fd`. The third
+// argument is interpreted as follows:
+//
+//   - absent or nil: `ioctl(fd, request, 0)` is called.
+//   - integer:       passed as `(void *)(intptr_t)arg`. Use for ioctls
+//                    whose argument is a single scalar.
+//   - string:        the bytes are copied into a mutable buffer, the
+//                    ioctl is invoked with a pointer to that buffer,
+//                    and the (possibly-modified) buffer is returned as
+//                    a new string on success. Use for ioctls whose
+//                    argument is a struct (e.g. SIOCSIFFLAGS with
+//                    ifreq built via string.pack).
+//
+// Typical usage for bringing the loopback interface up in a new net
+// namespace:
+//
+//     local sk = assert(unix.socket(unix.AF_INET, unix.SOCK_DGRAM, 0))
+//     local ifr = string.pack("c16i2", "lo", unix.IFF_UP) ..
+//                 string.rep("\\0", 24 - 2)
+//     assert(unix.ioctl(sk, unix.SIOCSIFFLAGS, ifr))
+static int LuaUnixIoctl(lua_State *L) {
+  int fd, rc, olderr;
+  unsigned long request;
+  size_t len;
+  const char *src;
+  char *buf;
+  olderr = errno;
+  fd = luaL_checkinteger(L, 1);
+  request = (unsigned long)luaL_checkinteger(L, 2);
+  switch (lua_type(L, 3)) {
+    case LUA_TNONE:
+    case LUA_TNIL:
+      return SysretBool(L, "ioctl", olderr, ioctl(fd, request, 0));
+    case LUA_TNUMBER:
+      return SysretBool(L, "ioctl", olderr,
+                        ioctl(fd, request,
+                              (void *)(intptr_t)luaL_checkinteger(L, 3)));
+    case LUA_TSTRING:
+      src = luaL_checklstring(L, 3, &len);
+      buf = malloc(len);
+      if (!buf) {
+        errno = ENOMEM;
+        return LuaUnixSysretErrno(L, "ioctl", olderr);
+      }
+      memcpy(buf, src, len);
+      rc = ioctl(fd, request, buf);
+      if (rc != -1) {
+        lua_pushlstring(L, buf, len);
+        free(buf);
+        return 1;
+      } else {
+        free(buf);
+        return LuaUnixSysretErrno(L, "ioctl", olderr);
+      }
+    default:
+      return luaL_argerror(L, 3, "expected nil, integer, or string");
   }
 }
 
@@ -3752,6 +3818,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"getsockopt", LuaUnixGetsockopt},    // get socket tunings
     {"getuid", LuaUnixGetuid},            // get real user id of process
     {"gmtime", LuaUnixGmtime},            // destructure unix timestamp
+    {"ioctl", LuaUnixIoctl},              // generic device control
     {"isatty", LuaUnixIsatty},            // detects pseudoteletypewriters
     {"kill", LuaUnixKill},                // signal child process
     {"killpg", LuaUnixKillpg},            // signal process group
@@ -4188,6 +4255,43 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "CLONE_NEWUSER", CLONE_NEWUSER);
   LuaSetIntField(L, "CLONE_NEWPID", CLONE_NEWPID);
   LuaSetIntField(L, "CLONE_NEWNET", CLONE_NEWNET);
+
+  // ifreq.ifr_flags values (IFF_*)
+  LuaSetIntField(L, "IFNAMSIZ", IFNAMSIZ);
+  LuaSetIntField(L, "IFF_UP", IFF_UP);
+  LuaSetIntField(L, "IFF_BROADCAST", IFF_BROADCAST);
+  LuaSetIntField(L, "IFF_LOOPBACK", IFF_LOOPBACK);
+  LuaSetIntField(L, "IFF_POINTOPOINT", IFF_POINTOPOINT);
+  LuaSetIntField(L, "IFF_RUNNING", IFF_RUNNING);
+  LuaSetIntField(L, "IFF_NOARP", IFF_NOARP);
+  LuaSetIntField(L, "IFF_PROMISC", IFF_PROMISC);
+  LuaSetIntField(L, "IFF_MULTICAST", IFF_MULTICAST);
+  LuaSetIntField(L, "IFF_ALLMULTI", IFF_ALLMULTI);
+  LuaSetIntField(L, "IFF_DEBUG", IFF_DEBUG);
+  LuaSetIntField(L, "IFF_NOTRAILERS", IFF_NOTRAILERS);
+  LuaSetIntField(L, "IFF_MASTER", IFF_MASTER);
+  LuaSetIntField(L, "IFF_SLAVE", IFF_SLAVE);
+  LuaSetIntField(L, "IFF_PORTSEL", IFF_PORTSEL);
+  LuaSetIntField(L, "IFF_AUTOMEDIA", IFF_AUTOMEDIA);
+  LuaSetIntField(L, "IFF_DYNAMIC", IFF_DYNAMIC);
+
+  // ioctl(SIOC*) requests for network interface manipulation
+  LuaSetIntField(L, "SIOCGIFFLAGS", SIOCGIFFLAGS);
+  LuaSetIntField(L, "SIOCSIFFLAGS", SIOCSIFFLAGS);
+  LuaSetIntField(L, "SIOCGIFADDR", SIOCGIFADDR);
+  LuaSetIntField(L, "SIOCSIFADDR", SIOCSIFADDR);
+  LuaSetIntField(L, "SIOCGIFDSTADDR", SIOCGIFDSTADDR);
+  LuaSetIntField(L, "SIOCSIFDSTADDR", SIOCSIFDSTADDR);
+  LuaSetIntField(L, "SIOCGIFBRDADDR", SIOCGIFBRDADDR);
+  LuaSetIntField(L, "SIOCSIFBRDADDR", SIOCSIFBRDADDR);
+  LuaSetIntField(L, "SIOCGIFNETMASK", SIOCGIFNETMASK);
+  LuaSetIntField(L, "SIOCSIFNETMASK", SIOCSIFNETMASK);
+  LuaSetIntField(L, "SIOCGIFMTU", SIOCGIFMTU);
+  LuaSetIntField(L, "SIOCSIFMTU", SIOCSIFMTU);
+  LuaSetIntField(L, "SIOCGIFMETRIC", SIOCGIFMETRIC);
+  LuaSetIntField(L, "SIOCSIFMETRIC", SIOCSIFMETRIC);
+  LuaSetIntField(L, "SIOCGIFINDEX", SIOCGIFINDEX);
+  LuaSetIntField(L, "SIOCGIFNAME", SIOCGIFNAME);
 
   // statfs::f_flags
   LuaSetIntField(L, "ST_RDONLY", ST_RDONLY);

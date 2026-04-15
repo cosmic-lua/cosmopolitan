@@ -31,6 +31,15 @@ assertf(unix.CLONE_NEWCGROUP == 0x02000000, "CLONE_NEWCGROUP wrong")
 -- The bindings are registered.
 assertf(type(unix.unshare) == "function", "unix.unshare missing")
 assertf(type(unix.setns)   == "function", "unix.setns missing")
+assertf(type(unix.ioctl)   == "function", "unix.ioctl missing")
+
+-- SIOC/IFF constants are present.
+assertf(unix.IFNAMSIZ == 16, "IFNAMSIZ expected 16, got %s",
+        tostring(unix.IFNAMSIZ))
+assertf(unix.IFF_UP == 1, "IFF_UP expected 1, got %s",
+        tostring(unix.IFF_UP))
+assertf(type(unix.SIOCGIFFLAGS) == "number", "SIOCGIFFLAGS missing")
+assertf(type(unix.SIOCSIFFLAGS) == "number", "SIOCSIFFLAGS missing")
 
 -- Calling unshare with an invalid flag should fail cleanly, not raise.
 -- (unshare(0) is a no-op success; we use a value that's never a flag.)
@@ -49,6 +58,35 @@ do
   assertf(err:errno() == unix.EBADF,
           "setns(-1) expected EBADF, got %d (%s)",
           err:errno(), err:name())
+end
+
+-- ioctl with a bogus fd must fail with EBADF, not crash; and arg type
+-- dispatch (nil / int / string) must all execute the same code path.
+do
+  local ok, err = unix.ioctl(-1, unix.SIOCGIFFLAGS)  -- nil arg
+  assertf(ok == nil, "ioctl(-1, ...) should fail")
+  assertf(err:errno() == unix.EBADF,
+          "ioctl(-1) expected EBADF, got %d", err:errno())
+end
+do
+  local ok, err = unix.ioctl(-1, unix.SIOCGIFFLAGS, 0)  -- int arg
+  assertf(ok == nil and err:errno() == unix.EBADF, "ioctl(int) wrong")
+end
+do
+  local buf = string.rep("\0", 40)
+  local ok, err = unix.ioctl(-1, unix.SIOCGIFFLAGS, buf)  -- string arg
+  assertf(ok == nil and err:errno() == unix.EBADF, "ioctl(str) wrong")
+end
+
+-- cosmo.sandbox.netns loads and its helpers do what they claim offline.
+do
+  local netns = require "cosmo.sandbox.netns"
+  local ifr = netns.build_ifreq("lo", unix.IFF_UP)
+  assertf(#ifr == unix.IFNAMSIZ + 24,
+          "ifreq wrong length %d", #ifr)
+  assertf(ifr:sub(1, 2) == "lo", "ifreq name not set")
+  assertf(netns.parse_ifreq_flags(ifr) == unix.IFF_UP,
+          "ifreq flags round-trip failed")
 end
 
 -- is_supported() should return true on Linux (the only OS we support).
