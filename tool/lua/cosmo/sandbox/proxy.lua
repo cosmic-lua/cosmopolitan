@@ -222,23 +222,33 @@ M._pump = pump
 -- Resolve `host` to an IPv4 integer suitable for unix.connect. Uses
 -- cosmo.ResolveIp which goes through the system resolver in the
 -- *current* netns (so call this AFTER setns() to the upstream netns).
+--
+-- Note: cosmo.ParseIp returns -1 (not nil) when the string isn't a
+-- literal IP, so we explicitly fall back to ResolveIp on -1.
 local function resolve_v4(host)
-  -- ParseIp succeeds for literal IPs; ResolveIp does DNS.
   local ip = cosmo.ParseIp(host)
-  if ip then return ip end
+  if ip and ip ~= -1 then return ip end
   return cosmo.ResolveIp(host)
 end
 
 -- Open a TCP connection to (host, port) in the namespace identified by
 -- `upstream_ns_fd`, falling back to the current namespace if the fd is
 -- nil. Returns fd | nil,err.
+--
+-- Resolution is done via cosmo.ResolveIp which calls into the system
+-- resolver and reads /etc/resolv.conf. Some libc resolvers cache the
+-- resolver state across the setns() call; ResolveIp re-reads
+-- /etc/resolv.conf each time so that switching namespaces (and thus
+-- DNS reachability) Just Works.
 local function dial(host, port, upstream_ns_fd)
   if upstream_ns_fd then
     local ok, err = unix.setns(upstream_ns_fd, unix.CLONE_NEWNET)
     if not ok then return nil, "setns(parent): " .. tostring(err) end
   end
   local ip, rerr = resolve_v4(host)
-  if not ip then return nil, "resolve " .. host .. ": " .. tostring(rerr) end
+  if not ip then
+    return nil, "resolve " .. host .. ": " .. tostring(rerr)
+  end
   local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
   if not sk then return nil, "socket: " .. tostring(serr) end
   local ok, cerr = unix.connect(sk, ip, port)
@@ -425,6 +435,7 @@ local function handle(self, client_fd)
       unix.close(client_fd)
       return
     end
+    logger.debug("dial", {method = "CONNECT", host = host, port = port})
     local up, derr = dial(host, port, self._upstream_ns_fd)
     if not up then
       logger.warn("upstream_fail",
