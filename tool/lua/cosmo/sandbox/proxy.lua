@@ -174,8 +174,10 @@ end
 M._auth_header = auth_header
 
 -- Validate a single allowlist rule. Returns nil on success, a
--- human-readable error string on failure. Used only when opts.strict
--- is set; the default path stays tolerant for back-compat.
+-- human-readable error string on failure. Invoked on every rule at
+-- proxy.new time so operators can't silently typo their way out of
+-- header injection — a sandbox proxy is security-sensitive and a
+-- misspelled `type` must fail loudly, not degrade to pass-through.
 --
 -- Bare pass-through values (nil, true, {}) are accepted as "allow,
 -- no auth injection". A table with a `type` field must use a known
@@ -676,10 +678,11 @@ end
 ---   type="header", header_name=STRING, header_value=STRING
 ---     → "<header_name>: <header_value>"
 ---
---- Unknown `type` values behave as pass-through. Rules are validated
---- lazily; unknown fields are ignored (forward compatibility). Pass
---- `opts.strict = true` to proxy.new / proxy.start to reject unknown
---- types and missing required fields at construction time.
+--- Every rule is validated at proxy.new time: unknown `type` values
+--- and missing required fields raise immediately. This is
+--- deliberate — a typo'd rule silently degrading to pass-through
+--- would strip auth from an otherwise-authenticated egress path.
+--- Unknown *non-type* fields are ignored (forward compatibility).
 
 local Proxy = {}
 Proxy.__index = Proxy
@@ -696,20 +699,16 @@ Proxy.__index = Proxy
 ---   log_format       "text"|"json"           (default "text")
 ---   log_file         path                    (default stderr)
 ---   accept_backlog   int                     (default 32)
----   strict           boolean (default false) — when true, validate
----                    every allowed_hosts rule at construction time
----                    and raise on unknown rule types or missing
----                    required fields. Recommended for new callers;
----                    off by default so existing configs keep working.
+---
+--- Raises if any allowed_hosts rule has an unknown `type` or is
+--- missing a required field — see "Allowlist rule schema" above.
 ---
 --- Returns the Proxy object.
 function M.new(opts)
   opts = opts or {}
-  if opts.strict then
-    for key, rule in pairs(opts.allowed_hosts or {}) do
-      local verr = validate_rule(key, rule)
-      if verr then error(verr) end
-    end
+  for key, rule in pairs(opts.allowed_hosts or {}) do
+    local verr = validate_rule(key, rule)
+    if verr then error(verr) end
   end
   local logger, lerr = make_logger(opts)
   if not logger then error(lerr) end
