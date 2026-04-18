@@ -300,4 +300,26 @@ do
   assertf(type(p) == "table", "valid rules should construct cleanly")
 end
 
+-- Proxy instances carry a named metatable so runtime errors and
+-- tostring() have a type discriminator.
+do
+  local p = proxy.new{log_level = "quiet"}
+  local mt = getmetatable(p)
+  assertf(type(mt) == "table", "proxy.new should return a table with a metatable")
+  assertf(mt.__name == "cosmo.sandbox.proxy.Proxy",
+          "Proxy __name = %s", tostring(mt.__name))
+end
+
+-- The handle returned by proxy.start() also carries a named
+-- metatable. The Handle metatable is exported for testability so we
+-- don't have to fork to verify it here.
+do
+  local Handle = proxy._Handle
+  assertf(type(Handle) == "table", "proxy._Handle should be exported")
+  assertf(Handle.__name == "cosmo.sandbox.proxy.Handle",
+          "Handle __name = %s", tostring(Handle.__name))
+  assertf(type(Handle.stop) == "function",
+          "Handle:stop should live on the metatable")
+end
+
 print("cosmo.sandbox.proxy unit tests passed")

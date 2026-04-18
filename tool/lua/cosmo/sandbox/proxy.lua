@@ -684,7 +684,7 @@ end
 --- would strip auth from an otherwise-authenticated egress path.
 --- Unknown *non-type* fields are ignored (forward compatibility).
 
-local Proxy = {}
+local Proxy = {__name = "cosmo.sandbox.proxy.Proxy"}
 Proxy.__index = Proxy
 
 --- Create a new proxy. `opts` fields:
@@ -795,6 +795,16 @@ end
 --------------------------------------------------------------------------------
 -- Convenience: fork + listen + serve in one call.
 
+local Handle = {__name = "cosmo.sandbox.proxy.Handle"}
+Handle.__index = Handle
+
+function Handle:stop()
+  pcall(unix.kill, self.pid, unix.SIGTERM)
+  pcall(unix.wait, self.pid)
+end
+
+M._Handle = Handle
+
 --- proxy.start(opts) → {pid, port, stop()} | nil, unix.Errno
 ---
 --- Fork a child process, bring the proxy up in it, and return a
@@ -851,12 +861,7 @@ function M.start(opts)
     pcall(unix.wait, pid)
     return nil, unix.EIO
   end
-  local handle = {pid = pid, port = port}
-  function handle:stop()
-    pcall(unix.kill, self.pid, unix.SIGTERM)
-    pcall(unix.wait, self.pid)
-  end
-  return handle
+  return setmetatable({pid = pid, port = port}, Handle)
 end
 
 return M

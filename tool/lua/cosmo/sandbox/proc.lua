@@ -99,23 +99,26 @@ end
 --- reads one byte from the read end (EOF counts as signaled, which
 --- propagates child crashes) and closes the read end. `drop_read()`
 --- / `drop_write()` are idempotent.
+local Barrier = {__name = "cosmo.sandbox.proc.Barrier"}
+Barrier.__index = Barrier
+
+function Barrier:signal()
+  if self._w then unix.write(self._w, "x"); unix.close(self._w); self._w = nil end
+end
+function Barrier:wait()
+  if self._r then unix.read(self._r, 1); unix.close(self._r); self._r = nil end
+end
+function Barrier:drop_read()
+  if self._r then unix.close(self._r); self._r = nil end
+end
+function Barrier:drop_write()
+  if self._w then unix.close(self._w); self._w = nil end
+end
+
 function M.barrier()
   local r, w, err = unix.pipe()
   if not r then return nil, w or err end
-  local b = {_r = r, _w = w}
-  function b:signal()
-    if self._w then unix.write(self._w, "x"); unix.close(self._w); self._w = nil end
-  end
-  function b:wait()
-    if self._r then unix.read(self._r, 1); unix.close(self._r); self._r = nil end
-  end
-  function b:drop_read()
-    if self._r then unix.close(self._r); self._r = nil end
-  end
-  function b:drop_write()
-    if self._w then unix.close(self._w); self._w = nil end
-  end
-  return b
+  return setmetatable({_r = r, _w = w}, Barrier)
 end
 
 --- Default signal set forwarded by become_init.
