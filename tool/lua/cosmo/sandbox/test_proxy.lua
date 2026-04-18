@@ -336,6 +336,32 @@ do
   assertf(h:alive() == false, "alive() must be idempotent on pid=0")
 end
 
+-- handle:stop() on a cleared handle (pid == 0) short-circuits: no
+-- signal goes out, no waitpid, and it returns true (idempotent
+-- success). This is critical because sending a signal to a reaped pid
+-- races against pid reuse — a second stop() call must not be able to
+-- target an unrelated process that recycled the pid.
+do
+  local Handle = proxy._Handle
+  local h = setmetatable({pid = 0}, Handle)
+  assertf(h:stop() == true, "stop() on pid=0 should return true")
+  assertf(h.pid == 0, "stop() on pid=0 must leave pid cleared")
+  -- Second call must also return true and remain a no-op.
+  assertf(h:stop() == true, "stop() must be idempotent on pid=0")
+  assertf(h.pid == 0, "stop() on pid=0 must not mutate pid")
+end
+
+-- stop() accepts an optional timeout_ms argument so callers can bound
+-- how long to wait before escalating a stuck child to SIGKILL. Passing
+-- it on a cleared handle is still a no-op — the timeout only matters
+-- when there is actually a live child to reap.
+do
+  local Handle = proxy._Handle
+  local h = setmetatable({pid = 0}, Handle)
+  assertf(h:stop(1000) == true,
+          "stop(timeout_ms) on pid=0 should return true")
+end
+
 -- A raising on_log sink must not abort the caller. emit() runs inside
 -- the per-connection worker; if a bad user sink propagates an error,
 -- the handler dies mid-request. Guard it with pcall.

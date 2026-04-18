@@ -801,9 +801,43 @@ end
 local Handle = {__name = "cosmo.sandbox.proxy.Handle"}
 Handle.__index = Handle
 
-function Handle:stop()
-  pcall(unix.kill, self.pid, unix.SIGTERM)
-  pcall(unix.wait, self.pid)
+local function now_ms()
+  local s, ns = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  return s * 1000 + ns // 1000000
+end
+
+--- handle:stop([timeout_ms]) → true
+---
+--- Send SIGTERM and reap. Idempotent: once the child has been reaped
+--- (self.pid == 0), subsequent calls short-circuit without re-
+--- signalling — critical because `kill(0, ...)` targets the caller's
+--- whole process group, and a reused pid would receive a spurious
+--- signal. Escalates to SIGKILL if the child hasn't exited within
+--- `timeout_ms` (default 5000), so a hung or SIGTERM-ignoring worker
+--- can't wedge the supervisor forever.
+---
+--- Always returns true; signal/wait failures are swallowed via pcall
+--- since the post-condition (pid cleared, child no longer our
+--- responsibility) is reached regardless.
+function Handle:stop(timeout_ms)
+  if self.pid == 0 then return true end
+  timeout_ms = timeout_ms or 5000
+  local pid = self.pid
+  pcall(unix.kill, pid, unix.SIGTERM)
+  local deadline = now_ms() + timeout_ms
+  while true do
+    local gone = unix.wait(pid, unix.WNOHANG)
+    if gone == pid then
+      self.pid = 0
+      return true
+    end
+    if now_ms() >= deadline then break end
+    unix.nanosleep(0, 10 * 1000 * 1000)
+  end
+  pcall(unix.kill, pid, unix.SIGKILL)
+  pcall(unix.wait, pid)
+  self.pid = 0
+  return true
 end
 
 --- handle:alive() → boolean
