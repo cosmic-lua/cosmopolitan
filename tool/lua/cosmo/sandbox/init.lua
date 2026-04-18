@@ -46,9 +46,22 @@ local M = {
 ---   cap_net_admin  geteuid() == 0 (veth pair creation needs root or
 ---                  a network-namespace that owns its own netlink)
 ---   landlock       kernel advertises landlock ABI >= 1 (Linux ≥ 5.13)
+---   pledge         unix.pledge is exported and does not ENOSYS on a
+---                  no-op call (true on Linux via seccomp and on
+---                  OpenBSD via the native syscall)
+---   unveil         unix.unveil is exported and does not ENOSYS on a
+---                  no-op call (true on OpenBSD, and on Linux when
+---                  Landlock-backed unveil is available)
 ---
 --- Higher-level helpers use these to fail fast with a specific reason
 --- rather than bail out on ENOSYS partway through a setup sequence.
+local function probe_nop(fn)
+  if not fn then return false end
+  local ok, err = fn(nil, nil)
+  if ok then return true end
+  if err and err.errno and err:errno() == unix.ENOSYS then return false end
+  return true
+end
 local _caps
 function M.capabilities()
   if _caps then return _caps end
@@ -68,6 +81,8 @@ function M.capabilities()
     pivot_root    = is_linux and unix.pivot_root    ~= nil,
     cap_net_admin = is_linux and unix.geteuid and unix.geteuid() == 0,
     landlock      = ll_ok,
+    pledge        = probe_nop(unix.pledge),
+    unveil        = probe_nop(unix.unveil),
   }
   return _caps
 end

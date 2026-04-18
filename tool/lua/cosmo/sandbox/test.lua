@@ -31,11 +31,39 @@ do
   assertf(type(c) == "table", "capabilities() did not return table")
   for _, k in ipairs{"linux", "user_ns", "mount_ns", "net_ns",
                      "uts_ns", "pid_ns", "pivot_root",
-                     "cap_net_admin", "landlock"} do
+                     "cap_net_admin", "landlock",
+                     "pledge", "unveil"} do
     assertf(type(c[k]) == "boolean",
             "capabilities().%s = %s (expected boolean)", k, tostring(c[k]))
   end
   assertf(c.linux == IS_LINUX, "capabilities().linux mismatch")
+  -- pledge / unveil reflect whether the primitive is both exported and
+  -- callable on the host. On a Linux host with unix.pledge exported,
+  -- the capability must report true (cosmopolitan implements pledge
+  -- via seccomp). If unix.pledge is missing, it must report false.
+  if IS_LINUX then
+    assertf(c.pledge == (unix.pledge ~= nil),
+            "capabilities().pledge = %s, expected %s (unix.pledge=%s)",
+            tostring(c.pledge), tostring(unix.pledge ~= nil),
+            tostring(unix.pledge))
+  end
+  -- unveil capability must match a live probe: if unix.unveil(nil, nil)
+  -- does not return ENOSYS, the primitive is usable and should report
+  -- true; otherwise false.
+  do
+    local want = false
+    if unix.unveil then
+      local ok, err = unix.unveil(nil, nil)
+      if ok then
+        want = true
+      elseif err and err:errno() ~= unix.ENOSYS then
+        want = true
+      end
+    end
+    assertf(c.unveil == want,
+            "capabilities().unveil = %s, expected %s",
+            tostring(c.unveil), tostring(want))
+  end
   -- Result is cached — second call returns the same table.
   assertf(sandbox.capabilities() == c, "capabilities() not cached")
 end
