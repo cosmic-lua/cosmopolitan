@@ -232,4 +232,72 @@ do
   assertf(p._index, "index not built")
 end
 
+-- new() rejects unknown rule.type. A typo like "Bearer" (capital B)
+-- must not silently become a pass-through entry that strips auth
+-- from the upstream request.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    allowed_hosts = {["api.example:443"] = {type = "Bearer", token = "x"}},
+  })
+  assertf(not ok, "unknown rule type should raise")
+  assertf(tostring(err):lower():find("bearer", 1, true) or
+          tostring(err):lower():find("type", 1, true),
+          "error should mention the offending type: %s", tostring(err))
+end
+
+-- bearer rule missing `token` is rejected.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    allowed_hosts = {["api.example:443"] = {type = "bearer"}},
+  })
+  assertf(not ok, "bearer without token should raise")
+  assertf(tostring(err):lower():find("token", 1, true),
+          "error should mention missing token: %s", tostring(err))
+end
+
+-- basic rule missing password is rejected.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    allowed_hosts = {
+      ["api.example:443"] = {type = "basic", username = "u"},
+    },
+  })
+  assertf(not ok, "basic without password should raise")
+  assertf(tostring(err):lower():find("password", 1, true),
+          "error should mention missing password: %s", tostring(err))
+end
+
+-- header rule missing header_value is rejected.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    allowed_hosts = {
+      ["api.example:443"] = {type = "header", header_name = "x-api-key"},
+    },
+  })
+  assertf(not ok, "header without header_value should raise")
+  assertf(tostring(err):lower():find("header_value", 1, true),
+          "error should mention missing header_value: %s", tostring(err))
+end
+
+-- Valid rules — including bare-true and empty-table pass-through — construct.
+do
+  local p = proxy.new{
+    log_level = "quiet",
+    allowed_hosts = {
+      ["api.example:443"]    = {type = "bearer", token = "x"},
+      ["basic.example:443"]  = {type = "basic", username = "u", password = "p"},
+      ["header.example:443"] = {type = "header", header_name = "x-k",
+                                header_value = "v"},
+      ["pass.example"]       = true,        -- allowed, no auth
+      ["bare.example"]       = {},          -- allowed, no auth
+      ["*.wild.example:443"] = {type = "bearer", token = "y"},
+    },
+  }
+  assertf(type(p) == "table", "valid rules should construct cleanly")
+end
+
 print("cosmo.sandbox.proxy unit tests passed")
