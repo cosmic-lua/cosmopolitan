@@ -27,7 +27,7 @@
 local unix = require "unix"
 local cosmo = require "cosmo"
 
-local M = {_VERSION = "0.0.2"}
+local M = {_VERSION = "0.0.3"}
 
 --------------------------------------------------------------------------------
 -- Logging
@@ -307,21 +307,76 @@ M._pump = pump
 --
 -- cosmo.ParseIp returns -1 (not nil) when the string isn't a literal
 -- IP, so we explicitly fall back to ResolveIp on -1.
-local function resolve_v4(host)
+--
+-- When `timeout_ms` is non-nil, DNS resolution is bounded: the actual
+-- lookup runs in a forked helper and the parent polls the result pipe
+-- with ppoll(timeout_ms). If the deadline elapses the helper is
+-- SIGKILL'd and (nil, "resolve timeout") is returned, so a hostile or
+-- tarpitting upstream resolver can't wedge a per-connection worker
+-- past the configured budget. Literal IPs skip the fork entirely.
+--
+-- `resolver` is an injection seam for tests: it defaults to
+-- cosmo.ResolveIp and takes `(host)` → ip | nil, err. Passing a fake
+-- slow/failing resolver lets the timeout path be exercised without a
+-- working DNS stack.
+local function resolve_v4(host, timeout_ms, resolver)
   local ip = cosmo.ParseIp(host)
   if ip and ip ~= -1 then return ip end
-  return cosmo.ResolveIp(host)
+  resolver = resolver or cosmo.ResolveIp
+  if not timeout_ms then
+    return resolver(host)
+  end
+  local r, w, perr = unix.pipe()
+  if not r then return nil, w or perr end
+  local pid, ferr = unix.fork()
+  if not pid then
+    unix.close(r); unix.close(w)
+    return nil, ferr
+  end
+  if pid == 0 then
+    unix.close(r)
+    local resolved, rerr = resolver(host)
+    if resolved then
+      unix.write(w, "O" .. string.pack("<i8", resolved))
+    else
+      unix.write(w, "E" .. tostring(rerr or "resolve failed"))
+    end
+    unix.close(w)
+    unix.exit(0)
+  end
+  unix.close(w)
+  local ready = unix.poll({[r] = unix.POLLIN}, timeout_ms)
+  if not ready or not ready[r] then
+    pcall(unix.kill, pid, unix.SIGKILL)
+    pcall(unix.wait, pid)
+    unix.close(r)
+    return nil, "resolve timeout"
+  end
+  -- Drain the pipe. The helper writes at most 9 bytes (1 status byte +
+  -- 8-byte packed int) on success, or "E" + a short error string.
+  local data = unix.read(r, 4096) or ""
+  unix.close(r)
+  pcall(unix.wait, pid)
+  local tag = data:sub(1, 1)
+  if tag == "O" and #data >= 9 then
+    return string.unpack("<i8", data, 2)
+  elseif tag == "E" then
+    return nil, data:sub(2)
+  end
+  return nil, "resolve failed"
 end
+M._resolve_v4 = resolve_v4
 
 -- Open a TCP connection to (host, port) in the namespace identified by
 -- `upstream_ns_fd`, falling back to the current namespace if the fd is
--- nil. Returns fd | nil,err.
-local function dial(host, port, upstream_ns_fd)
+-- nil. `resolve_timeout_ms` (optional) bounds DNS resolution per dial.
+-- Returns fd | nil,err.
+local function dial(host, port, upstream_ns_fd, resolve_timeout_ms)
   if upstream_ns_fd then
     local ok, err = unix.setns(upstream_ns_fd, unix.CLONE_NEWNET)
     if not ok then return nil, err end
   end
-  local ip, rerr = resolve_v4(host)
+  local ip, rerr = resolve_v4(host, resolve_timeout_ms)
   if not ip then return nil, rerr end
   local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
   if not sk then return nil, serr end
@@ -533,7 +588,8 @@ local function handle(self, client_fd)
       return
     end
     logger.debug("dial", {method = "CONNECT", host = host, port = port})
-    local up, derr = dial(host, port, self._upstream_ns_fd)
+    local up, derr = dial(host, port, self._upstream_ns_fd,
+                          self._resolve_timeout_ms)
     if not up then
       logger.warn("upstream_fail",
                   {method = "CONNECT", host = host, port = port, err = derr})
@@ -702,6 +758,13 @@ Proxy.__index = Proxy
 ---   log_format       "text"|"json"           (default "text")
 ---   log_file         path                    (default stderr)
 ---   accept_backlog   int                     (default 32)
+---   resolve_timeout_ms int | false            (default 5000)
+---                    Per-dial DNS resolution deadline in milliseconds.
+---                    A hostile or slow upstream resolver is capped at
+---                    this budget; on timeout the dial fails with
+---                    "resolve timeout" and the connection gets 502.
+---                    Pass `false` to opt out of the timeout entirely
+---                    (restores pre-v0.0.3 unbounded behaviour).
 ---
 --- Raises if any allowed_hosts rule has an unknown `type` or is
 --- missing a required field — see "Allowlist rule schema" above.
@@ -715,6 +778,14 @@ function M.new(opts)
   end
   local logger, lerr = make_logger(opts)
   if not logger then error(lerr) end
+  -- `resolve_timeout_ms = false` opts out of the timeout; a nil key
+  -- falls back to the 5000ms default.
+  local resolve_timeout_ms
+  if opts.resolve_timeout_ms == nil then
+    resolve_timeout_ms = 5000
+  elseif opts.resolve_timeout_ms then
+    resolve_timeout_ms = opts.resolve_timeout_ms
+  end
   return setmetatable({
     _bind_ip = opts.bind_ip or cosmo.ParseIp("127.0.0.1"),
     _bind_port = opts.bind_port or 3128,
@@ -722,6 +793,7 @@ function M.new(opts)
     _upstream_ns_fd = opts.upstream_ns_fd,
     _logger = logger,
     _backlog = opts.accept_backlog or 32,
+    _resolve_timeout_ms = resolve_timeout_ms,
     _listen_fd = nil,
   }, Proxy)
 end

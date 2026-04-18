@@ -368,4 +368,87 @@ do
           "sink received wrong fields")
 end
 
+--------------------------------------------------------------------------------
+-- resolve_v4: optional timeout_ms bounds DNS resolution per dial.
+
+local unix = require "unix"
+
+-- Literal IPv4 addresses are parsed inline — no DNS, no fork, and
+-- timeout_ms is irrelevant (even a 1ms ceiling must succeed).
+do
+  assertf(type(proxy._resolve_v4) == "function",
+          "_resolve_v4 should be exported")
+  local want = cosmo.ParseIp("127.0.0.1")
+  local ip = assert(proxy._resolve_v4("127.0.0.1"))
+  assertf(ip == want, "no-timeout literal IP wrong: %s", tostring(ip))
+  ip = assert(proxy._resolve_v4("127.0.0.1", 1))
+  assertf(ip == want, "1ms literal IP wrong: %s", tostring(ip))
+end
+
+-- With a timeout, a fast custom resolver returns its result verbatim.
+-- The resolver seam (3rd-positional parameter) is used so the test
+-- doesn't depend on a working DNS stack. Note the resolver runs in a
+-- forked child, so we observe the outcome via the returned value, not
+-- via shared Lua state.
+do
+  local fake = function(host)
+    assertf(host == "example.test", "resolver got wrong host: %s", host)
+    return 0x01020304
+  end
+  local ip = assert(proxy._resolve_v4("example.test", 500, fake))
+  assertf(ip == 0x01020304, "fast resolver result wrong: %s", tostring(ip))
+end
+
+-- A resolver that blocks past the deadline must be bounded: the call
+-- returns nil + an error that mentions the timeout, in under ~1 second
+-- of wall-clock. This is the whole point of the option — without it,
+-- a hostile/slow upstream DNS could wedge a worker indefinitely.
+do
+  local slow = function()
+    -- Sleep 3 seconds; the parent should kill us well before this
+    -- returns.
+    unix.nanosleep(3, 0)
+    return 0x0a0b0c0d
+  end
+  local t0_s, t0_ns = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  local ip, err = proxy._resolve_v4("slow.test", 100, slow)
+  local t1_s, t1_ns = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  local elapsed_ms = (t1_s - t0_s) * 1000 + (t1_ns - t0_ns) / 1e6
+  assertf(ip == nil, "slow resolver should not return an IP")
+  assertf(err and tostring(err):lower():find("timeout", 1, true),
+          "error should mention timeout, got: %s", tostring(err))
+  assertf(elapsed_ms < 1500,
+          "timeout took %.0fms — should be ~100ms, well under 1.5s",
+          elapsed_ms)
+end
+
+-- A resolver that fails (returns nil, err) propagates the error
+-- through the timeout wrapper instead of dressing it up as a timeout.
+do
+  local failing = function() return nil, "nxdomain-test" end
+  local ip, err = proxy._resolve_v4("nope.test", 500, failing)
+  assertf(ip == nil, "failing resolver should not return an IP")
+  assertf(err and tostring(err):find("nxdomain-test", 1, true),
+          "upstream error should propagate, got: %s", tostring(err))
+end
+
+-- resolve_timeout_ms flows through from opts to the Proxy instance so
+-- handle()/dial() can consult it. Default is 5000ms (per issue #108);
+-- an explicit value overrides the default, and explicit nil disables
+-- the timeout entirely.
+do
+  local p = proxy.new{log_level = "quiet"}
+  assertf(p._resolve_timeout_ms == 5000,
+          "default resolve_timeout_ms should be 5000, got %s",
+          tostring(p._resolve_timeout_ms))
+  p = proxy.new{log_level = "quiet", resolve_timeout_ms = 1234}
+  assertf(p._resolve_timeout_ms == 1234,
+          "explicit resolve_timeout_ms should be honoured, got %s",
+          tostring(p._resolve_timeout_ms))
+  p = proxy.new{log_level = "quiet", resolve_timeout_ms = false}
+  assertf(p._resolve_timeout_ms == nil,
+          "explicit false should disable timeout, got %s",
+          tostring(p._resolve_timeout_ms))
+end
+
 print("cosmo.sandbox.proxy unit tests passed")
