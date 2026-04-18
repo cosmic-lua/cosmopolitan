@@ -20,8 +20,11 @@
 #include "libc/assert.h"
 #include "libc/atomic.h"
 #include "libc/calls/calls.h"
+#include "libc/calls/cap.h"
 #include "libc/calls/cp.internal.h"
+#include "libc/calls/landlock.h"
 #include "libc/calls/makedev.h"
+#include "libc/calls/mount.h"
 #include "libc/calls/pledge.h"
 #include "libc/calls/struct/bpf.internal.h"
 #include "libc/calls/struct/dirent.h"
@@ -69,20 +72,26 @@
 #include "libc/temp.h"
 #include "libc/sysv/consts/af.h"
 #include "libc/sysv/consts/at.h"
+#include "libc/sysv/consts/cap.h"
 #include "libc/sysv/consts/clock.h"
+#include "libc/sysv/consts/clone.h"
 #include "libc/sysv/consts/dt.h"
 #include "libc/sysv/consts/f.h"
+#include "libc/sysv/consts/iff.h"
 #include "libc/sysv/consts/ip.h"
 #include "libc/sysv/consts/ipproto.h"
 #include "libc/sysv/consts/itimer.h"
 #include "libc/sysv/consts/limits.h"
 #include "libc/sysv/consts/log.h"
 #include "libc/sysv/consts/map.h"
+#include "libc/sysv/consts/mount.h"
 #include "libc/sysv/consts/msg.h"
 #include "libc/sysv/consts/nr.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/ok.h"
 #include "libc/sysv/consts/poll.h"
+#include "libc/sysv/consts/pr.h"
+#include "libc/sysv/consts/prio.h"
 #include "libc/sysv/consts/prot.h"
 #include "libc/calls/struct/rlimit.h"
 #include "libc/sysv/consts/rusage.h"
@@ -96,8 +105,8 @@
 #include "libc/sysv/consts/sol.h"
 #include "libc/sysv/consts/st.h"
 #include "libc/sysv/consts/tcp.h"
-#include "libc/sysv/consts/prio.h"
 #include "libc/sysv/consts/termios.h"
+#include "libc/sysv/consts/unmount.h"
 #include "libc/calls/termios.h"
 #include "libc/sysv/consts/utime.h"
 #include "libc/proc/posix_spawn.h"
@@ -879,6 +888,271 @@ static int LuaUnixChroot(lua_State *L) {
   return SysretBool(L, "chroot", olderr, chroot(luaL_checkstring(L, 1)));
 }
 
+// unix.unshare(flags:int)
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Disassociates parts of the caller's execution context, e.g. placing
+// it into a fresh network, mount, pid, or user namespace. `flags` is a
+// bitwise OR of `unix.CLONE_NEW*` constants. Linux-only; returns ENOSYS
+// elsewhere.
+static int LuaUnixUnshare(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "unshare", olderr, unshare(luaL_checkinteger(L, 1)));
+}
+
+// unix.setns(fd:int[, nstype:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Reassociates the calling thread with the namespace referenced by
+// `fd`, which is typically obtained by opening one of the files under
+// `/proc/<pid>/ns/`. `nstype`, if nonzero, must match one of the
+// `unix.CLONE_NEW*` constants and asserts the kind of namespace.
+// Linux-only; returns ENOSYS elsewhere.
+static int LuaUnixSetns(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "setns", olderr,
+                    setns(luaL_checkinteger(L, 1),
+                          luaL_optinteger(L, 2, 0)));
+}
+
+// unix.mount(source:str, target:str, fstype:str, flags:int[, data:str])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Mounts a filesystem. `flags` is a bitwise OR of `unix.MS_*`
+// constants. `data` is a filesystem-specific options string (may be
+// omitted). Typical uses for sandboxing:
+//
+//     -- Private mount namespace (so our mounts don't leak out)
+//     unix.unshare(unix.CLONE_NEWNS)
+//     unix.mount("none", "/", nil, unix.MS_REC | unix.MS_PRIVATE, nil)
+//
+//     -- Read-only bind of a host directory
+//     unix.mount("/etc/project", "/tmp/sandbox/etc",
+//                nil, unix.MS_BIND | unix.MS_REC, nil)
+//     unix.mount("none", "/tmp/sandbox/etc", nil,
+//                unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY, nil)
+//
+//     -- A fresh tmpfs
+//     unix.mount("tmpfs", "/tmp/sandbox/tmp", "tmpfs", 0, "size=64m")
+static int LuaUnixMount(lua_State *L) {
+  int olderr = errno;
+  const char *source = luaL_optstring(L, 1, NULL);
+  const char *target = luaL_checkstring(L, 2);
+  const char *fstype = luaL_optstring(L, 3, NULL);
+  unsigned long flags = (unsigned long)luaL_optinteger(L, 4, 0);
+  const char *data = luaL_optstring(L, 5, NULL);
+  return SysretBool(L, "mount", olderr,
+                    mount(source, target, fstype, flags, data));
+}
+
+// unix.unmount(target:str[, flags:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Unmounts a filesystem. The BSD-style name (`unmount`) is used for
+// cross-platform compatibility; on Linux this is the `umount2`
+// syscall. Flags may include MNT_FORCE, MNT_DETACH, MNT_EXPIRE,
+// UMOUNT_NOFOLLOW.
+static int LuaUnixUnmount(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "unmount", olderr,
+                    unmount(luaL_checkstring(L, 1),
+                            luaL_optinteger(L, 2, 0)));
+}
+
+// unix.pivot_root(new_root:str, put_old:str)
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Moves the root filesystem of the current mount namespace to
+// `put_old` and makes `new_root` the new root. Usually paired with
+// `chdir("/")` in the child. Requires a private mount namespace.
+static int LuaUnixPivotRoot(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "pivot_root", olderr,
+                    pivot_root(luaL_checkstring(L, 1),
+                               luaL_checkstring(L, 2)));
+}
+
+// unix.prctl(option:int[, arg2:int[, arg3:int[, arg4:int[, arg5:int]]]])
+//     ├─→ rc:int
+//     └─→ nil, unix.Errno
+//
+// Performs an operation on the calling process. `option` is one of
+// the `unix.PR_*` constants. The remaining arguments are
+// option-specific.
+//
+// For "getter" prctl options that return a value, the return is the
+// integer result. For "setter" options it's typically 0 on success.
+//
+// Common sandbox-relevant uses:
+//
+//     -- Kill this process when the parent dies
+//     unix.prctl(unix.PR_SET_PDEATHSIG, unix.SIGTERM)
+//
+//     -- Forbid gaining new privileges via setuid binaries
+//     unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1)
+//
+//     -- Prevent core dumps / PTRACE
+//     unix.prctl(unix.PR_SET_DUMPABLE, 0)
+static int LuaUnixPrctl(lua_State *L) {
+  int olderr = errno;
+  int option = luaL_checkinteger(L, 1);
+  unsigned long a2 = (unsigned long)luaL_optinteger(L, 2, 0);
+  unsigned long a3 = (unsigned long)luaL_optinteger(L, 3, 0);
+  unsigned long a4 = (unsigned long)luaL_optinteger(L, 4, 0);
+  unsigned long a5 = (unsigned long)luaL_optinteger(L, 5, 0);
+  return SysretInteger(L, "prctl", olderr, prctl(option, a2, a3, a4, a5));
+}
+
+// unix.capget([pid:int])
+//     ├─→ effective:int, permitted:int, inheritable:int
+//     └─→ nil, unix.Errno
+//
+// Returns the calling thread's (or `pid`'s) capability sets as
+// 64-bit bitmasks. Each bit position N in the returned masks
+// corresponds to `unix.CAP_*` constant N. Linux-only.
+//
+//     local eff, perm, inh = assert(unix.capget())
+//     if (eff & (1 << unix.CAP_NET_ADMIN)) ~= 0 then
+//       -- we have CAP_NET_ADMIN
+//     end
+static int LuaUnixCapget(lua_State *L) {
+  int olderr = errno;
+  struct __user_cap_header_struct hdr;
+  struct __user_cap_data_struct data[2];
+  /* Capability masks need 64 bits (CAP_LAST_CAP can exceed 32).
+     A 32-bit lua_Integer would silently truncate the upper half. */
+  _Static_assert(sizeof(lua_Integer) >= 8,
+                 "unix.capget/capset need 64-bit lua_Integer");
+  hdr.version = _LINUX_CAPABILITY_VERSION_3;
+  hdr.pid = luaL_optinteger(L, 1, 0);
+  if (capget(&hdr, data) == -1) {
+    return LuaUnixSysretErrno(L, "capget", olderr);
+  }
+  lua_pushinteger(L, ((uint64_t)data[1].effective   << 32) | data[0].effective);
+  lua_pushinteger(L, ((uint64_t)data[1].permitted   << 32) | data[0].permitted);
+  lua_pushinteger(L, ((uint64_t)data[1].inheritable << 32) | data[0].inheritable);
+  return 3;
+}
+
+// unix.capset(effective:int, permitted:int, inheritable:int[, pid:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Sets the calling thread's (or `pid`'s) capability sets. Each
+// argument is a 64-bit bitmask of `1 << unix.CAP_*` bits. Note that
+// `effective` must be a subset of `permitted`, `inheritable` must be
+// a subset of `permitted UNION current_inheritable`, and you cannot
+// add bits to `permitted` that aren't already there. Linux-only.
+//
+//     local _, perm, inh = assert(unix.capget())
+//     -- Drop everything except CAP_NET_BIND_SERVICE.
+//     local keep = 1 << unix.CAP_NET_BIND_SERVICE
+//     assert(unix.capset(perm & keep, perm & keep, inh & keep))
+static int LuaUnixCapset(lua_State *L) {
+  int olderr = errno;
+  struct __user_cap_header_struct hdr;
+  struct __user_cap_data_struct data[2];
+  uint64_t eff = (uint64_t)luaL_checkinteger(L, 1);
+  uint64_t per = (uint64_t)luaL_checkinteger(L, 2);
+  uint64_t inh = (uint64_t)luaL_checkinteger(L, 3);
+  hdr.version = _LINUX_CAPABILITY_VERSION_3;
+  hdr.pid = luaL_optinteger(L, 4, 0);
+  data[0].effective   = (uint32_t)(eff & 0xffffffff);
+  data[0].permitted   = (uint32_t)(per & 0xffffffff);
+  data[0].inheritable = (uint32_t)(inh & 0xffffffff);
+  data[1].effective   = (uint32_t)(eff >> 32);
+  data[1].permitted   = (uint32_t)(per >> 32);
+  data[1].inheritable = (uint32_t)(inh >> 32);
+  return SysretBool(L, "capset", olderr, capset(&hdr, data));
+}
+
+// unix.landlock_create_ruleset([handled_access_fs:int[, flags:int]])
+//     ├─→ fd:int      -- ruleset fd (close with unix.close)
+//     ├─→ abi:int     -- when called with no args, returns ABI version
+//     └─→ nil, unix.Errno
+//
+// With no arguments, returns the kernel's supported landlock ABI
+// (1 = basic, 2 = REFER, 3 = TRUNCATE, ...). With `handled_access_fs`,
+// creates a new ruleset that *handles* (can restrict) those access
+// categories — bits are LANDLOCK_ACCESS_FS_*. Access categories you
+// don't include are effectively unrestricted.
+//
+//     local abi = assert(unix.landlock_create_ruleset())
+//     local handled = unix.LANDLOCK_ACCESS_FS_READ_FILE
+//                   | unix.LANDLOCK_ACCESS_FS_READ_DIR
+//                   | unix.LANDLOCK_ACCESS_FS_WRITE_FILE
+//                   | unix.LANDLOCK_ACCESS_FS_EXECUTE
+//     local rs = assert(unix.landlock_create_ruleset(handled))
+//     -- ... add rules with unix.landlock_add_rule ...
+//     assert(unix.prctl(unix.PR_SET_NO_NEW_PRIVS, 1))
+//     assert(unix.landlock_restrict_self(rs))
+//     unix.close(rs)
+static int LuaUnixLandlockCreateRuleset(lua_State *L) {
+  int olderr = errno;
+  if (lua_isnoneornil(L, 1)) {
+    return SysretInteger(L, "landlock_create_ruleset", olderr,
+                         landlock_create_ruleset(0, 0,
+                             LANDLOCK_CREATE_RULESET_VERSION));
+  } else {
+    struct landlock_ruleset_attr attr = {
+      .handled_access_fs = (uint64_t)luaL_checkinteger(L, 1),
+    };
+    int flags = luaL_optinteger(L, 2, 0);
+    return SysretInteger(L, "landlock_create_ruleset", olderr,
+                         landlock_create_ruleset(&attr, sizeof(attr),
+                                                 flags));
+  }
+}
+
+// unix.landlock_add_rule(ruleset_fd:int, parent_fd:int, allowed:int[, flags:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Adds a LANDLOCK_RULE_PATH_BENEATH rule: access under the path
+// referenced by `parent_fd` (opened with O_PATH) is granted for the
+// categories in `allowed` (must be a subset of the ruleset's handled
+// set). `flags` is reserved and defaults to 0.
+//
+//     local fd = assert(unix.open("/usr", unix.O_PATH))
+//     assert(unix.landlock_add_rule(rs, fd,
+//              unix.LANDLOCK_ACCESS_FS_READ_FILE
+//            | unix.LANDLOCK_ACCESS_FS_READ_DIR
+//            | unix.LANDLOCK_ACCESS_FS_EXECUTE))
+//     unix.close(fd)
+static int LuaUnixLandlockAddRule(lua_State *L) {
+  int olderr = errno;
+  int ruleset_fd = luaL_checkinteger(L, 1);
+  struct landlock_path_beneath_attr attr = {
+    .parent_fd     = luaL_checkinteger(L, 2),
+    .allowed_access = (uint64_t)luaL_checkinteger(L, 3),
+  };
+  int flags = luaL_optinteger(L, 4, 0);
+  return SysretBool(L, "landlock_add_rule", olderr,
+                    landlock_add_rule(ruleset_fd,
+                                      LANDLOCK_RULE_PATH_BENEATH,
+                                      &attr, flags));
+}
+
+// unix.landlock_restrict_self(ruleset_fd:int[, flags:int])
+//     ├─→ true
+//     └─→ nil, unix.Errno
+//
+// Apply the ruleset to the current thread (and its future children).
+// Callers must set PR_SET_NO_NEW_PRIVS first or have CAP_SYS_ADMIN.
+// `flags` is reserved and defaults to 0.
+static int LuaUnixLandlockRestrictSelf(lua_State *L) {
+  int olderr = errno;
+  int ruleset_fd = luaL_checkinteger(L, 1);
+  int flags = luaL_optinteger(L, 2, 0);
+  return SysretBool(L, "landlock_restrict_self", olderr,
+                    landlock_restrict_self(ruleset_fd, flags));
+}
+
 // unix.setrlimit(resource:int, soft:int[, hard:int])
 //     ├─→ true
 //     └─→ nil, unix.Errno
@@ -998,6 +1272,76 @@ static int LuaUnixFcntl(lua_State *L) {
   } else {
     return SysretBool(L, "fcntl", olderr,
                       fcntl(fd, cmd, luaL_optinteger(L, 3, 0)));
+  }
+}
+
+// unix.ioctl(fd:int, request:int[, arg:int|str])
+//     ├─→ true               -- when arg is absent or an integer
+//     ├─→ buf:str            -- when arg is a string (possibly modified in place)
+//     └─→ nil, unix.Errno
+//
+// Performs a device-specific control operation on `fd`. The third
+// argument is interpreted as follows:
+//
+//   - absent or nil: `ioctl(fd, request, 0)` is called.
+//   - integer:       passed as `(void *)(intptr_t)arg`. Use for ioctls
+//                    whose argument is a single scalar.
+//   - string:        the bytes are copied into a mutable buffer of the
+//                    SAME length as the input string, the ioctl is
+//                    invoked with a pointer to that buffer, and the
+//                    (possibly-modified) buffer is returned on success.
+//                    The returned string is always exactly `#arg` bytes.
+//                    Only fixed-size struct ioctls are supported this
+//                    way; for ioctls whose kernel response may exceed
+//                    the input length (e.g. some SIOCGIF* variants that
+//                    write extra entries), pre-size `arg` to the max
+//                    length you expect. Variable-length ioctls whose
+//                    struct contains an embedded pointer+len (e.g.
+//                    SIOCGIFCONF) must be called via a different path.
+//
+// Typical usage for bringing the loopback interface up in a new net
+// namespace:
+//
+//     local sk = assert(unix.socket(unix.AF_INET, unix.SOCK_DGRAM, 0))
+//     local ifr = string.pack("c16i2", "lo", unix.IFF_UP) ..
+//                 string.rep("\\0", 24 - 2)
+//     assert(unix.ioctl(sk, unix.SIOCSIFFLAGS, ifr))
+static int LuaUnixIoctl(lua_State *L) {
+  int fd, rc, olderr;
+  unsigned long request;
+  size_t len;
+  const char *src;
+  char *buf;
+  olderr = errno;
+  fd = luaL_checkinteger(L, 1);
+  request = (unsigned long)luaL_checkinteger(L, 2);
+  switch (lua_type(L, 3)) {
+    case LUA_TNONE:
+    case LUA_TNIL:
+      return SysretBool(L, "ioctl", olderr, ioctl(fd, request, 0));
+    case LUA_TNUMBER:
+      return SysretBool(L, "ioctl", olderr,
+                        ioctl(fd, request,
+                              (void *)(intptr_t)luaL_checkinteger(L, 3)));
+    case LUA_TSTRING:
+      src = luaL_checklstring(L, 3, &len);
+      buf = malloc(len);
+      if (!buf) {
+        errno = ENOMEM;
+        return LuaUnixSysretErrno(L, "ioctl", olderr);
+      }
+      memcpy(buf, src, len);
+      rc = ioctl(fd, request, buf);
+      if (rc != -1) {
+        lua_pushlstring(L, buf, len);
+        free(buf);
+        return 1;
+      } else {
+        free(buf);
+        return LuaUnixSysretErrno(L, "ioctl", olderr);
+      }
+    default:
+      return luaL_argerror(L, 3, "expected nil, integer, or string");
   }
 }
 
@@ -1931,17 +2275,33 @@ static int LuaUnixRecv(lua_State *L) {
   }
 }
 
-// unix.send(fd:int, data:str[, flags:int])
+// unix.send(fd:int, data:str[, flags:int[, offset:int]])
 //     ├─→ sent:int
 //     └─→ nil, unix.Errno
+//
+// Sends `data[offset:]` on `fd`. `offset` defaults to 0 and is 0-based
+// (unlike most Lua indexes); offsets past `#data` send an empty
+// buffer. This lets partial-write loops avoid allocating a new
+// substring every iteration:
+//
+//     local off = 0
+//     while off < #data do
+//       local n = assert(unix.send(fd, data, 0, off))
+//       off = off + n
+//     end
 static int LuaUnixSend(lua_State *L) {
   size_t size;
   const char *data;
+  lua_Integer offset;
   int fd, flags, olderr = errno;
   fd = luaL_checkinteger(L, 1);
   data = luaL_checklstring(L, 2, &size);
   flags = luaL_optinteger(L, 3, 0);
-  return SysretInteger(L, "send", olderr, send(fd, data, size, flags));
+  offset = luaL_optinteger(L, 4, 0);
+  if (offset < 0) offset = 0;
+  if ((size_t)offset > size) offset = size;
+  return SysretInteger(L, "send", olderr,
+                       send(fd, data + offset, size - offset, flags));
 }
 
 // unix.sendto(fd:int, data:str, ip:uint32, port:uint16[, flags:int])
@@ -3677,6 +4037,8 @@ static const luaL_Reg kLuaUnix[] = {
     {"accept", LuaUnixAccept},            // create client fd for client
     {"access", LuaUnixAccess},            // check my file authorization
     {"bind", LuaUnixBind},                // reserve network interface address
+    {"capget", LuaUnixCapget},            // read capability bitmasks
+    {"capset", LuaUnixCapset},            // set capability bitmasks
     {"chdir", LuaUnixChdir},              // change directory
     {"chmod", LuaUnixChmod},              // change mode of file
     {"chown", LuaUnixChown},              // change owner of file
@@ -3722,9 +4084,13 @@ static const luaL_Reg kLuaUnix[] = {
     {"getsockopt", LuaUnixGetsockopt},    // get socket tunings
     {"getuid", LuaUnixGetuid},            // get real user id of process
     {"gmtime", LuaUnixGmtime},            // destructure unix timestamp
+    {"ioctl", LuaUnixIoctl},              // generic device control
     {"isatty", LuaUnixIsatty},            // detects pseudoteletypewriters
     {"kill", LuaUnixKill},                // signal child process
     {"killpg", LuaUnixKillpg},            // signal process group
+    {"landlock_add_rule", LuaUnixLandlockAddRule},            // add a landlock rule
+    {"landlock_create_ruleset", LuaUnixLandlockCreateRuleset},// create landlock ruleset
+    {"landlock_restrict_self", LuaUnixLandlockRestrictSelf},  // apply ruleset to self
     {"link", LuaUnixLink},                // create hard link
     {"listen", LuaUnixListen},            // begin listening for clients
     {"localtime", LuaUnixLocaltime},      // localize unix timestamp
@@ -3736,13 +4102,16 @@ static const luaL_Reg kLuaUnix[] = {
     {"mkdir", LuaUnixMkdir},              // make directory
     {"mkdtemp", LuaUnixMkdtemp},          // create temporary directory
     {"mkstemp", LuaUnixMkstemp},          // create temporary file
+    {"mount", LuaUnixMount},              // mount filesystem
     {"nanosleep", LuaUnixNanosleep},      // sleep w/ nano precision
     {"nice", LuaUnixNice},                // adjust process priority
     {"open", LuaUnixOpen},                // open file fd at lowest slot
     {"opendir", LuaUnixOpendir},          // read directory entry list
     {"pipe", LuaUnixPipe},                // create two anon fifo fds
+    {"pivot_root", LuaUnixPivotRoot},     // replace root fs of namespace
     {"pledge", LuaUnixPledge},            // enables syscall sandbox
     {"poll", LuaUnixPoll},                // waits for file descriptor events
+    {"prctl", LuaUnixPrctl},              // process-control operations
     {"raise", LuaUnixRaise},              // signal this process
     {"read", LuaUnixRead},                // read from file or socket
     {"readlink", LuaUnixReadlink},        // reads symbolic link
@@ -3760,6 +4129,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"setfsuid", LuaUnixSetfsuid},        // set/get user id for fs ops
     {"setgid", LuaUnixSetgid},            // set real group id of process
     {"setitimer", LuaUnixSetitimer},      // set alarm clock
+    {"setns", LuaUnixSetns},              // enter existing namespace via fd
     {"setpgid", LuaUnixSetpgid},          // set process group id for pid
     {"setpgrp", LuaUnixSetpgrp},          // sets process group id
     {"setpriority", LuaUnixSetpriority},  // set process priority
@@ -3792,7 +4162,9 @@ static const luaL_Reg kLuaUnix[] = {
     {"truncate", LuaUnixTruncate},        // shrink or extend file medium
     {"umask", LuaUnixUmask},              // set default file mask
     {"unlink", LuaUnixUnlink},            // remove file
+    {"unmount", LuaUnixUnmount},          // unmount filesystem
     {"unsetenv", LuaUnixUnsetenv},        // unset environment variable
+    {"unshare", LuaUnixUnshare},          // create fresh namespaces
     {"unveil", LuaUnixUnveil},            // filesystem sandboxing
     {"utimensat", LuaUnixUtimensat},      // change access/modified time
     {"verynice", LuaUnixVerynice},        // lowest priority
@@ -4147,6 +4519,179 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "PLEDGE_PENALTY_KILL_PROCESS", PLEDGE_PENALTY_KILL_PROCESS);
   LuaSetIntField(L, "PLEDGE_PENALTY_RETURN_EPERM", PLEDGE_PENALTY_RETURN_EPERM);
   LuaSetIntField(L, "PLEDGE_STDERR_LOGGING", PLEDGE_STDERR_LOGGING);
+
+  // unshare()/setns() flags (Linux CLONE_NEW*)
+  LuaSetIntField(L, "CLONE_NEWNS", CLONE_NEWNS);
+  LuaSetIntField(L, "CLONE_NEWCGROUP", CLONE_NEWCGROUP);
+  LuaSetIntField(L, "CLONE_NEWUTS", CLONE_NEWUTS);
+  LuaSetIntField(L, "CLONE_NEWIPC", CLONE_NEWIPC);
+  LuaSetIntField(L, "CLONE_NEWUSER", CLONE_NEWUSER);
+  LuaSetIntField(L, "CLONE_NEWPID", CLONE_NEWPID);
+  LuaSetIntField(L, "CLONE_NEWNET", CLONE_NEWNET);
+  LuaSetIntField(L, "CLONE_NEWTIME", CLONE_NEWTIME);
+
+  // ifreq.ifr_flags values (IFF_*)
+  LuaSetIntField(L, "IFNAMSIZ", IFNAMSIZ);
+  LuaSetIntField(L, "IFF_UP", IFF_UP);
+  LuaSetIntField(L, "IFF_BROADCAST", IFF_BROADCAST);
+  LuaSetIntField(L, "IFF_LOOPBACK", IFF_LOOPBACK);
+  LuaSetIntField(L, "IFF_POINTOPOINT", IFF_POINTOPOINT);
+  LuaSetIntField(L, "IFF_RUNNING", IFF_RUNNING);
+  LuaSetIntField(L, "IFF_NOARP", IFF_NOARP);
+  LuaSetIntField(L, "IFF_PROMISC", IFF_PROMISC);
+  LuaSetIntField(L, "IFF_MULTICAST", IFF_MULTICAST);
+  LuaSetIntField(L, "IFF_ALLMULTI", IFF_ALLMULTI);
+  LuaSetIntField(L, "IFF_DEBUG", IFF_DEBUG);
+  LuaSetIntField(L, "IFF_NOTRAILERS", IFF_NOTRAILERS);
+  LuaSetIntField(L, "IFF_MASTER", IFF_MASTER);
+  LuaSetIntField(L, "IFF_SLAVE", IFF_SLAVE);
+  LuaSetIntField(L, "IFF_PORTSEL", IFF_PORTSEL);
+  LuaSetIntField(L, "IFF_AUTOMEDIA", IFF_AUTOMEDIA);
+  LuaSetIntField(L, "IFF_DYNAMIC", IFF_DYNAMIC);
+
+  // mount() flags (Linux MS_*)
+  LuaSetIntField(L, "MS_RDONLY", MS_RDONLY);
+  LuaSetIntField(L, "MS_NOSUID", MS_NOSUID);
+  LuaSetIntField(L, "MS_NODEV", MS_NODEV);
+  LuaSetIntField(L, "MS_NOEXEC", MS_NOEXEC);
+  LuaSetIntField(L, "MS_SYNCHRONOUS", MS_SYNCHRONOUS);
+  LuaSetIntField(L, "MS_REMOUNT", MS_REMOUNT);
+  LuaSetIntField(L, "MS_MANDLOCK", MS_MANDLOCK);
+  LuaSetIntField(L, "MS_DIRSYNC", MS_DIRSYNC);
+  LuaSetIntField(L, "MS_NOATIME", MS_NOATIME);
+  LuaSetIntField(L, "MS_NODIRATIME", MS_NODIRATIME);
+  LuaSetIntField(L, "MS_BIND", MS_BIND);
+  LuaSetIntField(L, "MS_MOVE", MS_MOVE);
+  LuaSetIntField(L, "MS_REC", MS_REC);
+  LuaSetIntField(L, "MS_SILENT", MS_SILENT);
+  LuaSetIntField(L, "MS_POSIXACL", MS_POSIXACL);
+  LuaSetIntField(L, "MS_UNBINDABLE", MS_UNBINDABLE);
+  LuaSetIntField(L, "MS_PRIVATE", MS_PRIVATE);
+  LuaSetIntField(L, "MS_SLAVE", MS_SLAVE);
+  LuaSetIntField(L, "MS_SHARED", MS_SHARED);
+  LuaSetIntField(L, "MS_RELATIME", MS_RELATIME);
+  LuaSetIntField(L, "MS_STRICTATIME", MS_STRICTATIME);
+  LuaSetIntField(L, "MS_LAZYTIME", MS_LAZYTIME);
+
+  // unmount() flags (Linux umount2 flags + BSD MNT_*)
+  LuaSetIntField(L, "MNT_FORCE", MNT_FORCE);
+  LuaSetIntField(L, "MNT_DETACH", MNT_DETACH);
+  LuaSetIntField(L, "MNT_EXPIRE", MNT_EXPIRE);
+  LuaSetIntField(L, "UMOUNT_NOFOLLOW", UMOUNT_NOFOLLOW);
+
+  // capget()/capset() capability indices (CAP_*)
+  LuaSetIntField(L, "CAP_CHOWN", CAP_CHOWN);
+  LuaSetIntField(L, "CAP_DAC_OVERRIDE", CAP_DAC_OVERRIDE);
+  LuaSetIntField(L, "CAP_DAC_READ_SEARCH", CAP_DAC_READ_SEARCH);
+  LuaSetIntField(L, "CAP_FOWNER", CAP_FOWNER);
+  LuaSetIntField(L, "CAP_FSETID", CAP_FSETID);
+  LuaSetIntField(L, "CAP_KILL", CAP_KILL);
+  LuaSetIntField(L, "CAP_SETGID", CAP_SETGID);
+  LuaSetIntField(L, "CAP_SETUID", CAP_SETUID);
+  LuaSetIntField(L, "CAP_SETPCAP", CAP_SETPCAP);
+  LuaSetIntField(L, "CAP_LINUX_IMMUTABLE", CAP_LINUX_IMMUTABLE);
+  LuaSetIntField(L, "CAP_NET_BIND_SERVICE", CAP_NET_BIND_SERVICE);
+  LuaSetIntField(L, "CAP_NET_BROADCAST", CAP_NET_BROADCAST);
+  LuaSetIntField(L, "CAP_NET_ADMIN", CAP_NET_ADMIN);
+  LuaSetIntField(L, "CAP_NET_RAW", CAP_NET_RAW);
+  LuaSetIntField(L, "CAP_IPC_LOCK", CAP_IPC_LOCK);
+  LuaSetIntField(L, "CAP_IPC_OWNER", CAP_IPC_OWNER);
+  LuaSetIntField(L, "CAP_SYS_MODULE", CAP_SYS_MODULE);
+  LuaSetIntField(L, "CAP_SYS_RAWIO", CAP_SYS_RAWIO);
+  LuaSetIntField(L, "CAP_SYS_CHROOT", CAP_SYS_CHROOT);
+  LuaSetIntField(L, "CAP_SYS_PTRACE", CAP_SYS_PTRACE);
+  LuaSetIntField(L, "CAP_SYS_PACCT", CAP_SYS_PACCT);
+  LuaSetIntField(L, "CAP_SYS_ADMIN", CAP_SYS_ADMIN);
+  LuaSetIntField(L, "CAP_SYS_BOOT", CAP_SYS_BOOT);
+  LuaSetIntField(L, "CAP_SYS_NICE", CAP_SYS_NICE);
+  LuaSetIntField(L, "CAP_SYS_RESOURCE", CAP_SYS_RESOURCE);
+  LuaSetIntField(L, "CAP_SYS_TIME", CAP_SYS_TIME);
+  LuaSetIntField(L, "CAP_SYS_TTY_CONFIG", CAP_SYS_TTY_CONFIG);
+  LuaSetIntField(L, "CAP_MKNOD", CAP_MKNOD);
+  LuaSetIntField(L, "CAP_LEASE", CAP_LEASE);
+  LuaSetIntField(L, "CAP_AUDIT_WRITE", CAP_AUDIT_WRITE);
+  LuaSetIntField(L, "CAP_AUDIT_CONTROL", CAP_AUDIT_CONTROL);
+  LuaSetIntField(L, "CAP_SETFCAP", CAP_SETFCAP);
+  LuaSetIntField(L, "CAP_MAC_OVERRIDE", CAP_MAC_OVERRIDE);
+  LuaSetIntField(L, "CAP_MAC_ADMIN", CAP_MAC_ADMIN);
+  LuaSetIntField(L, "CAP_SYSLOG", CAP_SYSLOG);
+  LuaSetIntField(L, "CAP_WAKE_ALARM", CAP_WAKE_ALARM);
+  LuaSetIntField(L, "CAP_BLOCK_SUSPEND", CAP_BLOCK_SUSPEND);
+  LuaSetIntField(L, "CAP_AUDIT_READ", CAP_AUDIT_READ);
+  LuaSetIntField(L, "CAP_PERFMON", CAP_PERFMON);
+  LuaSetIntField(L, "CAP_BPF", CAP_BPF);
+  LuaSetIntField(L, "CAP_CHECKPOINT_RESTORE", CAP_CHECKPOINT_RESTORE);
+  LuaSetIntField(L, "CAP_LAST_CAP", CAP_LAST_CAP);
+
+  // prctl() options (commonly-used subset)
+  LuaSetIntField(L, "PR_SET_PDEATHSIG", PR_SET_PDEATHSIG);
+  LuaSetIntField(L, "PR_GET_PDEATHSIG", PR_GET_PDEATHSIG);
+  LuaSetIntField(L, "PR_SET_NO_NEW_PRIVS", PR_SET_NO_NEW_PRIVS);
+  LuaSetIntField(L, "PR_GET_NO_NEW_PRIVS", PR_GET_NO_NEW_PRIVS);
+  LuaSetIntField(L, "PR_SET_DUMPABLE", PR_SET_DUMPABLE);
+  LuaSetIntField(L, "PR_GET_DUMPABLE", PR_GET_DUMPABLE);
+  LuaSetIntField(L, "PR_SET_KEEPCAPS", PR_SET_KEEPCAPS);
+  LuaSetIntField(L, "PR_GET_KEEPCAPS", PR_GET_KEEPCAPS);
+  LuaSetIntField(L, "PR_SET_NAME", PR_SET_NAME);
+  LuaSetIntField(L, "PR_GET_NAME", PR_GET_NAME);
+  LuaSetIntField(L, "PR_SET_CHILD_SUBREAPER", PR_SET_CHILD_SUBREAPER);
+  LuaSetIntField(L, "PR_GET_CHILD_SUBREAPER", PR_GET_CHILD_SUBREAPER);
+  LuaSetIntField(L, "PR_CAPBSET_READ", PR_CAPBSET_READ);
+  LuaSetIntField(L, "PR_CAPBSET_DROP", PR_CAPBSET_DROP);
+
+  // landlock_* rule types and access categories
+  LuaSetIntField(L, "LANDLOCK_CREATE_RULESET_VERSION",
+                 LANDLOCK_CREATE_RULESET_VERSION);
+  LuaSetIntField(L, "LANDLOCK_RULE_PATH_BENEATH",
+                 LANDLOCK_RULE_PATH_BENEATH);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_EXECUTE",
+                 LANDLOCK_ACCESS_FS_EXECUTE);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_WRITE_FILE",
+                 LANDLOCK_ACCESS_FS_WRITE_FILE);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_READ_FILE",
+                 LANDLOCK_ACCESS_FS_READ_FILE);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_READ_DIR",
+                 LANDLOCK_ACCESS_FS_READ_DIR);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_REMOVE_DIR",
+                 LANDLOCK_ACCESS_FS_REMOVE_DIR);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_REMOVE_FILE",
+                 LANDLOCK_ACCESS_FS_REMOVE_FILE);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_MAKE_CHAR",
+                 LANDLOCK_ACCESS_FS_MAKE_CHAR);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_MAKE_DIR",
+                 LANDLOCK_ACCESS_FS_MAKE_DIR);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_MAKE_REG",
+                 LANDLOCK_ACCESS_FS_MAKE_REG);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_MAKE_SOCK",
+                 LANDLOCK_ACCESS_FS_MAKE_SOCK);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_MAKE_FIFO",
+                 LANDLOCK_ACCESS_FS_MAKE_FIFO);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_MAKE_BLOCK",
+                 LANDLOCK_ACCESS_FS_MAKE_BLOCK);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_MAKE_SYM",
+                 LANDLOCK_ACCESS_FS_MAKE_SYM);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_REFER",
+                 LANDLOCK_ACCESS_FS_REFER);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_TRUNCATE",
+                 LANDLOCK_ACCESS_FS_TRUNCATE);
+
+  // ioctl(SIOC*) requests for network interface manipulation
+  LuaSetIntField(L, "SIOCGIFFLAGS", SIOCGIFFLAGS);
+  LuaSetIntField(L, "SIOCSIFFLAGS", SIOCSIFFLAGS);
+  LuaSetIntField(L, "SIOCGIFADDR", SIOCGIFADDR);
+  LuaSetIntField(L, "SIOCSIFADDR", SIOCSIFADDR);
+  LuaSetIntField(L, "SIOCGIFDSTADDR", SIOCGIFDSTADDR);
+  LuaSetIntField(L, "SIOCSIFDSTADDR", SIOCSIFDSTADDR);
+  LuaSetIntField(L, "SIOCGIFBRDADDR", SIOCGIFBRDADDR);
+  LuaSetIntField(L, "SIOCSIFBRDADDR", SIOCSIFBRDADDR);
+  LuaSetIntField(L, "SIOCGIFNETMASK", SIOCGIFNETMASK);
+  LuaSetIntField(L, "SIOCSIFNETMASK", SIOCSIFNETMASK);
+  LuaSetIntField(L, "SIOCGIFMTU", SIOCGIFMTU);
+  LuaSetIntField(L, "SIOCSIFMTU", SIOCSIFMTU);
+  LuaSetIntField(L, "SIOCGIFMETRIC", SIOCGIFMETRIC);
+  LuaSetIntField(L, "SIOCSIFMETRIC", SIOCSIFMETRIC);
+  LuaSetIntField(L, "SIOCGIFINDEX", SIOCGIFINDEX);
+  LuaSetIntField(L, "SIOCGIFNAME", SIOCGIFNAME);
 
   // statfs::f_flags
   LuaSetIntField(L, "ST_RDONLY", ST_RDONLY);

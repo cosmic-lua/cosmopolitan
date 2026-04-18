@@ -191,6 +191,8 @@ int setresgid(unsigned, unsigned, unsigned) libcesque;
 int setresuid(unsigned, unsigned, unsigned) libcesque;
 int getresgid(unsigned *, unsigned *, unsigned *) libcesque __write_only(1) __write_only(2) __write_only(3);
 int getresuid(unsigned *, unsigned *, unsigned *) libcesque __write_only(1) __write_only(2) __write_only(3);
+int setns(int, int) libcesque;
+int unshare(int) libcesque;
 char *get_current_dir_name(void) libcesque __wur;
 ssize_t splice(int, int64_t *, int, int64_t *, size_t, unsigned) libcesque __read_write(2) __read_write(4);
 int execvpe(const char *, char *const[], char *const[]) libcesque __read_only(1) __read_only(2) __read_only(3);
