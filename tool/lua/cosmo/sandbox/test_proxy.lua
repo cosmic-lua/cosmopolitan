@@ -1,10 +1,11 @@
 -- Unit tests for cosmo.sandbox.proxy's pure-Lua bits (allowlist
 -- matching, request parsing, auth header construction, header
--- rebuilding). No sockets, no fork, no privileges required — runs
--- everywhere lua.com runs.
+-- rebuilding) plus fork-only lifecycle checks on the Handle metatable.
+-- No sockets, no privileges required — runs everywhere lua.com runs.
 
 local proxy = require "cosmo.sandbox.proxy"
 local cosmo = require "cosmo"
+local unix = require "unix"
 
 local function assertf(cond, fmt, ...)
   if not cond then error(string.format(fmt, ...), 2) end
@@ -320,6 +321,67 @@ do
           "Handle __name = %s", tostring(Handle.__name))
   assertf(type(Handle.stop) == "function",
           "Handle:stop should live on the metatable")
+end
+
+-- handle:stop() on an already-stopped handle (pid=0) is a no-op that
+-- returns true. A second stop() must not signal a reaped pid, since
+-- the kernel may have recycled it for an unrelated process.
+do
+  local Handle = proxy._Handle
+  local h = setmetatable({pid = 0}, Handle)
+  local ok, err = h:stop()
+  assertf(ok == true, "stop() with pid=0 should return true, got (%s, %s)",
+          tostring(ok), tostring(err))
+  assertf(h.pid == 0, "pid should remain 0 after no-op stop()")
+end
+
+-- handle:stop() sends SIGTERM, reaps the child, and zeros `pid` so the
+-- second stop() is a safe no-op. A well-behaved child exits promptly
+-- on SIGTERM and never triggers the SIGKILL escalation path.
+do
+  local Handle = proxy._Handle
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    unix.nanosleep(30, 0)  -- parent will terminate us well before this
+    unix.exit(0)
+  end
+  local h = setmetatable({pid = pid}, Handle)
+  local t0 = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  local ok = h:stop()
+  local t1 = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  assertf(ok == true, "stop() should return true, got %s", tostring(ok))
+  assertf(h.pid == 0, "stop() should clear pid, got %s", tostring(h.pid))
+  assertf((t1 - t0) < 2, "SIGTERM-compliant child took %ds to reap", t1 - t0)
+  -- Second stop must be a no-op — no kill, no wait, still returns true.
+  assertf(h:stop() == true, "second stop() should be idempotent")
+end
+
+-- handle:stop(timeout_ms) escalates to SIGKILL when the child ignores
+-- SIGTERM. Without escalation, unix.wait() would block forever; with
+-- it, the child is killed within timeout_ms + a bounded grace.
+do
+  local Handle = proxy._Handle
+  local r, w = assert(unix.pipe())
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    unix.close(r)
+    unix.sigaction(unix.SIGTERM, unix.SIG_IGN)
+    unix.write(w, "!")  -- ready: handler installed
+    unix.close(w)
+    unix.nanosleep(30, 0)  -- only SIGKILL can end this
+    unix.exit(0)
+  end
+  unix.close(w)
+  assertf(unix.read(r, 1) == "!", "child never signalled ready")
+  unix.close(r)
+  local h = setmetatable({pid = pid}, Handle)
+  local t0 = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  local ok = h:stop(200)  -- 200ms before escalating
+  local t1 = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  assertf(ok == true, "stop() with SIGKILL escalation should return true")
+  assertf(h.pid == 0, "pid should be zeroed after escalation")
+  assertf((t1 - t0) < 3,
+          "escalation should happen quickly, took %ds", t1 - t0)
 end
 
 -- A raising on_log sink must not abort the caller. emit() runs inside

@@ -801,9 +801,41 @@ end
 local Handle = {__name = "cosmo.sandbox.proxy.Handle"}
 Handle.__index = Handle
 
-function Handle:stop()
+-- Monotonic millisecond clock for bounded waits in Handle:stop().
+local function now_ms()
+  local s, ns = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  return s * 1000 + ns // 1000000
+end
+
+--- handle:stop([timeout_ms]) → true
+---
+--- Signal the proxy child to exit and reap it. Sends SIGTERM and
+--- polls waitpid(WNOHANG) until the child is reaped or `timeout_ms`
+--- (default 5000) elapses; on timeout, escalates to SIGKILL and reaps
+--- with a blocking waitpid. After the child is reaped `self.pid` is
+--- cleared, so subsequent stop() calls are no-ops that return true.
+--- This closes the race where a reaped pid has been recycled by the
+--- kernel for an unrelated process.
+function Handle:stop(timeout_ms)
+  if self.pid == 0 then return true end
+  timeout_ms = timeout_ms or 5000
   pcall(unix.kill, self.pid, unix.SIGTERM)
+  local deadline = now_ms() + timeout_ms
+  while now_ms() < deadline do
+    local gone = unix.wait(self.pid, unix.WNOHANG)
+    -- nil → ECHILD (already reaped), positive → we just reaped it.
+    -- 0 → still running; keep polling.
+    if gone ~= 0 then
+      self.pid = 0
+      return true
+    end
+    unix.nanosleep(0, 10 * 1000 * 1000)  -- 10ms
+  end
+  -- SIGTERM was ignored or the child is wedged; escalate.
+  pcall(unix.kill, self.pid, unix.SIGKILL)
   pcall(unix.wait, self.pid)
+  self.pid = 0
+  return true
 end
 
 M._Handle = Handle
@@ -813,10 +845,14 @@ M._Handle = Handle
 --- Fork a child process, bring the proxy up in it, and return a
 --- handle the caller can use to address the listening proxy:
 ---
----   p.pid     child pid (for waitpid / signal forwarding)
+---   p.pid     child pid (for waitpid / signal forwarding); becomes
+---             0 once stop() has reaped the child
 ---   p.port    the port the proxy is listening on (resolved even if
 ---             opts.bind_port was 0)
----   p:stop()  send SIGTERM and waitpid(p.pid)
+---   p:stop([timeout_ms])
+---             SIGTERM the child and poll-wait up to timeout_ms
+---             (default 5000) before escalating to SIGKILL; returns
+---             true and is idempotent across repeat calls
 ---
 --- The parent blocks until the child has bound-and-listened, so
 --- p.port is valid immediately. The port is communicated back via a
