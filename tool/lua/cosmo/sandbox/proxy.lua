@@ -59,7 +59,9 @@ local function make_logger(opts)
   end
   local function emit(ev, fields)
     if sink then
-      sink(fields)
+      -- emit() runs inside the per-connection worker. A raising
+      -- user sink would abort the handler mid-request; swallow it.
+      pcall(sink, fields)
       return
     end
     if format == "json" then
@@ -89,6 +91,7 @@ local function make_logger(opts)
     warn  = function(ev, f) if level >= 1 then emit(ev, f or {}) end end,
   }
 end
+M._make_logger = make_logger
 
 --------------------------------------------------------------------------------
 -- Allowlist matching
