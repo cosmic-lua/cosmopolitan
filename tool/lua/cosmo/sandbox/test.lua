@@ -248,7 +248,8 @@ do
   local proc = require "cosmo.sandbox.proc"
   -- Function-shape sanity.
   for _, fn in ipairs{"no_new_privs", "drop_privs",
-                      "become_init", "barrier"} do
+                      "become_init", "barrier",
+                      "setup_userns_maps"} do
     assertf(type(proc[fn]) == "function", "proc.%s missing", fn)
   end
   -- DEFAULT_SIGNALS is a sane set.

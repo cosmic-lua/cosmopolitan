@@ -251,6 +251,67 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- cosmo.sandbox.proc.setup_userns_maps
+--
+-- After unshare(CLONE_NEWUSER), the child is uid=nobody until uid_map /
+-- gid_map are written. setup_userns_maps() writes the canonical
+-- "inner uid 0 → host uid" mapping (with setgroups=deny for kernels
+-- ≥3.19, so the gid_map write is accepted without privilege).
+
+do
+  local proc = require "cosmo.sandbox.proc"
+  local rc = in_child(function()
+    local u_ok, u_err = unix.unshare(unix.CLONE_NEWUSER)
+    if not u_ok then
+      io.stderr:write("unshare(CLONE_NEWUSER): "..tostring(u_err).."\n")
+      unix.exit(42)
+    end
+    local host_uid = unix.getuid()
+    local host_gid = unix.getgid()
+
+    local ok, err = proc.setup_userns_maps()
+    assertf(ok, "setup_userns_maps() failed: %s", tostring(err))
+
+    -- Inside the new user ns, the process should now appear as uid 0.
+    local ruid, euid, suid = unix.getresuid()
+    assertf(ruid == 0 and euid == 0 and suid == 0,
+            "expected uid 0/0/0 inside ns, got %d/%d/%d",
+            ruid, euid, suid)
+
+    -- uid_map must read back as "0 <host_uid> 1".
+    local ufd = assert(unix.open("/proc/self/uid_map", unix.O_RDONLY))
+    local uc  = assert(unix.read(ufd, 4096))
+    unix.close(ufd)
+    local a, b, c = uc:match("(%d+)%s+(%d+)%s+(%d+)")
+    assertf(tonumber(a) == 0 and tonumber(b) == host_uid and tonumber(c) == 1,
+            "uid_map = %q, expected '0 %d 1'", uc, host_uid)
+
+    -- setgroups must have been set to "deny" (kernel ≥3.19).
+    local sgfd = unix.open("/proc/self/setgroups", unix.O_RDONLY)
+    if sgfd then
+      local sg = unix.read(sgfd, 4096) or ""
+      unix.close(sgfd)
+      assertf(sg:match("deny"),
+              "setgroups = %q, expected 'deny'", sg)
+    end
+
+    -- gid_map must read back as "0 <host_gid> 1".
+    local gfd = assert(unix.open("/proc/self/gid_map", unix.O_RDONLY))
+    local gc2 = assert(unix.read(gfd, 4096))
+    unix.close(gfd)
+    local ga, gb, gcc = gc2:match("(%d+)%s+(%d+)%s+(%d+)")
+    assertf(tonumber(ga) == 0 and tonumber(gb) == host_gid and tonumber(gcc) == 1,
+            "gid_map = %q, expected '0 %d 1'", gc2, host_gid)
+  end)
+  if rc == 42 then
+    log("skip: setup_userns_maps (unshare(CLONE_NEWUSER) denied)")
+  else
+    assertf(rc == 0, "setup_userns_maps integration exited %d", rc)
+    log("ok: setup_userns_maps writes uid_map/setgroups/gid_map")
+  end
+end
+
+--------------------------------------------------------------------------------
 -- Proxy integration tests
 --
 -- Topology:
