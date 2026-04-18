@@ -152,4 +152,23 @@ function M.pivot_to(jail)
   return true
 end
 
+--- fs.pivot_to_or_exit(jail[, exit_code])
+---
+--- Like pivot_to, but enforces the documented failure contract: on
+--- error, write a diagnostic to stderr and terminate the current
+--- process with unix.exit(exit_code or 127). Use from a forked child
+--- that has already committed to running inside the jail and cannot
+--- meaningfully recover from a half-unwound mount namespace.
+---
+--- Never returns on failure. Returns true on success.
+function M.pivot_to_or_exit(jail, exit_code)
+  local ok, err = M.pivot_to(jail)
+  if not ok then
+    io.stderr:write("pivot_to " .. tostring(jail) .. ": "
+                    .. tostring(err) .. "\n")
+    unix.exit(exit_code or 127)
+  end
+  return true
+end
+
 return M
