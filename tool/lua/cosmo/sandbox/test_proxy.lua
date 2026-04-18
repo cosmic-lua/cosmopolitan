@@ -322,4 +322,36 @@ do
           "Handle:stop should live on the metatable")
 end
 
+-- A raising on_log sink must not abort the caller. emit() runs inside
+-- the per-connection worker; if a bad user sink propagates an error,
+-- the handler dies mid-request. Guard it with pcall.
+do
+  local logger = assert(proxy._make_logger{
+    log_level = "info",
+    on_log = function() error("user sink blew up") end,
+  })
+  local ok, err = pcall(logger.info, "test_event", {foo = "bar"})
+  assertf(ok, "logger.info must swallow sink errors, got: %s", tostring(err))
+  -- Also exercise .warn and .debug paths; debug is below threshold so
+  -- the sink is never called, but .warn shares the emit() path.
+  ok, err = pcall(logger.warn, "warn_event", {})
+  assertf(ok, "logger.warn must swallow sink errors, got: %s", tostring(err))
+end
+
+-- A well-behaved sink still receives the fields table. This pins the
+-- documented on_log(fields) contract so a future pcall-refactor that
+-- changes the signature breaks loudly instead of silently.
+do
+  local captured
+  local logger = assert(proxy._make_logger{
+    log_level = "info",
+    on_log = function(fields) captured = fields end,
+  })
+  logger.info("ev", {host = "api.example", port = 443})
+  assertf(type(captured) == "table",
+          "sink should receive fields table, got %s", type(captured))
+  assertf(captured.host == "api.example" and captured.port == 443,
+          "sink received wrong fields")
+end
+
 print("cosmo.sandbox.proxy unit tests passed")
