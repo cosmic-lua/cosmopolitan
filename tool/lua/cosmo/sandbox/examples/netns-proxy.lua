@@ -29,6 +29,16 @@
 --   4    proxy setup failed (bind / listen)
 --   5    bad usage / config
 --   6    non-Linux host
+--
+-- Limitations:
+--   * No DNS resolver in the child netns — HTTP clients resolve
+--     names via the proxy's CONNECT target (the proxy resolves in
+--     the parent netns). `ping`, `dig`, etc. won't work.
+--   * Only HTTP(S) is tunneled. Raw TCP, SSH, etc. are blocked; use
+--     a SOCKS5 proxy variant if you need them.
+--   * CONNECT tunnels are end-to-end encrypted; auth-injection rules
+--     apply to plain-HTTP requests only (the allowlist still gates
+--     CONNECT).
 
 local unix = require "unix"
 local cosmo = require "cosmo"
