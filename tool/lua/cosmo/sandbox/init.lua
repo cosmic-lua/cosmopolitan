@@ -4,11 +4,12 @@
 --- library. The pieces it exposes are thin wrappers around `unix.*`
 --- syscalls plus higher-level helpers:
 ---
----     cosmo.sandbox.netns   network namespace helpers
----     cosmo.sandbox.fs      filesystem (bind/tmpfs/pivot) helpers
----     cosmo.sandbox.proc    process setup (hostname, no_new_privs,
----                           drop_privs, become_init supervisor)
----     cosmo.sandbox.proxy   HTTP CONNECT + plain-HTTP allowlist proxy
+---     cosmo.sandbox.netns     network namespace helpers
+---     cosmo.sandbox.fs        filesystem (bind/tmpfs/pivot) helpers
+---     cosmo.sandbox.proc      process setup (no_new_privs, drop_privs,
+---                             become_init supervisor, fork barrier)
+---     cosmo.sandbox.landlock  unprivileged filesystem allowlist
+---     cosmo.sandbox.proxy     HTTP CONNECT + plain-HTTP allowlist proxy
 ---
 --- All helpers and their underlying `unix.*` syscalls return
 --- `nil, unix.Errno` on failure (matching the rest of cosmo's lunix
@@ -44,6 +45,7 @@ local M = {
 ---   pivot_root     unix.pivot_root is exported by lunix
 ---   cap_net_admin  geteuid() == 0 (veth pair creation needs root or
 ---                  a network-namespace that owns its own netlink)
+---   landlock       kernel advertises landlock ABI >= 1 (Linux ≥ 5.13)
 ---
 --- Higher-level helpers use these to fail fast with a specific reason
 --- rather than bail out on ENOSYS partway through a setup sequence.
@@ -51,6 +53,11 @@ local _caps
 function M.capabilities()
   if _caps then return _caps end
   local is_linux = cosmo.GetHostOs() == "LINUX"
+  local ll_ok = false
+  if is_linux and unix.landlock_create_ruleset then
+    local abi = unix.landlock_create_ruleset()
+    ll_ok = type(abi) == "number" and abi >= 1
+  end
   _caps = {
     linux         = is_linux,
     user_ns       = is_linux and unix.CLONE_NEWUSER ~= nil,
@@ -60,6 +67,7 @@ function M.capabilities()
     pid_ns        = is_linux and unix.CLONE_NEWPID  ~= nil,
     pivot_root    = is_linux and unix.pivot_root    ~= nil,
     cap_net_admin = is_linux and unix.geteuid and unix.geteuid() == 0,
+    landlock      = ll_ok,
   }
   return _caps
 end

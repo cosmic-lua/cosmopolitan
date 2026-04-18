@@ -302,22 +302,25 @@ result), not a table of nils. Keeps `is_supported()` as
 
 ### 3. Extract `cosmo.sandbox.proc` (MEDIUM)
 
-Three primitives are duplicated across every example:
+Two primitives are duplicated across every example:
 
-- `unix.sethostname(name)`
 - `unix.prctl(PR_SET_NO_NEW_PRIVS, 1)` (fs-jail:132, claude-code:221)
 - `unix.setgid(gid); unix.setuid(uid)` (drop-privs sequence)
 
 Pull them into `cosmo.sandbox.proc`:
 
 ```lua
-proc.set_hostname(name)           → true | nil, unix.Errno
 proc.no_new_privs()               → true | nil, unix.Errno
 proc.drop_privs(uid, gid)         → true | nil, unix.Errno
 proc.become_init(child_pid)       → exit_code | nil, unix.Errno
                                     -- PID-1 reaper loop used in
                                     -- netns-proxy and claude-code
+proc.barrier()                    → {signal, wait, drop_*} | nil, err
+                                    -- one-shot fork sync primitive
 ```
+
+`unix.sethostname(name)` is a one-liner that didn't need wrapping —
+call it directly when you need to rename the UTS namespace.
 
 The `become_init` one is the biggest win — the PID-1 supervisor
 loop (EINTR handling, waitpid, propagate exit status) currently
@@ -380,7 +383,8 @@ All six changes landed in v0.0.3:
   fine-grained record; `is_supported()` becomes a convenience over
   it. Result is cached.
 - **#3** (proc module): `cosmo.sandbox.proc` now exports
-  `set_hostname`, `no_new_privs`, `drop_privs`, and `become_init`.
+  `no_new_privs`, `drop_privs`, `become_init`, and `barrier` (the
+  fork-sync primitive that closes the netns-open TOCTOU race).
   Both example supervisors collapse to one `proc.become_init(...)`
   call; claude-code's `drop_privileges` function is gone.
 - **#4** (proxy rules): rule schema documented in-source and tested.

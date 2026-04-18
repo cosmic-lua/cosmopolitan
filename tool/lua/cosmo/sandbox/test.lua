@@ -31,7 +31,7 @@ do
   assertf(type(c) == "table", "capabilities() did not return table")
   for _, k in ipairs{"linux", "user_ns", "mount_ns", "net_ns",
                      "uts_ns", "pid_ns", "pivot_root",
-                     "cap_net_admin"} do
+                     "cap_net_admin", "landlock"} do
     assertf(type(c[k]) == "boolean",
             "capabilities().%s = %s (expected boolean)", k, tostring(c[k]))
   end
@@ -51,9 +51,27 @@ assertf(unix.CLONE_NEWCGROUP == 0x02000000, "CLONE_NEWCGROUP wrong")
 
 -- The bindings are registered.
 for _, name in ipairs{"unshare", "setns", "ioctl", "mount", "unmount",
-                      "pivot_root", "prctl", "capget", "capset"} do
+                      "pivot_root", "prctl", "capget", "capset",
+                      "landlock_create_ruleset", "landlock_add_rule",
+                      "landlock_restrict_self"} do
   assertf(type(unix[name]) == "function", "unix.%s missing", name)
 end
+
+-- Landlock access-category constants are present.
+for _, name in ipairs{"LANDLOCK_ACCESS_FS_EXECUTE",
+                      "LANDLOCK_ACCESS_FS_WRITE_FILE",
+                      "LANDLOCK_ACCESS_FS_READ_FILE",
+                      "LANDLOCK_ACCESS_FS_READ_DIR",
+                      "LANDLOCK_ACCESS_FS_REFER",
+                      "LANDLOCK_ACCESS_FS_TRUNCATE",
+                      "LANDLOCK_RULE_PATH_BENEATH",
+                      "LANDLOCK_CREATE_RULESET_VERSION"} do
+  assertf(type(unix[name]) == "number", "unix.%s missing", name)
+end
+
+-- CLONE_NEWTIME is registered (ABI-visible even when the kernel
+-- doesn't support it — fails at unshare() time, not lookup time).
+assertf(unix.CLONE_NEWTIME == 0x00000080, "CLONE_NEWTIME expected 0x80")
 
 -- SIOC/IFF constants are present.
 assertf(unix.IFNAMSIZ == 16, "IFNAMSIZ expected 16")
@@ -201,8 +219,8 @@ end
 do
   local proc = require "cosmo.sandbox.proc"
   -- Function-shape sanity.
-  for _, fn in ipairs{"set_hostname", "no_new_privs",
-                      "drop_privs", "become_init"} do
+  for _, fn in ipairs{"no_new_privs", "drop_privs",
+                      "become_init", "barrier"} do
     assertf(type(proc[fn]) == "function", "proc.%s missing", fn)
   end
   -- DEFAULT_SIGNALS is a sane set.
@@ -210,12 +228,37 @@ do
           "proc.DEFAULT_SIGNALS missing")
   assertf(#proc.DEFAULT_SIGNALS == 3,
           "proc.DEFAULT_SIGNALS wrong size")
-  -- drop_privs(nil) and drop_privs(0) are documented no-ops.
+  -- drop_privs(nil) is a pure no-op. drop_privs(0) is "root without
+  -- caps" — calls capset(0,0,0), which is ENOSYS on non-Linux (treated
+  -- as success).
   assertf(proc.drop_privs(nil) == true, "drop_privs(nil) should succeed")
   assertf(proc.drop_privs(0)   == true, "drop_privs(0) should succeed")
-  -- set_hostname(bad input) raises a clear message (programmer error).
-  local ok = pcall(proc.set_hostname, 42)
-  assertf(not ok, "set_hostname(42) should assert on non-string")
+  -- barrier() builds a pipe-based one-shot; drop_read/drop_write are
+  -- idempotent in the same process.
+  local b = assert(proc.barrier())
+  b:drop_read(); b:drop_read()
+  b:drop_write(); b:drop_write()
+end
+
+--------------------------------------------------------------------------------
+-- cosmo.sandbox.landlock
+
+do
+  local ll = require "cosmo.sandbox.landlock"
+  -- Convenience flag aggregates.
+  assertf(ll.READ == (ll.READ_FILE | ll.READ_DIR), "ll.READ wrong")
+  assertf(ll.EXEC == ll.EXECUTE, "ll.EXEC wrong")
+  assertf(ll.RW & ll.EXEC ~= 0, "ll.RW should include EXEC")
+  -- Function-shape sanity.
+  for _, fn in ipairs{"abi", "available", "restrict"} do
+    assertf(type(ll[fn]) == "function", "ll.%s missing", fn)
+  end
+  -- On Linux, abi() returns either an int (≥1) or nil,Errno — either
+  -- way it should not crash.
+  local a = ll.abi()
+  if IS_LINUX then
+    assertf(a == nil or type(a) == "number", "ll.abi() wrong type")
+  end
 end
 
 print("cosmo.sandbox smoke tests passed")

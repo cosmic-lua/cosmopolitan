@@ -250,7 +250,13 @@ local function main(argv)
                     or os.getenv("HOME")
 
   local parent_ns = assert(netns.open())
-  local pipe_r, pipe_w = assert(unix.pipe())
+
+  -- Two barriers:
+  --   unshared: wrapper → parent, "new netns is live" (closes TOCTOU
+  --             between fork() and netns.open(cmd_pid)).
+  --   proxy_up: parent/proxy → wrapper, "proxy is listening".
+  local unshared = assert(proc.barrier())
+  local proxy_up = assert(proc.barrier())
 
   -- Merge default + user allowlist additions.
   local allowed = {}
@@ -261,14 +267,14 @@ local function main(argv)
   local cmd_pid, ferr = unix.fork()
   if not cmd_pid then die("fork(wrapper): %s", tostring(ferr)) end
   if cmd_pid == 0 then
-    unix.close(pipe_w)
+    unshared:drop_read()
+    proxy_up:drop_write()
     -- Both isolation namespaces in one shot.
     assert(unix.unshare(unix.CLONE_NEWNET | unix.CLONE_NEWNS))
+    unshared:signal()
     assert(fs.private_root())
     build_jail(opts, real_home)
-    -- Wait for the proxy to come up.
-    unix.read(pipe_r, 1)
-    unix.close(pipe_r)
+    proxy_up:wait()
     -- Drop privileges last, so build_jail/etc. could use root.
     assert(proc.drop_privs(real_uid, real_gid))
     assert(proc.no_new_privs())
@@ -283,7 +289,9 @@ local function main(argv)
     unix.exit(127)
   end
 
-  unix.close(pipe_r)
+  unshared:drop_write()
+  proxy_up:drop_read()
+  unshared:wait()
 
   local child_ns, cerr = netns.open(cmd_pid)
   if not child_ns then
@@ -309,7 +317,7 @@ local function main(argv)
       log_format     = "json",
     }
     assert(p:listen())
-    unix.close(pipe_w)
+    proxy_up:signal()
     -- Drop UID for the proxy too — it doesn't need root, only its
     -- already-bound listening fd.
     if real_uid ~= 0 then
@@ -319,7 +327,7 @@ local function main(argv)
     p:serve_forever()
     unix.exit(0)
   end
-  unix.close(pipe_w)
+  proxy_up:drop_write()
   unix.close(child_ns)
   unix.close(parent_ns)
 

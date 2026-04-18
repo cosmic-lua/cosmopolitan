@@ -128,6 +128,14 @@ end
 --- old root via unmount(MNT_DETACH) and removes the temporary
 --- /.old mountpoint. Caller must have already populated `jail` with
 --- the desired contents.
+---
+--- NOTE: on failure, the mount state is not unwound. A failed
+--- pivot_root may leave `/.old` as an empty dir; a failed unmount
+--- may leave the old root mounted at `/.old`. These only matter if
+--- the caller intends to keep running in the same mount namespace.
+--- The normal failure recovery is to exit the child process, which
+--- the kernel cleans up when the mount namespace's last reference
+--- goes away.
 function M.pivot_to(jail)
   local old = jail .. "/.old"
   local ok, err = unix.makedirs(old, M.MODE_DIR_PRIV)

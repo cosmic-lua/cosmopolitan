@@ -197,31 +197,31 @@ local function main(argv)
     die(EXIT_NETNS, "open(/proc/self/ns/net): %s", tostring(popen_err))
   end
 
-  -- Pipe used to gate the child: it blocks on read until we close the
-  -- write end after the proxy is up.
-  local r, w, perr = unix.pipe()
-  if not r then
-    die(EXIT_NETNS, "pipe: %s", tostring(w or perr))
-  end
+  -- Two barriers:
+  --   unshared: child → parent, "I've created the new netns"
+  --   proxy_up: parent → child, "proxy is listening, safe to exec"
+  -- The unshared barrier closes the race between fork() and
+  -- netns.open(cmd_pid): without it the parent could observe the
+  -- child's /proc/<pid>/ns/net before the child finishes unshare().
+  local unshared, uerr = proc.barrier()
+  if not unshared then die(EXIT_NETNS, "barrier: %s", tostring(uerr)) end
+  local proxy_up, perr = proc.barrier()
+  if not proxy_up then die(EXIT_NETNS, "barrier: %s", tostring(perr)) end
 
-  -- Fork the sandboxed shell wrapper. It will unshare(CLONE_NEWNET),
-  -- wait for the parent to set up the proxy, then exec the user's
-  -- command. The parent observes the wrapper's pid in /proc to get
-  -- a netns fd.
   local cmd_pid, ferr = unix.fork()
   if not cmd_pid then
     die(EXIT_NETNS, "fork: %s", tostring(ferr))
   end
   if cmd_pid == 0 then
-    unix.close(w)
+    unshared:drop_read()
+    proxy_up:drop_write()
     local ok, err = unix.unshare(unix.CLONE_NEWNET)
     if not ok then
       io.stderr:write("netns-proxy: child unshare: " .. tostring(err) .. "\n")
       unix.exit(EXIT_NETNS)
     end
-    -- Block until the parent finishes proxy setup.
-    local _ = unix.read(r, 1)
-    unix.close(r)
+    unshared:signal()        -- tell parent the new netns is live
+    proxy_up:wait()          -- block until the proxy is listening
     local env = build_child_env(cfg, proxy_url)
     local _, eerr = unix.execvpe(cmd[1], cmd, env)
     io.stderr:write("netns-proxy: execvp(" .. cmd[1] .. "): "
@@ -229,9 +229,10 @@ local function main(argv)
     unix.exit(127)
   end
 
-  -- Parent: install the child's netns fd so we can spawn the proxy
-  -- inside it.
-  unix.close(r)
+  -- Parent: wait for the child's unshare, then open its netns.
+  unshared:drop_write()
+  proxy_up:drop_read()
+  unshared:wait()
   local child_ns, cerr = netns.open(cmd_pid)
   if not child_ns then
     unix.kill(cmd_pid, unix.SIGKILL)
@@ -270,7 +271,7 @@ local function main(argv)
                 and EXIT_PERM or EXIT_PROXY)
     end
     -- Signal the wrapper that it's safe to exec.
-    unix.close(w)
+    proxy_up:signal()
     p:serve_forever()
     unix.exit(EXIT_OK)
   end
@@ -278,7 +279,7 @@ local function main(argv)
   -- Parent: wait for either the wrapper or the proxy to exit. If the
   -- wrapper exits first (normal path), kill the proxy and propagate
   -- the wrapper's exit status.
-  unix.close(w)
+  proxy_up:drop_write()
   unix.close(child_ns)
   unix.close(parent_ns)
 

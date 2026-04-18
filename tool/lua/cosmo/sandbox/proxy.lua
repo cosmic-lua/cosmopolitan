@@ -157,7 +157,10 @@ M._match = match
 -- Auth header construction
 
 local function auth_header(rule)
-  if not rule then return nil end
+  -- Accept the shorthand forms `true` / non-table as pass-through
+  -- (allowed, no injection). Only a real table with a known `type`
+  -- produces an injected header.
+  if type(rule) ~= "table" then return nil end
   if rule.type == "bearer" then
     return "Authorization", "Bearer " .. tostring(rule.token)
   elseif rule.type == "basic" then
@@ -192,11 +195,13 @@ local function read_headers(fd, max)
 end
 M._read_headers = read_headers
 
--- Send all bytes (handles short writes).
+-- Send all bytes (handles short writes). Uses the send() offset
+-- parameter so we don't reallocate a tail substring every iteration.
 local function send_all(fd, data)
+  local total = #data
   local off = 0
-  while off < #data do
-    local n, err = unix.send(fd, data:sub(off + 1))
+  while off < total do
+    local n, err = unix.send(fd, data, 0, off)
     if not n then return nil, tostring(err) end
     if n == 0 then return nil, "short write" end
     off = off + n
@@ -574,14 +579,29 @@ end
 --- Allowlist rule schema
 --- ----------------------
 ---
---- `opts.allowed_hosts` is a map from host-spec string to a rule table:
+--- `opts.allowed_hosts` is a map from host-spec string to a rule value:
 ---
 ---     opts.allowed_hosts = {
----       ["api.anthropic.com"]      = { methods = {"CONNECT"} },
----       ["*.githubusercontent.com"] = true,  -- shorthand: any port, any method
----       ["raw.githubusercontent.com:443"] = {
----         methods = {"CONNECT"},
----         auth    = {user = "u", pass = "p"},
+---       -- Pass-through: host is allowed, no auth header injection.
+---       ["api.anthropic.com:443"]         = {},
+---       ["*.githubusercontent.com"]       = true,
+---
+---       -- Bearer token injection (plain-HTTP only; HTTPS is opaque).
+---       ["api.internal.example.com:80"]   = {
+---         type  = "bearer",
+---         token = os.getenv("TOKEN") or "",
+---       },
+---
+---       -- Basic auth.
+---       ["legacy.example.com:80"]         = {
+---         type = "basic", username = "u", password = "p",
+---       },
+---
+---       -- Arbitrary header injection.
+---       ["api.internal.example.com:80"]   = {
+---         type         = "header",
+---         header_name  = "x-api-key",
+---         header_value = os.getenv("INTERNAL_API_KEY") or "",
 ---       },
 ---     }
 ---
@@ -592,17 +612,26 @@ end
 ---   *.suffix          any host ending in ".suffix", any port
 ---   *.suffix:port     any host ending in ".suffix", exact port
 ---
---- Rule-table fields (all optional):
----   methods           {string}    allowed HTTP methods (uppercase)
----                                 For HTTPS (CONNECT-tunneled), use
----                                 "CONNECT". nil = any method.
----   auth              {user, pass} upstream basic-auth credentials
----                                 injected as a Proxy-Authorization
----                                 header when proxying.
+--- Rule values:
+---   Any non-table (e.g. `true`, or an empty table `{}`) means "allow,
+---   do not inject auth". A table with a recognized `type` field
+---   injects the corresponding header on plain-HTTP requests only —
+---   HTTPS (CONNECT) tunnels are end-to-end encrypted, so no injection
+---   is possible. The rule is still consulted as the allowlist gate
+---   for CONNECT, and serves as documentation of which credentials the
+---   child process is expected to use.
 ---
---- The shorthand `true` means "any method, no auth injection". Rule
---- tables are validated lazily; unknown fields are ignored (forward
---- compatibility).
+---   type="bearer", token=STRING
+---     → "Authorization: Bearer <token>"
+---
+---   type="basic", username=STRING, password=STRING
+---     → "Authorization: Basic base64(user:pass)"
+---
+---   type="header", header_name=STRING, header_value=STRING
+---     → "<header_name>: <header_value>"
+---
+--- Unknown `type` values behave as pass-through. Rules are validated
+--- lazily; unknown fields are ignored (forward compatibility).
 
 local Proxy = {}
 Proxy.__index = Proxy
