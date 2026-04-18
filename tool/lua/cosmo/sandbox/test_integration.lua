@@ -96,6 +96,64 @@ do
   log("ok: handle:alive() tracks child liveness and reaps on exit")
 end
 
+-- handle:stop() against a cooperative child: the child blocks on a
+-- pipe read, and SIGTERM's default action is Terminate, so stop()
+-- should reap it cleanly, clear self.pid to 0, and return true. A
+-- second stop() must be a no-op — no signal, no wait — because the
+-- pid may have been recycled by the kernel.
+do
+  local Handle = proxy._Handle
+  local rpipe, wpipe = assert(unix.pipe())
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    unix.close(wpipe)
+    -- Block until the write end closes (never, in this test) or a
+    -- signal terminates us. SIGTERM has default-action Terminate.
+    unix.read(rpipe, 1)
+    unix.exit(0)
+  end
+  unix.close(rpipe); unix.close(wpipe)
+  local h = setmetatable({pid = pid}, Handle)
+  assertf(h:stop() == true, "stop() should return true on cooperative child")
+  assertf(h.pid == 0, "stop() must clear pid to 0 after reap")
+  -- Idempotent: a second stop() must not re-signal, must still return true.
+  assertf(h:stop() == true, "second stop() should be a no-op returning true")
+  assertf(h.pid == 0, "pid must remain 0 after second stop()")
+  log("ok: handle:stop() reaps cooperative child and is idempotent")
+end
+
+-- handle:stop() against a SIGTERM-ignoring child: after the timeout
+-- elapses, stop() must escalate to SIGKILL and reap the child. The
+-- bounded timeout prevents a hostile or stuck worker from wedging the
+-- supervisor forever.
+do
+  local Handle = proxy._Handle
+  local rpipe, wpipe = assert(unix.pipe())
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    unix.close(wpipe)
+    -- Ignore SIGTERM so only SIGKILL can terminate us. A stray
+    -- SIGTERM still interrupts the read() syscall (EINTR), so loop.
+    unix.sigaction(unix.SIGTERM, unix.SIG_IGN)
+    while true do unix.read(rpipe, 1) end
+    unix.exit(0)
+  end
+  unix.close(rpipe); unix.close(wpipe)
+  local h = setmetatable({pid = pid}, Handle)
+  -- Short timeout so the test runs quickly. 200ms is well over the
+  -- 10ms polling granularity but still short compared to a real user
+  -- pressing Ctrl-C.
+  local t0 = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  assertf(h:stop(200) == true, "stop(200) should still return true")
+  local t1 = unix.clock_gettime(unix.CLOCK_MONOTONIC)
+  assertf(h.pid == 0, "pid must be cleared after SIGKILL escalation")
+  -- Sanity: the call took at least the timeout (we had to wait) but
+  -- not unreasonably long (we didn't wedge).
+  assertf(t1 - t0 < 5,
+          "stop() with 200ms timeout took %d seconds", t1 - t0)
+  log("ok: handle:stop() escalates to SIGKILL after timeout")
+end
+
 -- Probe: can we actually unshare(CLONE_NEWNET)? Some kernels disable
 -- unprivileged user-namespace creation, and many environments aren't
 -- root. Rather than fail the test, skip.
