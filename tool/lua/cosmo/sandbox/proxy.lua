@@ -173,6 +173,52 @@ local function auth_header(rule)
 end
 M._auth_header = auth_header
 
+-- Validate a single allowlist rule. Returns nil on success, a
+-- human-readable error string on failure. Used only when opts.strict
+-- is set; the default path stays tolerant for back-compat.
+--
+-- Bare pass-through values (nil, true, {}) are accepted as "allow,
+-- no auth injection". A table with a `type` field must use a known
+-- type and carry the fields that auth_header() would dereference.
+local function validate_rule(key, rule)
+  if rule == nil or rule == true then return nil end
+  if type(rule) ~= "table" then
+    return string.format("allowed_hosts[%q]: rule must be a table, true, "
+                         .. "or nil (got %s)", key, type(rule))
+  end
+  if rule.type == nil then return nil end   -- {} is explicit pass-through
+  if rule.type == "bearer" then
+    if type(rule.token) ~= "string" or rule.token == "" then
+      return string.format("allowed_hosts[%q]: bearer rule requires "
+                           .. "non-empty string `token`", key)
+    end
+  elseif rule.type == "basic" then
+    if type(rule.username) ~= "string" or rule.username == "" then
+      return string.format("allowed_hosts[%q]: basic rule requires "
+                           .. "non-empty string `username`", key)
+    end
+    if type(rule.password) ~= "string" then
+      return string.format("allowed_hosts[%q]: basic rule requires "
+                           .. "string `password`", key)
+    end
+  elseif rule.type == "header" then
+    if type(rule.header_name) ~= "string" or rule.header_name == "" then
+      return string.format("allowed_hosts[%q]: header rule requires "
+                           .. "non-empty string `header_name`", key)
+    end
+    if type(rule.header_value) ~= "string" then
+      return string.format("allowed_hosts[%q]: header rule requires "
+                           .. "string `header_value`", key)
+    end
+  else
+    return string.format("allowed_hosts[%q]: unknown rule type %q "
+                         .. "(expected \"bearer\", \"basic\", or \"header\")",
+                         key, tostring(rule.type))
+  end
+  return nil
+end
+M._validate_rule = validate_rule
+
 --------------------------------------------------------------------------------
 -- Wire I/O helpers
 
@@ -631,7 +677,9 @@ end
 ---     → "<header_name>: <header_value>"
 ---
 --- Unknown `type` values behave as pass-through. Rules are validated
---- lazily; unknown fields are ignored (forward compatibility).
+--- lazily; unknown fields are ignored (forward compatibility). Pass
+--- `opts.strict = true` to proxy.new / proxy.start to reject unknown
+--- types and missing required fields at construction time.
 
 local Proxy = {}
 Proxy.__index = Proxy
@@ -648,10 +696,21 @@ Proxy.__index = Proxy
 ---   log_format       "text"|"json"           (default "text")
 ---   log_file         path                    (default stderr)
 ---   accept_backlog   int                     (default 32)
+---   strict           boolean (default false) — when true, validate
+---                    every allowed_hosts rule at construction time
+---                    and raise on unknown rule types or missing
+---                    required fields. Recommended for new callers;
+---                    off by default so existing configs keep working.
 ---
 --- Returns the Proxy object.
 function M.new(opts)
   opts = opts or {}
+  if opts.strict then
+    for key, rule in pairs(opts.allowed_hosts or {}) do
+      local verr = validate_rule(key, rule)
+      if verr then error(verr) end
+    end
+  end
   local logger, lerr = make_logger(opts)
   if not logger then error(lerr) end
   return setmetatable({

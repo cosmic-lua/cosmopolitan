@@ -232,4 +232,91 @@ do
   assertf(p._index, "index not built")
 end
 
+-- Strict mode: default (strict=false) silently tolerates typos so we
+-- don't break existing callers.
+do
+  local ok, p = pcall(proxy.new, {
+    log_level = "quiet",
+    allowed_hosts = {
+      ["api.example:443"] = {type = "Bearer", token = "x"},  -- typo
+    },
+  })
+  assertf(ok, "non-strict mode should accept unknown rule types: %s",
+          tostring(p))
+  assertf(type(p) == "table", "non-strict should still return proxy")
+end
+
+-- Strict mode: unknown rule.type is rejected at construction time.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    strict = true,
+    allowed_hosts = {
+      ["api.example:443"] = {type = "Bearer", token = "x"},  -- capital B
+    },
+  })
+  assertf(not ok, "strict mode should reject unknown rule type")
+  assertf(tostring(err):lower():find("bearer", 1, true) or
+          tostring(err):lower():find("type", 1, true),
+          "strict error should mention the offending type: %s", tostring(err))
+end
+
+-- Strict mode: bearer rule missing `token` is rejected.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    strict = true,
+    allowed_hosts = {["api.example:443"] = {type = "bearer"}},
+  })
+  assertf(not ok, "strict mode should reject bearer without token")
+  assertf(tostring(err):lower():find("token", 1, true),
+          "strict error should mention missing token: %s", tostring(err))
+end
+
+-- Strict mode: basic rule missing username or password is rejected.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    strict = true,
+    allowed_hosts = {
+      ["api.example:443"] = {type = "basic", username = "u"},  -- no password
+    },
+  })
+  assertf(not ok, "strict mode should reject basic without password")
+  assertf(tostring(err):lower():find("password", 1, true),
+          "strict error should mention missing password: %s", tostring(err))
+end
+
+-- Strict mode: header rule missing header_name/header_value is rejected.
+do
+  local ok, err = pcall(proxy.new, {
+    log_level = "quiet",
+    strict = true,
+    allowed_hosts = {
+      ["api.example:443"] = {type = "header", header_name = "x-api-key"},
+    },
+  })
+  assertf(not ok, "strict mode should reject header without header_value")
+  assertf(tostring(err):lower():find("header_value", 1, true),
+          "strict error should mention missing header_value: %s", tostring(err))
+end
+
+-- Strict mode: valid rules still pass.
+do
+  local p = proxy.new{
+    log_level = "quiet",
+    strict = true,
+    allowed_hosts = {
+      ["api.example:443"]     = {type = "bearer", token = "x"},
+      ["basic.example:443"]   = {type = "basic", username = "u", password = "p"},
+      ["header.example:443"]  = {type = "header", header_name = "x-k",
+                                 header_value = "v"},
+      ["pass.example"]        = true,        -- allowed, no auth
+      ["bare.example"]        = {},          -- allowed, no auth
+      ["*.wild.example:443"]  = {type = "bearer", token = "y"},
+    },
+  }
+  assertf(type(p) == "table", "strict + valid rules should construct cleanly")
+end
+
 print("cosmo.sandbox.proxy unit tests passed")
