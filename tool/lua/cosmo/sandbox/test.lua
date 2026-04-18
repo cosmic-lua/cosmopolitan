@@ -238,6 +238,12 @@ do
   local b = assert(proc.barrier())
   b:drop_read(); b:drop_read()
   b:drop_write(); b:drop_write()
+  -- The barrier carries a named metatable so runtime type errors
+  -- and tostring() output are discriminable.
+  local bmt = getmetatable(b)
+  assertf(type(bmt) == "table", "barrier should have a metatable")
+  assertf(bmt.__name == "cosmo.sandbox.proc.Barrier",
+          "barrier __name = %s", tostring(bmt.__name))
 end
 
 --------------------------------------------------------------------------------
