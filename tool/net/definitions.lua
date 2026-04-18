@@ -8068,6 +8068,125 @@ function unix.tmpfd() end
 --- Relinquishes scheduled quantum.
 function unix.sched_yield() end
 
+--- Disassociates parts of the caller's execution context, placing it
+--- into fresh namespace(s) specified by `flags` (bitwise OR of
+--- `unix.CLONE_NEW*` constants). Linux-only; returns ENOSYS elsewhere.
+---@param flags integer
+---@return true
+---@overload fun(flags: integer): nil, error: unix.Errno
+function unix.unshare(flags) end
+
+--- Reassociates the calling thread with the namespace referenced by
+--- `fd` (typically from `/proc/<pid>/ns/*`). `nstype`, if nonzero,
+--- must match a `unix.CLONE_NEW*` constant and asserts the kind of
+--- namespace. Linux-only; returns ENOSYS elsewhere.
+---@param fd integer
+---@param nstype integer?
+---@return true
+---@overload fun(fd: integer, nstype?: integer): nil, error: unix.Errno
+function unix.setns(fd, nstype) end
+
+--- Mounts a filesystem. `flags` is a bitwise OR of `unix.MS_*`
+--- constants; `data` is a filesystem-specific options string.
+---@param source string?
+---@param target string
+---@param fstype string?
+---@param flags integer?
+---@param data string?
+---@return true
+---@overload fun(source: string?, target: string, fstype: string?, flags: integer?, data: string?): nil, error: unix.Errno
+function unix.mount(source, target, fstype, flags, data) end
+
+--- Unmounts a filesystem. On Linux this is the `umount2` syscall.
+--- `flags` may include `unix.MNT_FORCE`, `unix.MNT_DETACH`,
+--- `unix.MNT_EXPIRE`, `unix.UMOUNT_NOFOLLOW`.
+---@param target string
+---@param flags integer?
+---@return true
+---@overload fun(target: string, flags?: integer): nil, error: unix.Errno
+function unix.unmount(target, flags) end
+
+--- Moves the root filesystem of the current mount namespace to
+--- `put_old` and makes `new_root` the new root. Usually paired with
+--- `chdir("/")` in the child. Requires a private mount namespace.
+---@param new_root string
+---@param put_old string
+---@return true
+---@overload fun(new_root: string, put_old: string): nil, error: unix.Errno
+function unix.pivot_root(new_root, put_old) end
+
+--- Performs an operation on the calling process. `option` is one of
+--- the `unix.PR_*` constants; remaining arguments are option-specific.
+--- Returns the integer result (0 for most setters).
+---@param option integer
+---@param arg2 integer?
+---@param arg3 integer?
+---@param arg4 integer?
+---@param arg5 integer?
+---@return integer rc
+---@overload fun(option: integer, arg2?: integer, arg3?: integer, arg4?: integer, arg5?: integer): nil, error: unix.Errno
+function unix.prctl(option, arg2, arg3, arg4, arg5) end
+
+--- Returns the calling thread's (or `pid`'s) capability sets as
+--- 64-bit bitmasks. Each bit position N corresponds to `unix.CAP_*`
+--- constant N. Linux-only.
+---@param pid integer?
+---@return integer effective, integer permitted, integer inheritable
+---@overload fun(pid?: integer): nil, error: unix.Errno
+function unix.capget(pid) end
+
+--- Sets the calling thread's (or `pid`'s) capability sets. Each
+--- argument is a 64-bit bitmask of `1 << unix.CAP_*` bits. Linux-only.
+---@param effective integer
+---@param permitted integer
+---@param inheritable integer
+---@param pid integer?
+---@return true
+---@overload fun(effective: integer, permitted: integer, inheritable: integer, pid?: integer): nil, error: unix.Errno
+function unix.capset(effective, permitted, inheritable, pid) end
+
+--- Generic device control. When `arg` is nil or absent, the ioctl is
+--- invoked with a null pointer. When `arg` is an integer, it's passed
+--- by value. When `arg` is a string, a mutable copy of the same size
+--- is passed to the kernel and the (possibly-modified) buffer of the
+--- same length is returned.
+---@param fd integer
+---@param request integer
+---@param arg (integer | string)?
+---@return (true | string) result
+---@overload fun(fd: integer, request: integer, arg?: integer | string): nil, error: unix.Errno
+function unix.ioctl(fd, request, arg) end
+
+--- Landlock: create ruleset. With no args, returns the kernel's
+--- supported ABI version. With `handled_access_fs`, creates a new
+--- ruleset file descriptor that handles the given access categories
+--- (bitwise OR of `unix.LANDLOCK_ACCESS_FS_*`). Linux 5.13+.
+---@param handled_access_fs integer?
+---@param flags integer?
+---@return integer fd_or_abi
+---@overload fun(handled_access_fs?: integer, flags?: integer): nil, error: unix.Errno
+function unix.landlock_create_ruleset(handled_access_fs, flags) end
+
+--- Landlock: add a PATH_BENEATH rule granting `allowed` access to the
+--- subtree rooted at `parent_fd` (opened with `unix.O_PATH`). `allowed`
+--- must be a subset of the ruleset's handled set.
+---@param ruleset_fd integer
+---@param parent_fd integer
+---@param allowed integer
+---@param flags integer?
+---@return true
+---@overload fun(ruleset_fd: integer, parent_fd: integer, allowed: integer, flags?: integer): nil, error: unix.Errno
+function unix.landlock_add_rule(ruleset_fd, parent_fd, allowed, flags) end
+
+--- Landlock: apply the ruleset to the current thread (and its future
+--- children). Caller must set `PR_SET_NO_NEW_PRIVS` first or hold
+--- `CAP_SYS_ADMIN`. The restriction is irrevocable.
+---@param ruleset_fd integer
+---@param flags integer?
+---@return true
+---@overload fun(ruleset_fd: integer, flags?: integer): nil, error: unix.Errno
+function unix.landlock_restrict_self(ruleset_fd, flags) end
+
 --- Creates interprocess shared memory mapping.
 ---
 --- This function allocates special memory that'll be inherited across
