@@ -62,6 +62,40 @@ local function in_child(fn)
   end
 end
 
+-- handle:alive() against a real child. This runs unprivileged because
+-- it only needs fork+waitpid — no namespaces. Must come before the
+-- CLONE_NEWNET probe below, which bails out of the whole file on
+-- environments that can't unshare.
+do
+  local Handle = proxy._Handle
+  -- A live, unreaped child: alive() must see it.
+  local rpipe, wpipe = assert(unix.pipe())
+  local pid = assert(unix.fork())
+  if pid == 0 then
+    unix.close(wpipe)
+    -- Block until the parent closes its end, then exit. Using a pipe
+    -- read is race-free: no sleep, no signal choreography.
+    unix.read(rpipe, 1)
+    unix.exit(0)
+  end
+  unix.close(rpipe)
+  local h = setmetatable({pid = pid}, Handle)
+  assertf(h:alive() == true, "alive() on running child should be true")
+  assertf(h.pid == pid, "alive() must not mutate pid while child lives")
+  -- Release the child; poll alive() until it sees the exit.
+  unix.close(wpipe)
+  local deadline = 200  -- 200 * 10ms = 2s budget
+  while deadline > 0 and h:alive() do
+    unix.nanosleep(0, 10 * 1000 * 1000)
+    deadline = deadline - 1
+  end
+  assertf(h:alive() == false,
+          "alive() should return false after child exits")
+  assertf(h.pid == 0,
+          "alive() should clear pid to 0 once the child has been reaped")
+  log("ok: handle:alive() tracks child liveness and reaps on exit")
+end
+
 -- Probe: can we actually unshare(CLONE_NEWNET)? Some kernels disable
 -- unprivileged user-namespace creation, and many environments aren't
 -- root. Rather than fail the test, skip.

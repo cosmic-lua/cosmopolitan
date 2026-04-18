@@ -806,6 +806,26 @@ function Handle:stop()
   pcall(unix.wait, self.pid)
 end
 
+--- handle:alive() → boolean
+---
+--- Non-blocking health check: true while the proxy child is still
+--- running, false once it has exited. Uses waitpid(WNOHANG) so it
+--- returns immediately whether or not the child is ready.
+---
+--- Once alive() has observed an exit, it reaps the child (consuming
+--- the zombie) and clears self.pid to 0. Subsequent calls short-
+--- circuit to false without a waitpid syscall — avoiding races
+--- against pid reuse.
+function Handle:alive()
+  if self.pid == 0 then return false end
+  local gone = unix.wait(self.pid, unix.WNOHANG)
+  if gone == self.pid then
+    self.pid = 0
+    return false
+  end
+  return true
+end
+
 M._Handle = Handle
 
 --- proxy.start(opts) → {pid, port, stop()} | nil, unix.Errno
@@ -813,10 +833,11 @@ M._Handle = Handle
 --- Fork a child process, bring the proxy up in it, and return a
 --- handle the caller can use to address the listening proxy:
 ---
----   p.pid     child pid (for waitpid / signal forwarding)
----   p.port    the port the proxy is listening on (resolved even if
----             opts.bind_port was 0)
----   p:stop()  send SIGTERM and waitpid(p.pid)
+---   p.pid      child pid (for waitpid / signal forwarding)
+---   p.port     the port the proxy is listening on (resolved even if
+---              opts.bind_port was 0)
+---   p:stop()   send SIGTERM and waitpid(p.pid)
+---   p:alive()  non-blocking health check (true while running)
 ---
 --- The parent blocks until the child has bound-and-listened, so
 --- p.port is valid immediately. The port is communicated back via a

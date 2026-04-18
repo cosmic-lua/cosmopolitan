@@ -320,6 +320,20 @@ do
           "Handle __name = %s", tostring(Handle.__name))
   assertf(type(Handle.stop) == "function",
           "Handle:stop should live on the metatable")
+  assertf(type(Handle.alive) == "function",
+          "Handle:alive should live on the metatable")
+end
+
+-- handle:alive() returns false for a cleared handle (pid == 0). This
+-- is the "already reaped" state that stop() leaves the handle in, so
+-- alive() must short-circuit without invoking waitpid on pid 0 (which
+-- would otherwise race against pid reuse).
+do
+  local Handle = proxy._Handle
+  local h = setmetatable({pid = 0}, Handle)
+  assertf(h:alive() == false, "alive() on pid=0 should be false")
+  -- Second call must remain false and still not crash.
+  assertf(h:alive() == false, "alive() must be idempotent on pid=0")
 end
 
 -- A raising on_log sink must not abort the caller. emit() runs inside
