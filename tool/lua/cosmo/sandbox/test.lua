@@ -236,8 +236,62 @@ do
           "exists(bogus) should be false")
   -- Function shape sanity.
   for _, fn in ipairs{"bind", "bind_ro", "tmpfs",
-                      "private_root", "pivot_to"} do
+                      "private_root", "pivot_to", "pivot_to_or_exit"} do
     assertf(type(fs[fn]) == "function", "fs.%s missing", fn)
+  end
+
+  -- pivot_to_or_exit enforces the documented failure contract: on
+  -- underlying pivot_to failure the child is expected to terminate
+  -- rather than keep running in a half-unwound mount namespace. Fork
+  -- a child and drive it into a guaranteed-failure path (an
+  -- unwritable jail that can't even have `/.old` created), then
+  -- check the exit status the parent observes.
+  do
+    local UNWRITABLE = "/__pivot_to_or_exit_nope__"
+    -- Sanity: we shouldn't be able to create this as an unprivileged
+    -- caller (fs.pivot_to calls makedirs(jail .. "/.old") first).
+    -- Root running these tests would actually succeed at makedirs,
+    -- which defeats the point; skip the exit-path check in that case.
+    local can_make = unix.makedirs(UNWRITABLE .. "/.old", fs.MODE_DIR_PRIV)
+    if can_make then
+      -- Clean up and skip: we're privileged enough to create dirs at /.
+      unix.rmdir(UNWRITABLE .. "/.old")
+      unix.rmdir(UNWRITABLE)
+    else
+      -- Default exit code is 127.
+      local pid = assert(unix.fork())
+      if pid == 0 then
+        -- Silence the diagnostic the child writes to stderr so the
+        -- test output stays clean. pivot_to_or_exit must still exit
+        -- with the expected code.
+        local devnull = unix.open("/dev/null", unix.O_WRONLY)
+        if devnull then unix.dup(devnull, 2); unix.close(devnull) end
+        fs.pivot_to_or_exit(UNWRITABLE)
+        -- Must not reach here.
+        unix.exit(0)
+      end
+      local _, ws = assert(unix.wait(pid))
+      assertf(unix.WIFEXITED(ws),
+              "pivot_to_or_exit child did not exit normally")
+      assertf(unix.WEXITSTATUS(ws) == 127,
+              "pivot_to_or_exit default exit code = %d (expected 127)",
+              unix.WEXITSTATUS(ws))
+
+      -- Caller-specified exit code is honoured.
+      pid = assert(unix.fork())
+      if pid == 0 then
+        local devnull = unix.open("/dev/null", unix.O_WRONLY)
+        if devnull then unix.dup(devnull, 2); unix.close(devnull) end
+        fs.pivot_to_or_exit(UNWRITABLE, 42)
+        unix.exit(0)
+      end
+      _, ws = assert(unix.wait(pid))
+      assertf(unix.WIFEXITED(ws),
+              "pivot_to_or_exit(_, 42) child did not exit normally")
+      assertf(unix.WEXITSTATUS(ws) == 42,
+              "pivot_to_or_exit custom exit code = %d (expected 42)",
+              unix.WEXITSTATUS(ws))
+    end
   end
 end
 
