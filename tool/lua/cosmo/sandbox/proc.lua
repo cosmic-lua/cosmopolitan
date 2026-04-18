@@ -71,6 +71,47 @@ function M.drop_privs(uid, gid)
   return true
 end
 
+--- proc.setup_userns_maps(uid, gid) → true | nil, unix.Errno
+---
+--- Write uid_map / setgroups / gid_map for the current process so that
+--- inner uid 0 maps to the host `uid` (and inner gid 0 to host `gid`).
+--- Must be called after `unshare(CLONE_NEWUSER)` and before any
+--- operation that requires a valid identity (setresuid, capset, mount,
+--- etc). Equivalent to the canonical three-step incantation:
+---
+---     echo "0 $uid 1" > /proc/self/uid_map
+---     echo "deny"     > /proc/self/setgroups   # kernel ≥ 3.19
+---     echo "0 $gid 1" > /proc/self/gid_map
+---
+--- The setgroups "deny" write must come before the gid_map write on
+--- kernels ≥3.19; an unprivileged writer is rejected from gid_map
+--- otherwise. On kernels old enough not to expose setgroups as a
+--- proc file the write fails with ENOENT, which is benign and
+--- silently ignored.
+---
+--- Arguments default to the current euid/egid, matching the common
+--- "map my host identity to root inside the new user ns" case.
+local function write_all(path, data)
+  local fd, err = unix.open(path, unix.O_WRONLY)
+  if not fd then return nil, err end
+  local ok, werr = unix.write(fd, data)
+  unix.close(fd)
+  if not ok then return nil, werr end
+  return true
+end
+
+function M.setup_userns_maps(uid, gid)
+  uid = uid or unix.geteuid()
+  gid = gid or unix.getegid()
+  local ok, err = write_all("/proc/self/uid_map", "0 "..uid.." 1\n")
+  if not ok then return nil, err end
+  local sg, sgerr = write_all("/proc/self/setgroups", "deny")
+  if not sg and sgerr and sgerr:errno() ~= unix.ENOENT then
+    return nil, sgerr
+  end
+  return write_all("/proc/self/gid_map", "0 "..gid.." 1\n")
+end
+
 --- proc.barrier() → {signal, wait, drop_read, drop_write} | nil, err
 ---
 --- Cross-process synchronization primitive: a one-shot pipe-based
