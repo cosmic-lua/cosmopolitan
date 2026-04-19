@@ -81,7 +81,8 @@ assertf(unix.CLONE_NEWCGROUP == 0x02000000, "CLONE_NEWCGROUP wrong")
 for _, name in ipairs{"unshare", "setns", "ioctl", "mount", "unmount",
                       "pivot_root", "prctl", "capget", "capset",
                       "landlock_create_ruleset", "landlock_add_rule",
-                      "landlock_restrict_self"} do
+                      "landlock_restrict_self",
+                      "gethostname", "sethostname"} do
   assertf(type(unix[name]) == "function", "unix.%s missing", name)
 end
 
@@ -195,6 +196,27 @@ do
   assertf(ok == nil, "prctl(-999) should fail")
   assertf(err:errno() == unix.EINVAL,
           "prctl(-999) expected EINVAL, got %s", err:name())
+end
+
+-- sethostname round-trip / error-shape contract. Setting the hostname
+-- requires CAP_SYS_ADMIN in the current UTS namespace, so an unprivileged
+-- test caller must see (nil, unix.Errno) — not a crash, not a nil
+-- function, not a naked integer. If the caller *is* privileged, the
+-- round-trip with the current hostname must succeed.
+if IS_LINUX then
+  local host = assert(unix.gethostname())
+  local ok, err = unix.sethostname(host)
+  if ok then
+    assertf(ok == true, "sethostname(host) expected true, got %s", tostring(ok))
+  else
+    assertf(type(err) == "userdata",
+            "sethostname should return Errno userdata on failure, got %s",
+            type(err))
+    local eno = err:errno()
+    assertf(eno == unix.EPERM or eno == unix.EACCES,
+            "sethostname unprivileged expected EPERM/EACCES, got %s",
+            err:name())
+  end
 end
 
 --------------------------------------------------------------------------------

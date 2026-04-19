@@ -2139,6 +2139,16 @@ static int LuaUnixGethostname(lua_State *L) {
   return LuaUnixSysretErrno(L, "gethostname", olderr);
 }
 
+// unix.sethostname(name:str)
+//     ├─→ true
+//     └─→ nil, unix.Errno
+static int LuaUnixSethostname(lua_State *L) {
+  size_t len;
+  int olderr = errno;
+  const char *name = luaL_checklstring(L, 1, &len);
+  return SysretBool(L, "sethostname", olderr, sethostname(name, len));
+}
+
 // unix.accept(serverfd:int[, flags:int])
 //     ├─→ clientfd:int, ip:uint32, port:uint16
 //     ├─→ clientfd:int, unixpath:str
@@ -4070,6 +4080,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"geteuid", LuaUnixGeteuid},          // get effective user id of process
     {"getgid", LuaUnixGetgid},            // get real group id of process
     {"gethostname", LuaUnixGethostname},  // get hostname of this machine
+    {"sethostname", LuaUnixSethostname},  // set hostname of this machine
     {"getlogin", LuaUnixGetlogin},        // get login name of current user
     {"getpeername", LuaUnixGetpeername},  // get address of remote end
     {"getpgid", LuaUnixGetpgid},          // get process group id of pid
