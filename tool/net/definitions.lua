@@ -7176,6 +7176,15 @@ function unix.poll(fds, timeoutms) end
 ---@overload fun(): nil, unix.Errno
 function unix.gethostname() end
 
+--- Sets hostname of system.
+---
+--- Requires CAP_SYS_ADMIN on Linux (or root on BSDs); returns `EPERM`
+--- otherwise. Not supported on Windows, where it returns `ENOSYS`.
+---@param name string
+---@return true
+---@overload fun(name:string): nil, unix.Errno
+function unix.sethostname(name) end
+
 --- Begins listening for incoming connections on a socket.
 ---@param fd integer
 ---@param backlog integer?

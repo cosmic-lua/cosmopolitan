@@ -100,6 +100,7 @@ i32 sys_setgid(i32);
 i32 sys_setpgid(i32, i32);
 i32 sys_setpriority(i32, u32, i32);
 i32 sys_setns(i32, i32);
+i32 sys_sethostname(const char *, u64);
 i32 sys_setregid(u32, u32);
 i32 sys_setresgid(u32, u32, u32);
 i32 sys_setresuid(u32, u32, u32);
