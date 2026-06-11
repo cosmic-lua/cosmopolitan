@@ -464,6 +464,26 @@ TEST(ParseHttpMessage, testBufferClampOnResume) {
   EXPECT_STREQ("x", gc(slice(m, req->headers[kHttpHost])));
 }
 
+TEST(ParseHttpMessage, testResumeWhenCapacityEqualsReceivedPlusOne) {
+  // Regression: when the buffer capacity is exactly one byte larger than
+  // the number of bytes received (c == n + 1), an inner loop that breaks
+  // via `if (++r->i == n) break;` leaves r->i == n, and the outer for loop
+  // then increments it to n + 1. If the position is not clamped before the
+  // capacity comparison, `if (r->i < c)` evaluates `n+1 < n+1` (false) and
+  // the parser wrongly returns EBADMSG for a message that is merely
+  // incomplete. It must instead return 0 (need more data) and leave r->i
+  // pointing no further than the received bytes.
+  InitHttpMessage(req, kHttpRequest);
+  EXPECT_EQ(0, ParseHttpMessage(req, "GET", 3, 4));
+  EXPECT_LE(req->i, 3);
+  // A subsequent call with the full message must still parse correctly,
+  // i.e. the paused byte was not skipped.
+  static const char m[] = "GET / HTTP/1.0\r\n\r\n";
+  EXPECT_EQ(strlen(m), ParseHttpMessage(req, m, strlen(m), strlen(m)));
+  EXPECT_STREQ("GET", method());
+  EXPECT_STREQ("/", gc(slice(m, req->uri)));
+}
+
 TEST(ParseHttpMessage, testResumeAfterPartialMethod) {
   // Feed a request where the method is split across two calls.
   // This exercises the kHttpStateMethod inner loop boundary.

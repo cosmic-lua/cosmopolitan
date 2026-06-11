@@ -316,13 +316,15 @@ int ParseHttpMessage(struct HttpMessage *r, const char *p, size_t n, size_t c) {
         __builtin_unreachable();
     }
   }
-  if (r->i < c) {
-    // Clamp position to not skip past buffer end.
-    // Inner loops may set r->i = n, then outer for loop increments to n+1.
-    // On resume we want to start at position n, not n+1.
-    if (r->i > n)
-      r->i = n;
+  // Clamp position to not skip past buffer end.
+  // Inner loops may set r->i = n, then outer for loop increments to n+1.
+  // On resume we want to start at position n, not n+1. This must happen
+  // before the capacity comparison: otherwise when c == n+1 the overshot
+  // r->i == n+1 fails the `r->i < c` test and we wrongly return ebadmsg()
+  // for a message that is merely incomplete.
+  if (r->i > n)
+    r->i = n;
+  if (r->i < c)
     return 0;
-  }
   return ebadmsg();
 }
