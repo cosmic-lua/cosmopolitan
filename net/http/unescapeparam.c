@@ -24,12 +24,19 @@
 /**
  * Unescapes URL query/form parameter.
  *
- * This decodes percent-encoded sequences (%XX) and optionally converts
- * '+' to space (common in application/x-www-form-urlencoded).
+ * Decodes percent-encoded sequences (%XX) and unconditionally converts
+ * '+' to space (application/x-www-form-urlencoded semantics).
  *
- * @param p is input value
- * @param n if -1 implies strlen
- * @param z if non-NULL receives output length
+ * The output buffer is NUL-terminated, but the decoded content may
+ * contain embedded NUL bytes (e.g. from %00). Callers must use the
+ * length returned via `z` rather than strlen() on the result.
+ *
+ * @param p is input pointer; may be NULL only when n == (size_t)-1
+ *     (in which case n is treated as 0). Passing NULL with a positive
+ *     n will dereference the NULL pointer.
+ * @param n is the number of bytes to decode, or -1 to use strlen(p)
+ * @param z if non-NULL receives the decoded output length (excluding
+ *     the NUL terminator); always set to 0 on allocation failure
  * @return allocated NUL-terminated buffer, or NULL w/ errno
  */
 char *UnescapeParam(const char *p, size_t n, size_t *z) {

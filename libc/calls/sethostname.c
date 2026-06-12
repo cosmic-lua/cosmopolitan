@@ -38,7 +38,8 @@
  * @raise EINVAL if `len` exceeds the implementation limit
  * @raise EPERM if the caller lacks `CAP_SYS_ADMIN` in the current UTS
  *     namespace
- * @raise ENOSYS on Windows
+ * @raise ENOSYS on Windows, macOS, FreeBSD, OpenBSD, and NetBSD (the syscall
+ *     is Linux-only; on other platforms the syscall table returns ENOSYS)
  */
 int sethostname(const char *name, size_t len) {
   int rc;
