@@ -8,7 +8,12 @@ OUTPUT_DIR=${1:?OUTPUT_DIR}
 COSMOCC_VERSION=${2:?COSMOCC_VERSION}
 COSMOCC_SHA256SUM=${3:?COSMOCC_SHA256SUM}
 URL1="https://github.com/whilp/cosmopolitan/releases/download/${COSMOCC_VERSION}/cosmocc.zip"
-URL2="https://cosmo.zip/pub/cosmocc/cosmocc-${COSMOCC_VERSION}.zip"
+# NOTE: The upstream fallback URL2 was removed because COSMOCC_VERSION already
+# contains the "cosmocc-" prefix (e.g. "cosmocc-2025.12.30-..."), which caused
+# a double "cosmocc-cosmocc-..." path that always 404s. Even if corrected, the
+# upstream asset would have a different SHA-256 (jart's build vs. this fork's
+# build) and be rejected by the sha256sum check below. The fork's own release
+# (URL1) is the canonical and sole source.
 
 # helper function
 abort() {
@@ -86,11 +91,7 @@ die() {
 }
 
 # download cosmocc toolchain
-# multiple urls avoids outages and national firewalls
-if ! "${DOWNLOAD}" ${DOWNLOAD_ARGS} cosmocc.zip "${URL1}"; then
-  rm -f cosmocc.zip
-  "${DOWNLOAD}" ${DOWNLOAD_ARGS} cosmocc.zip "${URL2}" || die
-fi
+"${DOWNLOAD}" ${DOWNLOAD_ARGS} cosmocc.zip "${URL1}" || die
 printf '%s\n' "${COSMOCC_SHA256SUM} *cosmocc.zip" >cosmocc.zip.sha256sum
 sha256sum -c cosmocc.zip.sha256sum || die
 "${UNZIP}" cosmocc.zip || die
