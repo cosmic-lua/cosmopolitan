@@ -5,6 +5,7 @@ fork against its upstream base, along with a recommended remediation plan.
 
 - **Fork base:** `b444b3a6` (upstream `jart/cosmopolitan`, 2025-12-02)
 - **Branch reviewed:** `claude/upstream-diff-security-review-p4gl4e`
+  (merged up to `master` @ `de0f3e56`)
 - **Scope:** ~20k lines of fork-specific changes — a Lua `cosmo.*` standard
   library (fetch / http / zip / getopt / repl), the `cosmo.sandbox`
   namespaces + landlock + HTTP egress proxy framework, new libc syscall
@@ -30,6 +31,16 @@ fork against its upstream base, along with a recommended remediation plan.
    in the zip appender, producing a heap overflow.
 
 Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
+
+## Status / changelog
+
+- **2026-06-12 — merged `master` up to `de0f3e56`.** PR #122
+  ("parsehttpmessage: clamp resume position before capacity check") landed and
+  **fully resolves** the parsehttpmessage clamp-ordering finding (see the
+  ~~struck-through~~ entry in *Low / Info → libc syscall bindings & HTTP
+  parsing*). The fix matches the recommendation exactly (clamp `r->i` to `n`
+  before the `r->i < c` capacity test) and adds a `c == n+1` regression test.
+  No other findings have been addressed yet.
 
 ---
 
@@ -367,19 +378,18 @@ paths.
 
 ### libc syscall bindings & HTTP parsing
 
-- **LOW — `parsehttpmessage.c` resume clamp is placed one line too late.**
-  `net/http/parsehttpmessage.c:319-325`: the clamp is inside `if (r->i < c)`,
-  so when `r->i == n+1` and `c == n+1` the function returns `ebadmsg()` one
-  byte prematurely. **Fix:** clamp before the capacity comparison:
+- **~~LOW — `parsehttpmessage.c` resume clamp is placed one line too late.~~**
+  **RESOLVED in `de0f3e56` (PR #122).** Previously the clamp was inside
+  `if (r->i < c)`, so when `r->i == n+1` and `c == n+1` the function returned
+  `ebadmsg()` one byte prematurely. The fix moves the clamp before the capacity
+  comparison exactly as recommended:
   ```c
   if (r->i > n) r->i = n;
   if (r->i < c) return 0;
   ```
-  Note: the fork change itself *fixes a real upstream bug* — inner loops do
-  `if (++r->i == n) break;` and the outer `for (; r->i < n; ++r->i)` then
-  increments again, leaving `r->i == n+1` so a resumed parse skipped a byte
-  (parser desync, request-smuggling-adjacent). The new
-  `testBufferClampOnResume` / byte-at-a-time tests are good.
+  and adds `testResumeWhenCapacityEqualsReceivedPlusOne` covering the
+  `c == n+1` case. (The fork's original change already fixed a real upstream
+  resume byte-skip / parser-desync bug; this completes it.)
 - **LOW — `unix.readlink` silently repurposed arg 2 from `dirfd` to `bufsiz`.**
   `third_party/lua/lunix.c:534-549`: upstream resolved `path` relative to a
   directory fd; the fork hardcodes `AT_FDCWD` and treats arg 2 as a buffer
@@ -500,7 +510,8 @@ be "fixed":
 3. **PR 3 (TLS / certs):** M1 (`secure_getenv`, opt-in system CAs, restore
    diagnostics), M2 (`resettls` scope), M3 (handshake deadline).
 4. **PR 4 (correctness/robustness):** the lzip atomicity/`data_end`/`GetZipEocd`
-   bounds fixes, the `parsehttpmessage` clamp ordering, and the various LOW
-   `lunix`/`lgetopt`/`bin/cosmic` items.
+   bounds fixes and the various LOW `lunix`/`lgetopt`/`bin/cosmic` items.
+   (The `parsehttpmessage` clamp ordering originally listed here was fixed
+   separately in PR #122.)
 5. **Ongoing:** the cosmic functional gaps, starting with sandbox type
    definitions.
