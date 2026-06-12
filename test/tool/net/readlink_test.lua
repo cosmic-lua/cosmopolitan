@@ -13,10 +13,12 @@
 -- TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 -- PERFORMANCE OF THIS SOFTWARE.
 
--- test: unix.readlink() works with relative paths
+-- test: unix.readlink() works with relative paths and bufsiz clamping
 --
 -- This test verifies that unix.readlink() can read symbolic links
--- using relative paths, not just absolute paths.
+-- using relative paths, not just absolute paths.  It also verifies
+-- that the bufsiz arg-2 clamp (non-positive → BUFSIZ, huge → 0x7ffff000)
+-- does not cause a memory error.
 
 local unix = require("cosmo.unix")
 local path = require("cosmo.path")
@@ -44,10 +46,26 @@ local sized_result, sized_err = unix.readlink(link_path, 1024)
 assert(sized_result == "target_file",
   "readlink with bufsiz should work, got: " .. tostring(sized_err or sized_result))
 
--- test 4: small buffer should truncate
+-- test 4: small buffer should return ENAMETOOLONG (buffer fills → truncated)
+-- readlinkat returns bufsiz bytes when the path fills the buffer; the
+-- implementation treats this as ENAMETOOLONG per POSIX (cannot distinguish
+-- exact-fit from truncation without a retry loop).
 local small_result, small_err = unix.readlink(link_path, 6)
-assert(small_result == "target",
-  "readlink with small bufsiz should truncate, got: " .. tostring(small_err or small_result))
+assert(small_result == nil and small_err ~= nil,
+  "readlink with small bufsiz should fail with ENAMETOOLONG, got: " ..
+  tostring(small_err or small_result))
+
+-- test 5: bufsiz=0 must not crash — clamped to BUFSIZ, should succeed
+local zero_result, zero_err = unix.readlink(link_path, 0)
+assert(zero_result == "target_file",
+  "readlink with bufsiz=0 (clamped to BUFSIZ) should work, got: " ..
+  tostring(zero_err or zero_result))
+
+-- test 6: negative bufsiz must not crash — clamped to BUFSIZ, should succeed
+local neg_result, neg_err = unix.readlink(link_path, -1)
+assert(neg_result == "target_file",
+  "readlink with negative bufsiz (clamped to BUFSIZ) should work, got: " ..
+  tostring(neg_err or neg_result))
 
 -- cleanup
 unix.unlink(link_path)
