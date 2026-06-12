@@ -26,9 +26,12 @@
 #include "libc/sysv/consts/o.h"
 #include "libc/testlib/subprocess.h"
 #include "libc/testlib/testlib.h"
+#ifndef O_EXEC
+#define O_EXEC _O_PATH  // Linux uses O_PATH; FreeBSD has its own O_EXEC
+#endif
 // clang-format off
 
-STATIC_YOINK("zipos");
+int memfd_create(const char *, unsigned int);  // not yet in public headers
 
 __static_yoink("zipos");
 

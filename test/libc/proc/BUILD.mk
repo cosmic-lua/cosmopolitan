@@ -113,6 +113,7 @@ o/$(MODE)/test/libc/proc/fexecve_test.dbg:				\
 		$(TEST_LIBC_PROC_DEPS)					\
 		o/$(MODE)/test/libc/proc/fexecve_test.o			\
 		o/$(MODE)/test/libc/proc/proc.pkg			\
+		o/$(MODE)/tool/build/echo.zip.o				\
 		o/$(MODE)/test/libc/mem/prog/life.elf.zip.o		\
 		o/$(MODE)/test/libc/calls/life-nomod.zip.o		\
 		o/$(MODE)/test/libc/calls/zipread.zip.o			\
