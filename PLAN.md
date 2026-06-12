@@ -34,6 +34,13 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — H2 (lzip ZIP64 overflow) implemented** on this branch. The
+  appender now bounds `cnt` (`cnt < 0 || cnt > cdir_size / kZipCfileHdrMinSize`
+  → reject), switches `malloc(cnt * sizeof)` to overflow-safe
+  `calloc(cnt, sizeof)`, and handles the `cnt == 0` empty-archive path
+  correctly. Builds clean; regression test added to
+  `tool/lua/cosmo/zip/test_security.lua`. (Wire-level malicious-ZIP64 fixture
+  left as a follow-up — the Lua harness can't easily craft raw binary.)
 - **2026-06-12 — H1 (SSRF) implemented** on this branch (commit
   `security: fix SSRF guards...`). The fetch guards in `tool/net/lfetch.c` and
   `tool/net/fetch.inc` now block when `!IsPublicIp(ip)`, and
@@ -110,6 +117,9 @@ This is the single most important fix for the AI-agent sandboxing use case.
 
 - **File:** `tool/net/lzip.c:1296`, `:1313`.
 - **Severity:** HIGH (CRITICAL if append mode is exposed to untrusted archives).
+- **Status: IMPLEMENTED on this branch (2026-06-12)** — `cnt` bounded against
+  `cdir_size / kZipCfileHdrMinSize`, allocation switched to `calloc`, `cnt == 0`
+  handled. The description below records the original defect.
 
 ```c
 int64_t cnt = GetZipCdirRecords(eocd);   // full 64-bit ZIP64 field
@@ -514,7 +524,7 @@ be "fixed":
 ## Recommended remediation order
 
 1. **PR 1 (quick, high-value):** ~~H1 (`!IsPublicIp` in fetch + sandbox
-   proxy)~~ **[done]**, H2 (bound the ZIP64 `cnt`), H4 (delete
+   proxy)~~ **[done]**, ~~H2 (bound the ZIP64 `cnt`)~~ **[done]**, H4 (delete
    `fexecve_test.c:31`, add the `echo.zip.o` BUILD.mk dep).
 2. **PR 2 (sandbox hardening):** H3 (wire landlock + `no_new_privs`), M4
    (recursive RO remount), M5 (CLOEXEC on namespace/listen/control fds), M6
