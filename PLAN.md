@@ -34,6 +34,17 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — small-C LOW items (L4) implemented** on this branch.
+  (1) `lgetopt.c` `LuaGetoptNew` now creates the parser userdata first (NULL
+  pointers, `LUA_NOREF` refs, metatable set) before `calloc`'ing argv/longopts
+  and assigning them in — so an OOM `luaL_error` can't leak the C buffers
+  (`__gc` is NULL-safe; no double-free). (2) `sethostname.c` doc corrected to
+  state ENOSYS on all non-Linux hosts (Windows/macOS/the BSDs), not just
+  Windows (comment-only). (3) `unescapeparam.c` docstring corrected: `'+'`→space
+  is unconditional, output may contain embedded NULs (use the returned length,
+  not `strlen`), and `p==NULL` is only valid when `n==-1` (decoding behavior
+  unchanged). Builds clean; getopt + unescapeparam tests pass.
+
 - **2026-06-12 — lunix LOW items (L3) implemented** on this branch.
   (1) `unix.readlink` arg-2 `bufsiz` is read as `lua_Integer` and clamped to
   `[BUFSIZ, 0x7ffff000]` (non-positive → BUFSIZ), with a comment noting the
@@ -583,17 +594,17 @@ paths.
   `if (bufsiz < 0) bufsiz = 0;`.
 - **LOW — `unix.ioctl` string path calls `malloc(0)` on an empty-string arg** _[FIXED — L3]_
   (surfaces a spurious `ENOMEM`). Guard `len == 0`.
-- **LOW — `lgetopt.c:124-135` leaks `argv`/`longopts` on OOM.** They are
+- **LOW — `lgetopt.c:124-135` leaks `argv`/`longopts` on OOM.** _[FIXED — L4]_ They are
   `calloc`'d before `lua_newuserdata`; if that raises an OOM Lua error
   (longjmp) the allocations leak because the owning userdata does not yet
   exist. **Fix:** allocate the userdata first, then the C buffers.
-- **LOW — `sethostname.c` ENOSYS documentation is incomplete.**
+- **LOW — `sethostname.c` ENOSYS documentation is incomplete.** _[FIXED — L4: doc]_
   `libc/calls/sethostname.c:38,45` documents only "ENOSYS on Windows", but the
   call also returns ENOSYS on macOS/OpenBSD/NetBSD and likely FreeBSD (syscall
   88 is the COMPAT_43 `osethostname`, typically not enabled). **Fix:** document
   ENOSYS on all non-Linux hosts, gate `!IsLinux()`, or implement FreeBSD via
   `sysctl kern.hostname`.
-- **LOW/INFO — `unescapeparam.c` `%00` decodes to an embedded NUL**, which is
+- _[documented — L4]_ **LOW/INFO — `unescapeparam.c` `%00` decodes to an embedded NUL**, which is
   undocumented; the Lua binding is NUL-safe (`lua_pushlstring`) but C callers
   using `strlen` get silent truncation. The `'+'` conversion is unconditional
   despite the docstring saying "optionally", and `p == NULL` is only tolerated
