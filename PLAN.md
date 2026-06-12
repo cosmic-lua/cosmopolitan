@@ -34,6 +34,19 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — lzip LOW/INFO items (L1) implemented** on this branch
+  (commit `robustness (lzip): ...`). (1) `zip.from()`/`zip.open()` now require
+  `zsize >= kZipCdirHdrMinSize` (22) before `GetZipEocd`, fixing the <4-byte
+  OOB-read DoS (tests added for `""`, `"PK"`, 21-byte inputs). (2) The appender
+  now **fails closed** if any kept entry's local header is unreadable and
+  floors `data_end` at `max(max_data_end, cdir_off)`, so it can never write new
+  data over valid data or the APE prefix (no-op on well-formed archives).
+  (3) `LuaZipAppenderClose` `fsync`s before and after `ftruncate` and documents
+  that in-place append is NOT crash-atomic. (4) `force_deflate` now honors an
+  explicit `method="deflate"` (emits a deflate stream even if not smaller).
+  (5) CRC/length use `strm.total_out` captured before `inflateEnd()` instead of
+  the declared size. H2 `cnt` bound untouched. Builds clean; all zip tests pass.
+
 - **2026-06-12 — M3 (TLS handshake deadline) implemented** on this branch.
   Both `lfetch.c` and `fetch.inc` now capture a `CLOCK_MONOTONIC` deadline
   before the handshake loop and, on each `WANT_READ`/`WANT_WRITE` return,
@@ -460,7 +473,7 @@ paths.
 
 ### lzip (zip module)
 
-- **LOW — Non-atomic in-place append corrupts archives/APEs on crash.**
+- **LOW — Non-atomic in-place append corrupts archives/APEs on crash.** _[MITIGATED — L1: fsync + documented]_
   `tool/net/lzip.c:1605-1681` (`LuaZipAppenderClose`) rewrites the file in
   place starting at `data_end` (over the old central directory), then appends
   the new cdir + EOCD and `ftruncate`s — all on the original fd, with no
@@ -469,24 +482,24 @@ paths.
   (including an APE executable) permanently corrupt. **Fix:** write to a temp
   copy and atomically rename, or at minimum `fsync` before truncate and
   document the destructive behavior.
-- **LOW — `data_end` miscomputation can overwrite valid data / APE prefix.**
+- **LOW — `data_end` miscomputation can overwrite valid data / APE prefix.** _[FIXED — L1]_
   `tool/net/lzip.c:1361-1384`: `max_data_end` is only advanced for entries
   whose local header passes validation; entries that fail are silently skipped.
   If all entries fail, `data_end = 0` and new local files are written at offset
   0, overwriting the APE prefix. The computed `prefix_size` is never used as a
   floor. **Fix:** derive `data_end` from `max(cdir_off, computed end)`, fail
   closed if a kept entry cannot be validated, and use `prefix_size` as a floor.
-- **MEDIUM/LOW — OOB read on inputs < 4 bytes passed to `GetZipEocd`.**
+- **MEDIUM/LOW — OOB read on inputs < 4 bytes passed to `GetZipEocd`.** _[FIXED — L1]_
   `tool/net/lzip.c:311` (`LuaZipFrom`, reachable from the arbitrary string
   passed to `zip.from()`) and `:228` (`LuaZipOpen`). Only `zsize == 0` is
   rejected; `GetZipEocd` starts at `i = n - 4`, an unsigned underflow when
   `n < 4`, then reads far out of bounds (DoS). **Fix:** require
   `zsize >= kZipCdirHdrMinSize` (22) before calling `GetZipEocd`.
-- **LOW — `force_deflate` silently falls back to store** when compression does
+- **LOW — `force_deflate` silently falls back to store** _[FIXED — L1]_ when compression does
   not shrink the data (`tool/net/lzip.c:1047`, `:1464`), so an explicit
   `method="deflate"` is ignored.
 - **INFO — CRC/return computed over declared `uncompressed_size` rather than
-  `strm.total_out`** (`:544`, `:550`); a legitimate short inflate would read
+  `strm.total_out`** _[FIXED — L1]_ (`:544`, `:550`); a legitimate short inflate would read
   uninitialized tail bytes (a malicious mismatch fails CRC first, so no data
   leak in practice). `avail_in`/`avail_out` are 32-bit `uInt`, so sizes
   truncate if a caller raises `max_file_size` above 4 GB (inflate underruns
