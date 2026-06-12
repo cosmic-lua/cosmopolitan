@@ -34,6 +34,15 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — H1 (SSRF) implemented** on this branch (commit
+  `security: fix SSRF guards...`). The fetch guards in `tool/net/lfetch.c` and
+  `tool/net/fetch.inc` now block when `!IsPublicIp(ip)`, and
+  `tool/lua/cosmo/sandbox/proxy.lua:dial()` gains a `cosmo.IsPublicIp(ip)`
+  guard after `resolve_v4()` (covering both the CONNECT and plain-HTTP paths).
+  `169.254.169.254`, `0.0.0.0/8`, and CGNAT are now rejected. Byte-order
+  verified consistent (`ParseIp`/`ResolveIp`/`IsPublicIp` all host-order).
+  Builds clean (`o/x86_64/tool/lua/lua.dbg`); tests added to
+  `test/tool/net/lfetch_test.lua` for the link-local and `0.0.0.0` cases.
 - **2026-06-12 — merged `master` up to `de0f3e56`.** PR #122
   ("parsehttpmessage: clamp resume position before capacity check") landed and
   **fully resolves** the parsehttpmessage clamp-ordering finding (see the
@@ -51,6 +60,9 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 - **Files:** `tool/net/fetch.inc` (~line 430), `tool/net/lfetch.c:892`,
   and `tool/lua/cosmo/sandbox/proxy.lua:374-389` (`dial`).
 - **Severity:** HIGH.
+- **Status: IMPLEMENTED on this branch (2026-06-12)** via `!IsPublicIp(ip)` in
+  the fetch guards and a `cosmo.IsPublicIp(ip)` guard in `proxy.lua:dial()`.
+  The description below records the original defect and the fix applied.
 
 The `Fetch()` SSRF guard blocks only:
 
@@ -501,9 +513,9 @@ be "fixed":
 
 ## Recommended remediation order
 
-1. **PR 1 (quick, high-value):** H1 (`!IsPublicIp` in fetch + sandbox proxy),
-   H2 (bound the ZIP64 `cnt`), H4 (delete `fexecve_test.c:31`, add the
-   `echo.zip.o` BUILD.mk dep).
+1. **PR 1 (quick, high-value):** ~~H1 (`!IsPublicIp` in fetch + sandbox
+   proxy)~~ **[done]**, H2 (bound the ZIP64 `cnt`), H4 (delete
+   `fexecve_test.c:31`, add the `echo.zip.o` BUILD.mk dep).
 2. **PR 2 (sandbox hardening):** H3 (wire landlock + `no_new_privs`), M4
    (recursive RO remount), M5 (CLOEXEC on namespace/listen/control fds), M6
    (resolve timeout on the HTTP path), M7 (`fs.proc()` + PID namespace).
