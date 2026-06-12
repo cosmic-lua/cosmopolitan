@@ -98,16 +98,22 @@ int LuaFetch(lua_State *L) {
     lua_getfield(L, 2, "numredirects");
     numredirects = luaL_optinteger(L, -1, numredirects);
     lua_getfield(L, 2, "maxresponse");
-    if (lua_isinteger(L, -1))
-      maxresponse = lua_tointeger(L, -1);
+    if (lua_isinteger(L, -1)) {
+      lua_Integer mr = lua_tointeger(L, -1);
+      if (mr < 0)
+        return luaL_argerror(L, 2, "maxresponse must be >= 0");
+      maxresponse = (size_t)mr;
+    }
     lua_getfield(L, 2, "timeout");
     if (lua_isinteger(L, -1)) {
+      // timeout=0 (or absent) keeps the default; there is no "infinite" option
       int timeout_sec = lua_tointeger(L, -1);
       if (timeout_sec > 0) {
         fetchtimeout.tv_sec = timeout_sec;
         fetchtimeout.tv_usec = 0;
       }
     } else if (lua_isnumber(L, -1)) {
+      // timeout=0.0 (or absent) keeps the default; there is no "infinite" option
       double timeout_val = lua_tonumber(L, -1);
       if (timeout_val > 0) {
         fetchtimeout.tv_sec = (int64_t)timeout_val;

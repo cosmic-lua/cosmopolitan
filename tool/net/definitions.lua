@@ -1132,7 +1132,12 @@ function EvadeDragnetSurveillance(bool) end
 --- - `proxy` (string): HTTP proxy URL, e.g. `"http://proxy:8080"`.
 ---   Supports Basic authentication: `"http://user:pass@proxy:8080"`.
 --- - `maxresponse` (default: `104857600`): maximum response size in bytes.
----   Protects against memory exhaustion from large responses.
+---   Protects against memory exhaustion from large responses.  Must be >= 0;
+---   negative values are rejected.
+--- - `timeout` (number, seconds): per-operation socket timeout (read/write/
+---   connect).  A value of `0` or absent keeps the 60-second default.  There
+---   is no "infinite" option — use a large positive value if needed.  The
+---   timeout also bounds the TLS handshake.
 --- - `resettls` (default: `true`): reset TLS state after fork.
 ---   Ensures child processes get fresh DRBG entropy.
 ---
@@ -1159,8 +1164,14 @@ function Fetch(url, body) end
 
 --- Sends an HTTP/HTTPS request and returns a streaming reader for the response body.
 --- Useful for Server-Sent Events (SSE), large downloads, or processing data incrementally.
+---
+--- Accepts the same options table as `Fetch()`, including `timeout`, `maxresponse`,
+--- `headers`, `method`, `body`, `proxy`, `followredirect`, and `maxredirects`.
+--- Note: `timeout=0` (or absent) retains the 60-second default; there is no
+--- "infinite" option.  `maxresponse` limits per-read buffer growth; negative
+--- values are rejected.
 ---@param url string The URL to fetch
----@param options? { headers: table<string,string>, method: string, body: string, maxredirects?: integer, followredirect?: boolean, proxy: string? } Request options
+---@param options? { headers: table<string,string>, method: string, body: string, maxredirects?: integer, followredirect?: boolean, proxy: string?, timeout?: number, maxresponse?: integer } Request options
 ---@return integer status, table<string,string> headers, FetchReader reader
 ---@nodiscard
 ---@overload fun(url:string, options?: table): nil, error: string
@@ -2121,11 +2132,15 @@ function Lemur64() end
 ---@nodiscard
 function Rand64() end
 
----@return integer # 64-bit hardware random integer from RDRND instruction, with automatic fallback to `getrandom()` if not available.
+---@return integer # 64-bit CSPRNG integer (arc4random64).  Despite the name, this does NOT
+--- read raw hardware RDRAND; it returns output from the OS CSPRNG (arc4random64), which is
+--- seeded from hardware entropy but is safer (no RNG fault exposure).
 ---@nodiscard
 function Rdrand() end
 
----@return integer # 64-bit hardware random integer from `RDSEED` instruction, with automatic fallback to `RDRND` and `getrandom()` if not available.
+---@return integer # 64-bit CSPRNG integer (arc4random64).  Despite the name, this does NOT
+--- read raw hardware RDSEED; it returns output from the OS CSPRNG (arc4random64), which is
+--- seeded from hardware entropy but is safer (no RNG fault exposure).
 ---@nodiscard
 function Rdseed() end
 

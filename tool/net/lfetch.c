@@ -658,16 +658,22 @@ int LuaFetchStream(lua_State *L) {
     lua_getfield(L, 2, "numredirects");
     numredirects = luaL_optinteger(L, -1, numredirects);
     lua_getfield(L, 2, "maxresponse");
-    if (lua_isinteger(L, -1))
-      maxresponse = lua_tointeger(L, -1);
+    if (lua_isinteger(L, -1)) {
+      lua_Integer mr = lua_tointeger(L, -1);
+      if (mr < 0)
+        return luaL_argerror(L, 2, "maxresponse must be >= 0");
+      maxresponse = (size_t)mr;
+    }
     lua_getfield(L, 2, "timeout");
     if (lua_isinteger(L, -1)) {
+      // timeout=0 (or absent) keeps the default; there is no "infinite" option
       int timeout_sec = lua_tointeger(L, -1);
       if (timeout_sec > 0) {
         fetchtimeout.tv_sec = timeout_sec;
         fetchtimeout.tv_usec = 0;
       }
     } else if (lua_isnumber(L, -1)) {
+      // timeout=0.0 (or absent) keeps the default; there is no "infinite" option
       double timeout_val = lua_tonumber(L, -1);
       if (timeout_val > 0) {
         fetchtimeout.tv_sec = (int64_t)timeout_val;
@@ -1252,30 +1258,49 @@ int LuaFetchStream(lua_State *L) {
   }
 
 StreamCreateReader: {
-    // Push status and headers BEFORE we modify the buffer
-    // (header offsets in msg point into inbuf.p)
-    lua_pushinteger(L, msg.status);
-    LuaPushHeaders(L, &msg, inbuf.p);
-    DestroyHttpMessage(&msg);
-
+    // Create the reader userdata FIRST so all resources (sock, ssl, buf) are
+    // owned by a GC-managed object before any further allocation-capable Lua
+    // call.  If lua_pushinteger / LuaPushHeaders longjmp on OOM, the reader's
+    // __gc (FetchReaderClose) will free the fd / mbedtls ctx / buffer rather
+    // than leaking them.
     FetchReader *reader = lua_newuserdata(L, sizeof(FetchReader));
     memset(reader, 0, sizeof(FetchReader));
+    // Set sock = -1 before luaL_setmetatable so that if the metatable lookup
+    // somehow fails and triggers a longjmp the GC won't close fd 0.
+    reader->sock = -1;
     luaL_setmetatable(L, FETCH_READER_MT);
 
+    // Transfer all resource ownership to reader NOW, before any Lua alloc call.
     reader->sock = sock;
     reader->usingssl = usingssl;
     reader->body_state = t;
     reader->content_length = paylen;
     reader->bytes_read = 0;
 
-    // Transfer buffer ownership (may contain body data after headers)
+    // Transfer buffer ownership.  Header offsets in msg still point into
+    // inbuf.p; LuaPushHeaders below must run before any memmove of inbuf.p.
     reader->buf = inbuf;
     reader->buf_pos = hdrsize;  // body starts after headers
 
-    // Initialize unchunker if chunked
+#ifndef UNSECURE
+    if (sslctx) {
+      // Transfer SSL context ownership to reader.
+      reader->sslctx = sslctx;
+      reader->bio = bio;
+    }
+#endif
+
+    // Push status and headers.  These Lua calls may longjmp on OOM, but all
+    // resources are now owned by reader's __gc, so nothing leaks.
+    // LuaPushHeaders must run before the chunked memmove below (header offsets
+    // in msg point into inbuf.p which the memmove would overwrite).
+    lua_pushinteger(L, msg.status);
+    LuaPushHeaders(L, &msg, inbuf.p);
+    DestroyHttpMessage(&msg);
+
+    // Initialize unchunker; shift body data to start of buffer.
     if (t == kHttpClientStateBodyChunked) {
       bzero(&reader->u, sizeof(reader->u));
-      // Shift body data to start of buffer for unchunker
       if (inbuf.n > hdrsize) {
         size_t body_avail = inbuf.n - hdrsize;
         memmove(inbuf.p, inbuf.p + hdrsize, body_avail);
@@ -1287,13 +1312,9 @@ StreamCreateReader: {
       }
     }
 
-#ifndef UNSECURE
-    if (sslctx) {
-      // Transfer ownership of heap-allocated sslctx to reader
-      reader->sslctx = sslctx;
-      reader->bio = bio;
-    }
-#endif
+    // Stack is now: ..., reader, status, headers
+    // Rotate to the expected return order: ..., status, headers, reader
+    lua_rotate(L, -3, 2);
 
     // Stack: ..., status, headers, reader
     // Ownership transferred to reader: inbuf.p, bio, sock, sslctx

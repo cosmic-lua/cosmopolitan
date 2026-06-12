@@ -194,6 +194,23 @@ function test_bad_method()
     print("test_bad_method: PASS")
 end
 
+-- Test: Negative maxresponse is rejected (not silently wrapped to a huge size_t)
+function test_negative_maxresponse_rejected()
+    -- A negative value used to wrap to a huge size_t, effectively disabling
+    -- the memory cap.  It must now be rejected with a clear error.
+    local ok, err = pcall(Fetch, "http://127.0.0.1/", {maxresponse = -1})
+    -- pcall captures Lua errors from luaL_argerror; Fetch may also return nil,err
+    if ok then
+        -- If Fetch returned rather than raised, check that it returned nil + err
+        -- (this path is taken when Fetch uses LuaNilError instead of luaL_argerror,
+        -- but our implementation uses luaL_argerror which raises)
+        assert(false, "expected error for negative maxresponse, got no error")
+    end
+    assert(type(err) == "string" and err:find("maxresponse"),
+           "expected 'maxresponse' in error, got: " .. tostring(err))
+    print("test_negative_maxresponse_rejected: PASS")
+end
+
 -- Test: Response too large error message formatting
 -- Verifies that the error message displays the numeric byte limit correctly
 -- This is a regression test for a bug where %I format specifier would print
@@ -992,6 +1009,7 @@ function main()
         test_ssrf_blocks_private,
         test_invalid_scheme,
         test_bad_method,
+        test_negative_maxresponse_rejected,
         test_response_too_large_error_message,
         -- Timeout tests
         test_timeout_triggers_error,
