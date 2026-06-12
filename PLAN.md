@@ -34,6 +34,16 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — M2 (`resettls` per-Fetch server-TLS leak) implemented** on
+  this branch. redbean now provides its own `LuaResetFetchTlsState()` (defining
+  `HAVE_LUA_RESET_FETCH_TLS_STATE` to suppress the broken `fetch.inc` fallback)
+  that only reseeds the client DRBG (`ReseedRng(&rngcli, "fetch")`) — it no
+  longer frees `confcli` or clears `sslinitialized`, so each HTTPS `Fetch()` no
+  longer re-runs `mbedtls_ssl_config_defaults()`/`LoadCertificates()` on the
+  shared server structures (which leaked their buffers every call). The
+  original post-fork DRBG-reseed fix (commit c055d331, fixing ~25% concurrent
+  handshake failures) is preserved; `lfetch.c` is unaffected (already has its
+  own impl). Builds clean (`lua.dbg` + `redbean`).
 - **2026-06-12 — M1 (getsslroots hardening) implemented** on this branch.
   `SSL_CERT_FILE` and a new `SSL_USE_SYSTEM_CERTS` gate are now read via
   `secure_getenv()` (ignored under setuid/setgid/AT_SECURE), so an
@@ -316,6 +326,9 @@ diagnostic on total load failure.
 
 - **File:** `tool/net/fetch.inc:225-227`.
 - **Severity:** MEDIUM.
+- **Status: IMPLEMENTED on this branch (2026-06-12)** — redbean-specific
+  reset reseeds only the client DRBG; server TLS state no longer rebuilt
+  per Fetch. (Implemented in `tool/net/redbean.c`.)
 
 `resettls` now defaults to `true` and calls `LuaResetFetchTlsState()` before
 `TlsInit()`. In **redbean** (which uses the `fetch.inc` path that does not
