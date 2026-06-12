@@ -545,9 +545,27 @@ int LuaFetch(lua_State *L) {
     bio->b = 0;
     bio->c = -1;
     mbedtls_ssl_set_bio(&sslctx, bio, TlsSend, 0, TlsRecvImpl);
+    // Compute handshake deadline from the same timeout used for SO_RCVTIMEO.
+    // Uses CLOCK_MONOTONIC so wall-clock jumps don't affect the bound.
+    // If no timeout is configured (fetchtimeout.tv_sec == 0), deadline is
+    // left as timespec_zero and the check below is skipped (preserving the
+    // existing "no timeout" behaviour).
+    bool have_handshake_deadline = fetchtimeout.tv_sec > 0;
+    struct timespec handshake_deadline = timespec_zero;
+    if (have_handshake_deadline) {
+      handshake_deadline =
+          timespec_add(timespec_mono(), timeval_totimespec(fetchtimeout));
+    }
     while ((ret = mbedtls_ssl_handshake(&sslctx))) {
       switch (ret) {
         case MBEDTLS_ERR_SSL_WANT_READ:
+        case MBEDTLS_ERR_SSL_WANT_WRITE:
+          if (have_handshake_deadline &&
+              timespec_cmp(timespec_mono(), handshake_deadline) >= 0) {
+            mbedtls_ssl_free(&sslctx);
+            close(sock);
+            return LuaNilError(L, "TLS handshake timed out");
+          }
           break;
         case MBEDTLS_ERR_X509_CERT_VERIFY_FAILED:
           goto VerifyFailed;
