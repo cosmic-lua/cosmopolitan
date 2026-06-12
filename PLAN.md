@@ -34,6 +34,16 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — M3 (TLS handshake deadline) implemented** on this branch.
+  Both `lfetch.c` and `fetch.inc` now capture a `CLOCK_MONOTONIC` deadline
+  before the handshake loop and, on each `WANT_READ`/`WANT_WRITE` return,
+  abort with "TLS handshake timed out" once it elapses — so a slow-loris peer
+  can no longer wedge the handshake indefinitely despite the configured
+  timeout (previously `SO_RCVTIMEO` expiry just re-blocked for another full
+  period). Guarded by `fetchtimeout.tv_sec > 0`, so the no-timeout case is
+  unchanged; cleanup on the abort path mirrors the sibling error returns
+  (no fd/mbedtls leaks). Builds clean (`lua.dbg` + `redbean`); a real
+  slow-loris integration test is a follow-up.
 - **2026-06-12 — M2 (`resettls` per-Fetch server-TLS leak) implemented** on
   this branch. redbean now provides its own `LuaResetFetchTlsState()` (defining
   `HAVE_LUA_RESET_FETCH_TLS_STATE` to suppress the broken `fetch.inc` fallback)
@@ -346,6 +356,8 @@ or free the server contexts before re-running `config_defaults`.
 
 - **File:** `tool/net/lfetch.c:1011-1024` (and the `fetch.inc` equivalent).
 - **Severity:** MEDIUM.
+- **Status: IMPLEMENTED on this branch (2026-06-12)** — monotonic handshake
+  deadline added to both files; WANT_READ/WANT_WRITE re-block now bounded.
 
 Timeout is implemented only via `SO_RCVTIMEO`/`SO_SNDTIMEO` in `GoodSocket`.
 In the handshake loop, an `SO_RCVTIMEO` expiry makes `read()` return `EAGAIN`,
