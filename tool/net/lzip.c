@@ -212,7 +212,10 @@ static int LuaZipOpen(lua_State *L) {
     return SysError(L, path ? path : "fd");
   }
 
-  if (zsize == 0) {
+  // GetZipEocd starts scanning at i = n-4; if n < kZipCdirHdrMinSize (22)
+  // the subtraction underflows (size_t is unsigned) causing an OOB read.
+  // The shortest valid zip is an EOCD record which is exactly 22 bytes.
+  if (zsize < kZipCdirHdrMinSize) {
     if (owns_fd) close(fd);
     return ZipError(L, "not a zip file");
   }
@@ -302,7 +305,10 @@ static int LuaZipFrom(lua_State *L) {
     lua_pop(L, 1);
   }
 
-  if (zsize == 0) {
+  // GetZipEocd starts scanning at i = n-4; if n < kZipCdirHdrMinSize (22)
+  // the subtraction underflows (size_t is unsigned) causing an OOB read.
+  // The shortest valid zip is an EOCD record which is exactly 22 bytes.
+  if (zsize < (size_t)kZipCdirHdrMinSize) {
     return ZipError(L, "not a zip file");
   }
 
@@ -532,6 +538,12 @@ static int LuaZipReaderRead(lua_State *L) {
     }
 
     ret = inflate(&strm, Z_FINISH);
+    // Capture total_out before inflateEnd() zeroes it.  Use this instead of
+    // the declared uncompressed_size: for a well-formed archive the values
+    // are equal, but a malicious archive could declare a larger size and have
+    // us CRC-check or return uninitialized tail bytes.  Capturing the actual
+    // bytes written avoids that without destabilising the inflate path.
+    size_t actual_out = strm.total_out;
     inflateEnd(&strm);
     free(compressed);
 
@@ -541,13 +553,13 @@ static int LuaZipReaderRead(lua_State *L) {
     }
 
     // verify CRC32
-    uint32_t actual_crc = crc32_z(0, uncompressed, uncompressed_size);
+    uint32_t actual_crc = crc32_z(0, uncompressed, actual_out);
     if (actual_crc != expected_crc) {
       free(uncompressed);
       return ZipError(L, "crc32 mismatch");
     }
 
-    lua_pushlstring(L, (char *)uncompressed, uncompressed_size);
+    lua_pushlstring(L, (char *)uncompressed, actual_out);
     free(uncompressed);
     return 1;
   } else {
@@ -642,13 +654,27 @@ static bool ShouldCompress(const char *name, size_t namesize,
 }
 
 // Compress data using deflate. Returns 0 on success, -1 on error.
-// If compression doesn't help, *out will be NULL and *outlen unchanged.
+// If compression doesn't help AND force is false, *out will be NULL and
+// *outlen unchanged (caller stores uncompressed).  When force is true the
+// deflate stream is always returned even if it is larger than the input,
+// so that an explicit method="deflate" request is honoured exactly.
 // Caller must free(*out) if non-NULL.
 static int ZipDeflate(const void *in, size_t inlen, void **out, size_t *outlen,
-                      int level) {
+                      int level, bool force) {
   *out = NULL;
-  if (inlen == 0)
+  if (inlen == 0) {
+    if (force) {
+      // Empty input: produce a valid empty deflate stream (2 bytes: 0x03 0x00).
+      uint8_t *buf = malloc(2);
+      if (!buf)
+        return -1;
+      buf[0] = 0x03;
+      buf[1] = 0x00;
+      *out = buf;
+      *outlen = 2;
+    }
     return 0;
+  }
 
   z_stream strm = {0};
   int ret = deflateInit2(&strm, level, Z_DEFLATED, -MAX_WBITS, DEF_MEM_LEVEL,
@@ -678,8 +704,11 @@ static int ZipDeflate(const void *in, size_t inlen, void **out, size_t *outlen,
   size_t compsize = strm.total_out;
   deflateEnd(&strm);
 
-  // If compressed is larger or equal, don't use it
-  if (compsize >= inlen) {
+  // If compressed is larger or equal and not forced, don't use it; the caller
+  // will store the data uncompressed.  When force=true (explicit method=
+  // "deflate" from the caller) we honour the request and return the deflate
+  // stream even if it is larger, so the stored method is always Deflate.
+  if (compsize >= inlen && !force) {
     free(compdata);
     return 0;
   }
@@ -1042,7 +1071,10 @@ static int LuaZipWriterAdd(lua_State *L) {
 
   if (!force_store &&
       (force_deflate || ShouldCompress(name, namelen, content, contentlen, w->level))) {
-    if (ZipDeflate(content, contentlen, &compdata, &compsize, w->level) < 0)
+    // Pass force_deflate so that an explicit method="deflate" always emits a
+    // deflate stream, even when it is not smaller than the raw content.
+    if (ZipDeflate(content, contentlen, &compdata, &compsize, w->level,
+                   force_deflate) < 0)
       return ZipError(L, "deflate failed");
     if (compdata)
       method = kZipCompressionDeflate;
@@ -1374,7 +1406,12 @@ static int LuaZipAppend(lua_State *L) {
     if ((int64_t)e->offset < min_lfile_off)
       min_lfile_off = e->offset;
 
-    // Read local file header from mmap to get actual data end
+    // Read local file header from mmap to determine where this entry's data
+    // ends, so we know where to start writing new entries.
+    // Fail closed: if the local header is unreadable/invalid we cannot trust
+    // the data layout and must reject the archive rather than silently skipping
+    // and potentially computing a data_end that lies inside valid data.
+    bool lfile_valid = false;
     if ((int64_t)e->offset >= 0 &&
         (int64_t)e->offset + kZipLfileHdrMinSize <= zsize) {
       uint8_t *lfile = map + e->offset;
@@ -1386,15 +1423,28 @@ static int LuaZipAppend(lua_State *L) {
           int64_t this_end = e->offset + hdr_size + e->compsize;
           if (this_end > max_data_end)
             max_data_end = this_end;
+          lfile_valid = true;
         }
       }
+    }
+    if (!lfile_valid) {
+      // Cannot determine where this entry's data ends; fail closed rather than
+      // risk writing new entries over live data or the APE prefix.
+      munmap(map, zsize);
+      AppenderCleanup(a);
+      return ZipError(L, "local file header unreadable; archive may be corrupt");
     }
   }
 
   munmap(map, zsize);
 
   a->prefix_size = (min_lfile_off == INT64_MAX) ? 0 : min_lfile_off;
-  a->data_end = max_data_end;
+  // Use cdir_off as a floor: data_end must never be below the start of the
+  // central directory (which we are about to overwrite with new local files
+  // and a new cdir).  This also protects the APE prefix: cdir_off >= all
+  // local file data, so writing at max(max_data_end, cdir_off) is always
+  // safe for well-formed archives where cdir_off > prefix_size.
+  a->data_end = max_data_end > cdir_off ? max_data_end : cdir_off;
 
   return 1;
 }
@@ -1472,7 +1522,10 @@ static int LuaZipAppenderAdd(lua_State *L) {
 
   if (!force_store &&
       (force_deflate || ShouldCompress(name, namelen, content, contentlen, a->level))) {
-    if (ZipDeflate(content, contentlen, &compdata, &compsize, a->level) < 0)
+    // Pass force_deflate so that an explicit method="deflate" always emits a
+    // deflate stream, even when it is not smaller than the raw content.
+    if (ZipDeflate(content, contentlen, &compdata, &compsize, a->level,
+                   force_deflate) < 0)
       return ZipError(L, "deflate failed");
     if (compdata)
       method = kZipCompressionDeflate;
@@ -1686,11 +1739,30 @@ static int LuaZipAppenderClose(lua_State *L) {
     return SysError(L, "write eocd");
   }
 
+  // SAFETY NOTE: This in-place rewrite is NOT crash-atomic.  A power loss or
+  // signal between the write() calls above and the fsync()/ftruncate() below
+  // can leave the archive (and any APE prefix) in a corrupt state.  Callers
+  // that require atomicity should append to a copy and rename(2) into place.
+  //
+  // We fsync before ftruncate so the new EOCD reaches persistent storage
+  // before the file length is updated; this reduces (but does not eliminate)
+  // the window in which a crash produces a truncated-but-not-updated archive.
+  if (fsync(fd) == -1) {
+    AppenderCleanup(a);
+    return SysError(L, "fsync");
+  }
+
   // Truncate file to remove old central directory
   int64_t final_size = lseek(fd, 0, SEEK_CUR);
   if (ftruncate(fd, final_size) == -1) {
     AppenderCleanup(a);
     return SysError(L, "ftruncate");
+  }
+
+  // fsync again after truncate so the final file size is durable.
+  if (fsync(fd) == -1) {
+    AppenderCleanup(a);
+    return SysError(L, "fsync after truncate");
   }
 
   AppenderCleanup(a);

@@ -285,6 +285,40 @@ assert(result == nil, "truncated zip should fail to open for append")
 assert(err:match("not a zip"), "error should indicate invalid zip")
 
 --------------------------------------------------------------------------------
+-- OOB-read guard: zip.from() on inputs shorter than a valid EOCD (22 bytes)
+-- must return an error rather than crashing / reading out of bounds.
+--------------------------------------------------------------------------------
+
+-- Empty string
+result, err = zip.from("")
+assert(result == nil, "zip.from('') should fail gracefully")
+assert(err, "zip.from('') must return an error message")
+
+-- "PK" signature prefix (2 bytes) - too short for any valid ZIP structure
+result, err = zip.from("PK")
+assert(result == nil, "zip.from('PK') should be rejected")
+assert(err:match("not a zip"), "error should indicate invalid zip")
+
+-- 21 bytes - one byte short of the minimum EOCD record
+result, err = zip.from(string.rep("\0", 21))
+assert(result == nil, "21-byte input should be rejected as too small")
+assert(err, "21-byte input must return an error message")
+
+-- 22 bytes of zeros - minimum size but no valid EOCD magic, so still rejected
+result, err = zip.from(string.rep("\0", 22))
+assert(result == nil, "22 zero bytes should be rejected (no valid EOCD magic)")
+assert(err, "22 zero bytes must return an error message")
+
+-- Verify the size guard works for zip.open() too (via a file smaller than 22 bytes)
+local tiny_zip = tmpdir .. "/tiny.zip"
+local tf = io.open(tiny_zip, "wb")
+tf:write("PK")
+tf:close()
+result, err = zip.open(tiny_zip)
+assert(result == nil, "zip.open() on a 2-byte file should fail")
+assert(err:match("not a zip"), "zip.open() error should indicate invalid zip")
+
+--------------------------------------------------------------------------------
 -- Cleanup
 --------------------------------------------------------------------------------
 
