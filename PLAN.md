@@ -34,6 +34,17 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — H3 (landlock wiring) implemented** on this branch.
+  `claude-code.lua` and `fs-jail.lua` now apply `landlock.restrict{}` after
+  `pivot_root` + privilege drop + `no_new_privs` and before `exec`
+  (composition order `mounts → pivot_root → drop_privs → no_new_privs →
+  landlock → exec`). Rules are derived from the same bind plan the jail uses
+  (RO binds → `READ|EXEC`, project/`~/.claude`/`/tmp` → `RW`); verified that
+  binds map each path to the same absolute path inside the jail, so the
+  `open(O_PATH)` rule resolution is correct post-pivot. Both examples
+  **fail closed** if `landlock.available()` is false (refuse to exec rather
+  than run with a weaker pivot-root-only jail). `netns-proxy.lua` left
+  untouched (no FS jail). Files load/syntax-check; sandbox smoke tests pass.
 - **2026-06-12 — H4 (fexecve_test build break) implemented** on this branch.
   Removed the undefined `STATIC_YOINK` line, added the missing
   `echo.zip.o` dep to the `fexecve_test.dbg` link rule, and supplied the
@@ -164,6 +175,10 @@ allocating per-record).
 - **Files:** `tool/lua/cosmo/sandbox/examples/claude-code.lua:269-290`,
   `examples/fs-jail.lua`, `examples/netns-proxy.lua`; `landlock.lua` (unused).
 - **Severity:** HIGH.
+- **Status: IMPLEMENTED on this branch (2026-06-12)** — `claude-code.lua` and
+  `fs-jail.lua` now apply `landlock.restrict{}` (after `no_new_privs`, before
+  `exec`) and fail closed when landlock is unavailable. Description below
+  records the original defect. (`netns-proxy.lua` has no FS jail; left as-is.)
 
 `landlock.lua` is fully implemented but **no example ever calls it**. The
 privileged path does `unshare(CLONE_NEWNET|CLONE_NEWNS)` (note: no
