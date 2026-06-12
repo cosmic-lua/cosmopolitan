@@ -59,11 +59,68 @@ local function ensure_mountpoint(src, dst)
   return true
 end
 
+-- Parse /proc/self/mountinfo and return an array of mount-point paths
+-- that are strictly under `prefix` (i.e. prefix is a proper ancestor).
+-- mountinfo format (kernel Documentation/filesystems/proc.rst, field 5):
+--   <mountid> <parentid> <major>:<minor> <root> <mountpoint> <mountopts>
+--   [optional fields] - <fstype> <source> <superopts>
+-- Field 5 (1-indexed) is the mount point; spaces inside paths are encoded
+-- as the octal escape \040. We use io.open so this has no dependency on
+-- any unix.* extension beyond what the rest of this module already needs.
+local function submounts_under(prefix)
+  -- Normalise prefix: strip trailing slash unless it is the root itself.
+  local norm = prefix:gsub("/+$", "")
+  if norm == "" then norm = "/" end
+  local result = {}
+  local f = io.open("/proc/self/mountinfo", "r")
+  if not f then return result end
+  for line in f:lines() do
+    -- Split on spaces; field 5 is the encoded mount point.
+    local fields = {}
+    for tok in line:gmatch("%S+") do
+      fields[#fields + 1] = tok
+    end
+    local mp_enc = fields[5]
+    if mp_enc then
+      -- Decode octal-encoded spaces (\040 → " ").
+      local mp = mp_enc:gsub("\\040", " ")
+      -- Include this mount if its path is strictly under norm:
+      --   norm == "/" means everything qualifies
+      --   otherwise the path must start with norm .. "/" (not just norm itself,
+      --   which is the top-level bind we already handled).
+      local is_sub
+      if norm == "/" then
+        is_sub = mp ~= "/"
+      else
+        is_sub = mp:sub(1, #norm + 1) == norm .. "/"
+      end
+      if is_sub then
+        result[#result + 1] = mp
+      end
+    end
+  end
+  f:close()
+  return result
+end
+
 --- fs.bind(src, dst[, opts]) → true | nil, err
 ---
 --- Bind-mount `src` onto `dst` (creating dst as a file or directory as
 --- needed), optionally remounting read-only. opts.ro = true requests a
 --- read-only bind. opts.rec = false disables MS_REC (default true).
+---
+--- Read-only guarantee: MS_REC on a *remount* does NOT recursively
+--- re-apply MS_RDONLY to sub-mounts that exist within the bound tree
+--- (it only sets the flag on the top-level bind mount). To ensure the
+--- entire subtree is truly read-only, we parse /proc/self/mountinfo
+--- after the top-level RO remount and individually remount each
+--- sub-mount read-only. On the common "no sub-mounts" path the extra
+--- step finds nothing and adds no overhead.
+---
+--- The clean alternative — mount_setattr(2) with AT_RECURSIVE — would
+--- accomplish this atomically in a single syscall, but unix.mount_setattr
+--- is not currently exposed by lunix.c; exposing it would be a welcome
+--- future improvement.
 function M.bind(src, dst, opts)
   opts = opts or {}
   local rec = opts.rec ~= false
@@ -73,10 +130,24 @@ function M.bind(src, dst, opts)
   ok, err = unix.mount(src, dst, nil, flags, nil)
   if not ok then return nil, err end
   if opts.ro then
+    -- Step 1: remount the top-level bind mount read-only.
     flags = unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY
-            | (rec and unix.MS_REC or 0)
     ok, err = unix.mount("none", dst, nil, flags, nil)
     if not ok then return nil, err end
+    -- Step 2: walk any sub-mounts visible under dst and remount each
+    -- read-only. MS_REC on a remount does not propagate MS_RDONLY into
+    -- sub-mounts, so without this step a nested filesystem (e.g. if src
+    -- is "/" or a directory with other filesystems mounted under it)
+    -- would remain writable inside the jail.
+    if rec then
+      local subs = submounts_under(dst)
+      for _, mp in ipairs(subs) do
+        ok, err = unix.mount("none", mp, nil,
+                             unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY,
+                             nil)
+        if not ok then return nil, err end
+      end
+    end
   end
   return true
 end
