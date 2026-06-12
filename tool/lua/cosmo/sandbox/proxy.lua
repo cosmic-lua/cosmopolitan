@@ -385,7 +385,10 @@ local function dial(host, port, upstream_ns_fd, resolve_timeout_ms)
   if not cosmo.IsPublicIp(ip) then
     return nil, "request to private network blocked (SSRF protection)"
   end
-  local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
+  -- SOCK_CLOEXEC: prevent this upstream connection socket from leaking
+  -- into any exec'd child via an accidental fork/exec ordering change.
+  -- setns() in this process (before connect) is unaffected by CLOEXEC.
+  local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM | unix.SOCK_CLOEXEC, 0)
   if not sk then return nil, serr end
   local ok, cerr = unix.connect(sk, ip, port)
   if not ok then
@@ -807,7 +810,11 @@ end
 
 --- Bind + listen. Returns the listening fd, or nil, unix.Errno.
 function Proxy:listen()
-  local fd, err = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
+  -- SOCK_CLOEXEC: the listening socket must not be inherited by the
+  -- sandboxed exec'd child (it would allow rebinding or probing the
+  -- proxy from inside the jail). Per-connection forks already explicitly
+  -- close it; CLOEXEC adds defense-in-depth against ordering accidents.
+  local fd, err = unix.socket(unix.AF_INET, unix.SOCK_STREAM | unix.SOCK_CLOEXEC, 0)
   if not fd then return nil, err end
   unix.setsockopt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
   local ok, berr = unix.bind(fd, self._bind_ip, self._bind_port)
