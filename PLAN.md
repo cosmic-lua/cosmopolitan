@@ -34,6 +34,21 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — fetch-client LOW/INFO items (L2) implemented** on this branch.
+  (1) `maxresponse` is now read as a signed `lua_Integer` and rejected with
+  `luaL_argerror` when `< 0` in both `lfetch.c` and `fetch.inc` (closes the
+  size-cap-disable footgun; test added). (2) `timeout=0` semantics documented
+  at the parse sites and in `definitions.lua` (0/absent = default, no infinite
+  option — behavior unchanged). (3) `LuaFetchStream` now creates the
+  `FetchReader` userdata first, sets `sock=-1` before `setmetatable`, and
+  transfers all resources (sock/sslctx/bio/buf) to it before the
+  longjmp-capable `lua_pushinteger`/`LuaPushHeaders`, so an OOM longjmp can no
+  longer leak the fd/mbedtls ctx/buffer; `FetchReaderClose` verified safe on
+  the fully-initialized struct (idempotent, NULL-safe, no fd-0 close).
+  (4) INFO: `Rdrand`/`Rdseed` doc now notes they return CSPRNG (arc4random64)
+  output, not raw hardware instructions. H1/M2/M3 intact; builds clean
+  (`lua.dbg` + `redbean`).
+
 - **2026-06-12 — lzip LOW/INFO items (L1) implemented** on this branch
   (commit `robustness (lzip): ...`). (1) `zip.from()`/`zip.open()` now require
   `zsize >= kZipCdirHdrMinSize` (22) before `GetZipEocd`, fixing the <4-byte
@@ -508,20 +523,20 @@ paths.
 ### HTTP fetch client
 
 - **LOW — `timeout=0` does not mean infinite; negative `maxresponse` disables
-  the size cap.** `tool/net/lfetch.c:663-676`, `fetch.inc`. Timeout is applied
+  the size cap.** _[FIXED — L2: maxresponse rejected; timeout documented]_ `tool/net/lfetch.c:663-676`, `fetch.inc`. Timeout is applied
   only `if (timeout_sec > 0)`, so `0` silently retains the 60s default;
   `maxresponse` read into a `size_t` wraps for negative Lua integers,
   effectively removing the 100 MB cap. **Fix:** document timeout semantics;
   reject negative `maxresponse`.
-- **LOW — Streaming reader returns empty-string chunks** (`lfetch.c:524-528`).
+- **LOW — Streaming reader returns empty-string chunks** (`lfetch.c:524-528`). _[documented — L2 (behavior left as-is)]_
   Chunk framing without payload yields `""` (truthy in Lua), which can spin a
   naive `while c = r:read() do` loop. Worth surfacing to wrapper authors.
-- **LOW — OOM longjmp after socket/SSL ctx allocated leaks fd + memory.**
+- **LOW — OOM longjmp after socket/SSL ctx allocated leaks fd + memory.** _[FIXED — L2]_
   `lfetch.c:1236-1240`: `lua_pushinteger`/`LuaPushHeaders`/`lua_newuserdata`
   can `longjmp` after `sock`/`sslctx`/`bio`/`inbuf.p` are live but before
   ownership transfers to the userdata. Edge OOM only; the normal error paths
   free everything and `FetchReaderClose` is idempotent (no double-close/UAF).
-- **INFO — `Rdrand`/`Rdseed` are `arc4random64` aliases** (`tool/net/lfuncs.c:175-181`).
+- **INFO — `Rdrand`/`Rdseed` are `arc4random64` aliases** (`tool/net/lfuncs.c:175-181`). _[documented — L2]_
   Safer than raw hardware RNG, but the names mislead callers wanting true
   hardware entropy.
 - **INFO — `unix://` proxy SSRF surface is constrained.** Proxy is taken only
