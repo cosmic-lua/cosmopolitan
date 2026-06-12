@@ -529,12 +529,17 @@ static int LuaUnixChmod(lua_State *L) {
 // unix.readlink(path:str[, bufsiz:int])
 //     ├─→ content:str
 //     └─→ nil, unix.Errno
+//
+// Note: this fork changed arg 2 from a dirfd (upstream) to a buffer size;
+// AT_FDCWD is always used.  bufsiz is clamped to [1, 0x7ffff000].
 static int LuaUnixReadlink(lua_State *L) {
   size_t got;
   ssize_t rc;
   luaL_Buffer lb;
   int olderr = errno;
-  size_t bufsiz = luaL_optinteger(L, 2, BUFSIZ);
+  lua_Integer bufsiz = luaL_optinteger(L, 2, BUFSIZ);
+  if (bufsiz <= 0) bufsiz = BUFSIZ;
+  if (bufsiz > 0x7ffff000) bufsiz = 0x7ffff000;
   if ((rc = readlinkat(AT_FDCWD, luaL_checkstring(L, 1),
                        luaL_buffinitsize(L, &lb, bufsiz), bufsiz)) != -1) {
     if ((got = rc) < bufsiz) {
@@ -1325,7 +1330,7 @@ static int LuaUnixIoctl(lua_State *L) {
                               (void *)(intptr_t)luaL_checkinteger(L, 3)));
     case LUA_TSTRING:
       src = luaL_checklstring(L, 3, &len);
-      buf = malloc(len);
+      buf = malloc(len ? len : 1);  // avoid malloc(0) on empty-string arg
       if (!buf) {
         errno = ENOMEM;
         return LuaUnixSysretErrno(L, "ioctl", olderr);
@@ -1692,6 +1697,7 @@ static int LuaUnixRead(lua_State *L) {
   fd = luaL_checkinteger(L, 1);
   bufsiz = luaL_optinteger(L, 2, BUFSIZ);
   offset = luaL_optinteger(L, 3, -1);
+  if (bufsiz < 0) bufsiz = 0;
   bufsiz = MIN(bufsiz, 0x7ffff000);
   buf = LuaAllocOrDie(L, bufsiz);
   if (offset == -1) {
@@ -2243,6 +2249,7 @@ static int LuaUnixRecvfrom(lua_State *L) {
   addrsize = sizeof(ss);
   fd = luaL_checkinteger(L, 1);
   bufsiz = luaL_optinteger(L, 2, 1500);
+  if (bufsiz < 0) bufsiz = 0;
   bufsiz = MIN(bufsiz, 0x7ffff000);
   flags = luaL_optinteger(L, 3, 0);
   buf = LuaAllocOrDie(L, bufsiz);
@@ -2270,6 +2277,7 @@ static int LuaUnixRecv(lua_State *L) {
   int fd, flags, olderr = errno;
   fd = luaL_checkinteger(L, 1);
   bufsiz = luaL_optinteger(L, 2, 1500);
+  if (bufsiz < 0) bufsiz = 0;
   bufsiz = MIN(bufsiz, 0x7ffff000);
   flags = luaL_optinteger(L, 3, 0);
   buf = LuaAllocOrDie(L, bufsiz);

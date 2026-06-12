@@ -111,7 +111,8 @@ assertf(type(unix.SIOCSIFFLAGS) == "number", "SIOCSIFFLAGS missing")
 -- MS_* mount-flag constants.
 assertf(unix.MS_RDONLY == 1, "MS_RDONLY expected 1")
 for _, name in ipairs{"MS_BIND", "MS_REC", "MS_PRIVATE", "MS_SLAVE",
-                      "MS_REMOUNT"} do
+                      "MS_REMOUNT",
+                      "MS_NOSUID", "MS_NODEV", "MS_NOEXEC"} do
   assertf(type(unix[name]) == "number", "%s missing", name)
 end
 
@@ -258,7 +259,8 @@ do
           "exists(bogus) should be false")
   -- Function shape sanity.
   for _, fn in ipairs{"bind", "bind_ro", "tmpfs",
-                      "private_root", "pivot_to", "pivot_to_or_exit"} do
+                      "private_root", "pivot_to", "pivot_to_or_exit",
+                      "proc"} do
     assertf(type(fs[fn]) == "function", "fs.%s missing", fn)
   end
 
@@ -325,7 +327,7 @@ do
   -- Function-shape sanity.
   for _, fn in ipairs{"no_new_privs", "drop_privs",
                       "become_init", "barrier",
-                      "setup_userns_maps"} do
+                      "setup_userns_maps", "fork_pidns"} do
     assertf(type(proc[fn]) == "function", "proc.%s missing", fn)
   end
   -- DEFAULT_SIGNALS is a sane set.

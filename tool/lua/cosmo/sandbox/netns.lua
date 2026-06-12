@@ -51,7 +51,10 @@ end
 --- SIOC* interface-configuration ioctls. The caller owns the fd and
 --- should close it.
 function M.control_socket()
-  return unix.socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+  -- SOCK_CLOEXEC: prevent this short-lived control socket from leaking
+  -- into any exec'd child (e.g. the sandboxed command) via an accidental
+  -- fork/exec ordering change.
+  return unix.socket(unix.AF_INET, unix.SOCK_DGRAM | unix.SOCK_CLOEXEC, 0)
 end
 
 --- netns.get_flags(name) → flags:int | nil, unix.Errno
@@ -105,7 +108,12 @@ end
 --- current process, omit `pid` (or pass nil/"self").
 function M.open(pid)
   local tag = pid and tostring(pid) or "self"
-  return unix.open("/proc/" .. tag .. "/ns/net", unix.O_RDONLY)
+  -- O_CLOEXEC: a namespace fd that leaks across exec into the sandboxed
+  -- child gives it a setns(2) handle back to the parent network namespace —
+  -- a direct sandbox escape. setns() calls in THIS process are unaffected
+  -- (CLOEXEC only fires across exec, not fork or plain syscalls).
+  return unix.open("/proc/" .. tag .. "/ns/net",
+                   unix.O_RDONLY | unix.O_CLOEXEC)
 end
 
 return M

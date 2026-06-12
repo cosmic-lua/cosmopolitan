@@ -378,7 +378,17 @@ local function dial(host, port, upstream_ns_fd, resolve_timeout_ms)
   end
   local ip, rerr = resolve_v4(host, resolve_timeout_ms)
   if not ip then return nil, rerr end
-  local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
+  -- Block non-public IPs to prevent SSRF. This covers loopback (127/8),
+  -- link-local (169.254/16) including the cloud metadata endpoint
+  -- 169.254.169.254, RFC1918, CGNAT (100.64/10), 0.0.0.0/8, and other
+  -- reserved ranges. Applies to both CONNECT and plain-HTTP paths.
+  if not cosmo.IsPublicIp(ip) then
+    return nil, "request to private network blocked (SSRF protection)"
+  end
+  -- SOCK_CLOEXEC: prevent this upstream connection socket from leaking
+  -- into any exec'd child via an accidental fork/exec ordering change.
+  -- setns() in this process (before connect) is unaffected by CLOEXEC.
+  local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM | unix.SOCK_CLOEXEC, 0)
   if not sk then return nil, serr end
   local ok, cerr = unix.connect(sk, ip, port)
   if not ok then
@@ -651,7 +661,7 @@ local function handle(self, client_fd)
     end
     body = b
   end
-  local up, derr = dial(host, port, self._upstream_ns_fd)
+  local up, derr = dial(host, port, self._upstream_ns_fd, self._resolve_timeout_ms)
   if not up then
     logger.warn("upstream_fail",
                 {method = method, host = host, port = port, err = derr})
@@ -800,7 +810,11 @@ end
 
 --- Bind + listen. Returns the listening fd, or nil, unix.Errno.
 function Proxy:listen()
-  local fd, err = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
+  -- SOCK_CLOEXEC: the listening socket must not be inherited by the
+  -- sandboxed exec'd child (it would allow rebinding or probing the
+  -- proxy from inside the jail). Per-connection forks already explicitly
+  -- close it; CLOEXEC adds defense-in-depth against ordering accidents.
+  local fd, err = unix.socket(unix.AF_INET, unix.SOCK_STREAM | unix.SOCK_CLOEXEC, 0)
   if not fd then return nil, err end
   unix.setsockopt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
   local ok, berr = unix.bind(fd, self._bind_ip, self._bind_port)

@@ -98,16 +98,22 @@ int LuaFetch(lua_State *L) {
     lua_getfield(L, 2, "numredirects");
     numredirects = luaL_optinteger(L, -1, numredirects);
     lua_getfield(L, 2, "maxresponse");
-    if (lua_isinteger(L, -1))
-      maxresponse = lua_tointeger(L, -1);
+    if (lua_isinteger(L, -1)) {
+      lua_Integer mr = lua_tointeger(L, -1);
+      if (mr < 0)
+        return luaL_argerror(L, 2, "maxresponse must be >= 0");
+      maxresponse = (size_t)mr;
+    }
     lua_getfield(L, 2, "timeout");
     if (lua_isinteger(L, -1)) {
+      // timeout=0 (or absent) keeps the default; there is no "infinite" option
       int timeout_sec = lua_tointeger(L, -1);
       if (timeout_sec > 0) {
         fetchtimeout.tv_sec = timeout_sec;
         fetchtimeout.tv_usec = 0;
       }
     } else if (lua_isnumber(L, -1)) {
+      // timeout=0.0 (or absent) keeps the default; there is no "infinite" option
       double timeout_val = lua_tonumber(L, -1);
       if (timeout_val > 0) {
         fetchtimeout.tv_sec = (int64_t)timeout_val;
@@ -420,9 +426,12 @@ int LuaFetch(lua_State *L) {
     DEBUGF("(ftch) client connecting %hhu.%hhu.%hhu.%hhu:%d", ip >> 24,
            ip >> 16, ip >> 8, ip,
            ntohs(((struct sockaddr_in *)addr->ai_addr)->sin_port));
-    // Prevent SSRF by blocking requests to private/internal networks
+    // Prevent SSRF by blocking requests to non-public networks.
+    // This covers loopback (127/8), link-local (169.254/16, including the
+    // cloud metadata endpoint 169.254.169.254), RFC1918, CGNAT (100.64/10),
+    // 0.0.0.0/8, and other reserved ranges via IsPublicIp().
     // Skip SSRF check for proxy connections (proxy handles target resolution)
-    if (!proxyhost && (IsLoopbackIp(ip) || IsPrivateIp(ip))) {
+    if (!proxyhost && !IsPublicIp(ip)) {
       freeaddrinfo(addr);
       return LuaNilError(L, "request to private network blocked (SSRF protection)");
     }
@@ -542,9 +551,27 @@ int LuaFetch(lua_State *L) {
     bio->b = 0;
     bio->c = -1;
     mbedtls_ssl_set_bio(&sslctx, bio, TlsSend, 0, TlsRecvImpl);
+    // Compute handshake deadline from the same timeout used for SO_RCVTIMEO.
+    // Uses CLOCK_MONOTONIC so wall-clock jumps don't affect the bound.
+    // If no timeout is configured (fetchtimeout.tv_sec == 0), deadline is
+    // left as timespec_zero and the check below is skipped (preserving the
+    // existing "no timeout" behaviour).
+    bool have_handshake_deadline = fetchtimeout.tv_sec > 0;
+    struct timespec handshake_deadline = timespec_zero;
+    if (have_handshake_deadline) {
+      handshake_deadline =
+          timespec_add(timespec_mono(), timeval_totimespec(fetchtimeout));
+    }
     while ((ret = mbedtls_ssl_handshake(&sslctx))) {
       switch (ret) {
         case MBEDTLS_ERR_SSL_WANT_READ:
+        case MBEDTLS_ERR_SSL_WANT_WRITE:
+          if (have_handshake_deadline &&
+              timespec_cmp(timespec_mono(), handshake_deadline) >= 0) {
+            mbedtls_ssl_free(&sslctx);
+            close(sock);
+            return LuaNilError(L, "TLS handshake timed out");
+          }
           break;
         case MBEDTLS_ERR_X509_CERT_VERIFY_FAILED:
           goto VerifyFailed;

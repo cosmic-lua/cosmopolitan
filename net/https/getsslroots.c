@@ -107,13 +107,21 @@ static void InitSslRoots(void) {
   const char *env_cert_file;
   size_t i;
 
-  // Skip system CA loading if SSL_NO_SYSTEM_CERTS is set
-  if (!getenv("SSL_NO_SYSTEM_CERTS")) {
-    // First, try SSL_CERT_FILE environment variable
-    if ((env_cert_file = getenv("SSL_CERT_FILE")) != NULL) {
+  // System CA loading is OPT-IN: only load /etc/ssl/... bundles when
+  // SSL_USE_SYSTEM_CERTS is set.  This preserves the pre-fork behaviour of
+  // trusting only the embedded pinned root set, and prevents a corporate MITM
+  // proxy CA (or any locally-installed CA) from silently joining the trust
+  // store without an explicit operator decision.
+  //
+  // Both env vars are read via secure_getenv() so they are ignored when the
+  // process is running setuid/setgid/AT_SECURE, exactly as OpenSSL does for
+  // SSL_CERT_FILE in privileged contexts.
+  if (secure_getenv("SSL_USE_SYSTEM_CERTS")) {
+    // Honour SSL_CERT_FILE to point at a specific bundle (setuid-safe).
+    if ((env_cert_file = secure_getenv("SSL_CERT_FILE")) != NULL) {
       LoadCertsFromFile(env_cert_file);
     } else {
-      // Then try common system CA bundle locations
+      // Otherwise probe the well-known system bundle locations in order.
       for (i = 0; i < sizeof(kSystemCaPaths) / sizeof(kSystemCaPaths[0]); i++) {
         if (LoadCertsFromFile(kSystemCaPaths[i])) {
           break;
@@ -122,8 +130,15 @@ static void InitSslRoots(void) {
     }
   }
 
-  // Always load embedded certificates as supplement/fallback
+  // Always load the embedded pinned root certificates.
   LoadCertsFromDir(SSL_ROOT_DIR);
+
+  // Warn if the trust store is completely empty — all HTTPS verification
+  // will fail and this is almost certainly a packaging/deployment error.
+  if (!g_ssl_roots.chain.raw.len) {
+    tinyprint(2, "warning: GetSslRoots: no SSL root certificates loaded;"
+                 " HTTPS verification will fail\n", NULL);
+  }
 
   atexit(FreeSslRoots);
 }

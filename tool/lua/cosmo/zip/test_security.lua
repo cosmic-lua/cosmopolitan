@@ -221,6 +221,45 @@ assert(#entries == 51, "should have 51 entries (1 initial + 50 appended), got " 
 reader:close()
 
 --------------------------------------------------------------------------------
+-- H2 regression: cnt == 0 path (empty central directory, valid archive)
+-- Exercises the calloc(cnt, ...) branch where cnt == 0 must not be treated
+-- as an allocation failure (malloc(0) / calloc(0,...) may return NULL).
+--------------------------------------------------------------------------------
+
+-- Create a zip, remove all entries so the archive on disk has cnt=0, then
+-- open it in append mode.  The appender must not error on the NULL return from
+-- calloc(0, ...) and must accept new entries correctly.
+local empty_cdir_zip = tmpdir .. "/empty_cdir.zip"
+writer = zip.open(empty_cdir_zip, "w")
+writer:add("will_be_removed.txt", "placeholder")
+writer:close()
+
+-- Open for append and immediately remove the only entry (leaving cnt == 0 on
+-- the *next* open, after close rewrites the archive with an empty cdir).
+appender = zip.open(empty_cdir_zip, "a")
+assert(appender, "should open archive for append")
+ok, err = appender:remove("will_be_removed.txt")
+assert(ok, "remove should succeed: " .. tostring(err))
+ok, err = appender:close()
+assert(ok, "close after remove-all should succeed: " .. tostring(err))
+
+-- The archive now has cnt == 0.  Opening for append must succeed (not OOM-error
+-- on NULL calloc(0,...)) and must be able to add a new entry.
+appender, err = zip.open(empty_cdir_zip, "a")
+assert(appender, "opening zero-entry archive for append must succeed: " .. tostring(err))
+ok, err = appender:add("new_entry.txt", "fresh content")
+assert(ok, "adding to formerly-empty archive should succeed: " .. tostring(err))
+ok, err = appender:close()
+assert(ok, "close on formerly-empty archive should succeed: " .. tostring(err))
+
+reader = zip.open(empty_cdir_zip)
+assert(reader, "should open formerly-empty archive for read")
+entries = reader:list()
+assert(#entries == 1, "should have exactly 1 entry, got " .. #entries)
+assert(reader:read("new_entry.txt") == "fresh content", "content must match")
+reader:close()
+
+--------------------------------------------------------------------------------
 -- Test handling of truncated/corrupted zip files
 --------------------------------------------------------------------------------
 
@@ -244,6 +283,40 @@ f:close()
 result, err = zip.open(truncated_zip, "a")
 assert(result == nil, "truncated zip should fail to open for append")
 assert(err:match("not a zip"), "error should indicate invalid zip")
+
+--------------------------------------------------------------------------------
+-- OOB-read guard: zip.from() on inputs shorter than a valid EOCD (22 bytes)
+-- must return an error rather than crashing / reading out of bounds.
+--------------------------------------------------------------------------------
+
+-- Empty string
+result, err = zip.from("")
+assert(result == nil, "zip.from('') should fail gracefully")
+assert(err, "zip.from('') must return an error message")
+
+-- "PK" signature prefix (2 bytes) - too short for any valid ZIP structure
+result, err = zip.from("PK")
+assert(result == nil, "zip.from('PK') should be rejected")
+assert(err:match("not a zip"), "error should indicate invalid zip")
+
+-- 21 bytes - one byte short of the minimum EOCD record
+result, err = zip.from(string.rep("\0", 21))
+assert(result == nil, "21-byte input should be rejected as too small")
+assert(err, "21-byte input must return an error message")
+
+-- 22 bytes of zeros - minimum size but no valid EOCD magic, so still rejected
+result, err = zip.from(string.rep("\0", 22))
+assert(result == nil, "22 zero bytes should be rejected (no valid EOCD magic)")
+assert(err, "22 zero bytes must return an error message")
+
+-- Verify the size guard works for zip.open() too (via a file smaller than 22 bytes)
+local tiny_zip = tmpdir .. "/tiny.zip"
+local tf = io.open(tiny_zip, "wb")
+tf:write("PK")
+tf:close()
+result, err = zip.open(tiny_zip)
+assert(result == nil, "zip.open() on a 2-byte file should fail")
+assert(err:match("not a zip"), "zip.open() error should indicate invalid zip")
 
 --------------------------------------------------------------------------------
 -- Cleanup

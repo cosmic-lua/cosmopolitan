@@ -6,11 +6,81 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COSMIC_LUA="${SCRIPT_DIR}/cosmic-lua"
 RELEASE_URL="https://github.com/whilp/world/releases/download/home-2026-01-05-a64eed2/cosmic-lua"
 
+# TODO(maintainer): pin the cosmic-lua release SHA-256 here for integrity verification.
+# Leave empty to allow download without a pinned digest (a warning will be printed).
+# To pin: run `sha256sum cosmic-lua` (or `shasum -a 256 cosmic-lua`) on the known-good
+# binary and paste the hex digest below.
+# Example: EXPECTED_SHA256="abcdef0123456789..."
+EXPECTED_SHA256=""
+
+# Portable sha256 wrapper: prefer sha256sum (Linux/GNU), fall back to shasum (macOS).
+_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$@"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$@"
+    else
+        printf '%s\n' "cosmic: fatal: sha256sum (or shasum) not found; cannot verify download" >&2
+        return 1
+    fi
+}
+
+# verify_file FILE EXPECTED_HEX
+# Returns 0 on match, non-zero on mismatch (and deletes FILE).
+verify_file() {
+    _file="$1"
+    _expected="$2"
+    _actual=$(_sha256 "${_file}" | awk '{print $1}')
+    if [ "${_actual}" != "${_expected}" ]; then
+        printf '%s\n' "cosmic: FATAL: SHA-256 mismatch for ${_file}" >&2
+        printf '%s\n' "cosmic:   expected: ${_expected}" >&2
+        printf '%s\n' "cosmic:   got:      ${_actual}" >&2
+        printf '%s\n' "cosmic: Deleting the file and aborting." >&2
+        rm -f "${_file}"
+        return 1
+    fi
+    return 0
+}
+
 # Download cosmic-lua if it doesn't exist
 if [ ! -f "${COSMIC_LUA}" ]; then
-    echo "Downloading cosmic-lua..." >&2
+    printf '%s\n' "Downloading cosmic-lua..." >&2
     curl -fsSL -o "${COSMIC_LUA}" "${RELEASE_URL}"
     chmod +x "${COSMIC_LUA}"
+
+    # --- Integrity verification ---
+    _verified=0
+
+    # Precedence 1: verify against the pinned EXPECTED_SHA256 if set.
+    if [ -n "${EXPECTED_SHA256}" ]; then
+        verify_file "${COSMIC_LUA}" "${EXPECTED_SHA256}" || exit 1
+        _verified=1
+    fi
+
+    # Precedence 2 (additional/alternative): attempt to fetch a sidecar checksum
+    # from the same release and verify against it if the download succeeds.
+    if [ "${_verified}" -eq 0 ]; then
+        _sidecar="${COSMIC_LUA}.sha256"
+        if curl -fsSL -o "${_sidecar}" "${RELEASE_URL}.sha256" 2>/dev/null; then
+            _sidecar_hash=$(awk '{print $1}' "${_sidecar}")
+            rm -f "${_sidecar}"
+            if [ -n "${_sidecar_hash}" ]; then
+                verify_file "${COSMIC_LUA}" "${_sidecar_hash}" || exit 1
+                _verified=1
+            fi
+        else
+            rm -f "${_sidecar}"
+        fi
+    fi
+
+    # If neither a pinned digest nor a sidecar checksum was available, warn loudly.
+    if [ "${_verified}" -eq 0 ]; then
+        printf '%s\n' "" >&2
+        printf '%s\n' "cosmic: WARNING: cosmic-lua was downloaded WITHOUT any checksum verification." >&2
+        printf '%s\n' "cosmic: WARNING: No pinned EXPECTED_SHA256 is set and no sidecar .sha256 was found." >&2
+        printf '%s\n' "cosmic: WARNING: Set EXPECTED_SHA256 in bin/cosmic to enable fail-closed integrity checks." >&2
+        printf '%s\n' "" >&2
+    fi
 fi
 
 # Execute cosmic-lua with all arguments

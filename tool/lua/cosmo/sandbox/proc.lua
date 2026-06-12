@@ -162,6 +162,68 @@ function M.barrier()
   return setmetatable({_r = r, _w = w}, Barrier)
 end
 
+--- proc.fork_pidns() → child_pid | nil, err
+---
+--- Enter a new PID namespace and fork a child that becomes PID 1
+--- inside it. Returns the child PID to the caller (the parent); the
+--- child runs `child_fn()` (if given) and then exits with unix.exit(0).
+--- If `child_fn` is omitted, only the fork+unshare mechanics are
+--- performed — the child returns nil (indicating "I am the child") and
+--- is expected to exec or call unix.exit() itself.
+---
+--- Why fork is required: `unshare(CLONE_NEWPID)` does NOT move the
+--- calling process into the new PID namespace — it only causes the
+--- process's FUTURE CHILDREN to be born into it.  The first such child
+--- is PID 1 of the new namespace.  Only that child (PID 1 of the new
+--- pidns) can mount a fresh procfs that shows only the sandbox's own
+--- processes.  Attempting to mount procfs from the parent (which remains
+--- in the outer pidns) produces a procfs that leaks all host processes.
+---
+--- Typical usage in a jail-setup child (already in CLONE_NEWNS):
+---
+---     -- Step 1: enter new PID namespace and fork the grandchild.
+---     local child_pid, err = proc.fork_pidns()
+---     if child_pid == nil then
+---       -- We are the grandchild (PID 1 in the new pidns).
+---       -- Mount private /proc, then exec the jailed command.
+---       assert(fs.proc())
+---       local _, e = unix.execvp(cmd[1], cmd)
+---       unix.exit(127)
+---     end
+---     -- We are the wrapper child (parent of grandchild).
+---     -- Run a minimal PID-1 supervisor loop so the grandchild's
+---     -- exit status is properly reaped (PID 1 must reap all zombies).
+---     os.exit(proc.become_init(child_pid))
+---
+--- Returns:
+---   parent side: child_pid (integer > 0), or nil, err on unshare/fork failure.
+---   child side:  nil (i.e. child_pid == false/nil from unix.fork check)
+---     — but NOTE: the child never returns from fork_pidns in the normal
+---     flow above because it immediately execs or calls unix.exit().
+---
+--- Security note: the parent (wrapper child) remains in the OUTER PID
+--- namespace, but because it is inside CLONE_NEWNS it cannot re-enter
+--- the outer procfs.  The child (grandchild) is the only process that
+--- mounts and uses the private procfs.
+function M.fork_pidns()
+  -- Calling unshare(CLONE_NEWPID) here makes the *next* fork's child
+  -- land in a fresh PID namespace as PID 1.
+  local ok, err = unix.unshare(unix.CLONE_NEWPID)
+  if not ok then return nil, err end
+
+  local child_pid, ferr = unix.fork()
+  if not child_pid then return nil, ferr end
+
+  -- child_pid == 0: we are the grandchild, PID 1 of the new pidns.
+  -- Return nil so the caller can distinguish child from parent.
+  if child_pid == 0 then
+    return nil
+  end
+
+  -- child_pid > 0: we are the parent.  Return the child's PID.
+  return child_pid
+end
+
 --- Default signal set forwarded by become_init.
 M.DEFAULT_SIGNALS = { "SIGINT", "SIGTERM", "SIGHUP" }
 

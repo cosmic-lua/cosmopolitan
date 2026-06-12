@@ -33,12 +33,13 @@
 --
 -- Exit codes mirror the wrapped command's.
 
-local unix  = require "unix"
-local cosmo = require "cosmo"
-local netns = require "cosmo.sandbox.netns"
-local fs    = require "cosmo.sandbox.fs"
-local proc  = require "cosmo.sandbox.proc"
-local proxy = require "cosmo.sandbox.proxy"
+local unix     = require "unix"
+local cosmo    = require "cosmo"
+local netns    = require "cosmo.sandbox.netns"
+local fs       = require "cosmo.sandbox.fs"
+local proc     = require "cosmo.sandbox.proc"
+local proxy    = require "cosmo.sandbox.proxy"
+local landlock = require "cosmo.sandbox.landlock"
 
 local LOOPBACK = cosmo.ParseIp("127.0.0.1")
 local PROXY_PORT = 3128
@@ -173,7 +174,8 @@ local function build_jail(opts, real_home)
   local jail = "/tmp/claude-jail-" .. unix.getpid()
   assert(fs.tmpfs(jail, "128m"))
 
-  for _, ent in ipairs(plan_binds(opts)) do
+  local plan = plan_binds(opts)
+  for _, ent in ipairs(plan) do
     local ok, err = fs.bind(ent.src, jail .. ent.src, {ro = ent.ro})
     if not ok then die("ro-bind %s: %s", ent.src, err) end
   end
@@ -204,6 +206,81 @@ local function build_jail(opts, real_home)
   -- pivot_root.
   ok, err = fs.pivot_to(jail)
   if not ok then die("pivot_to: %s", err) end
+
+  -- Return the bind plan so the caller can feed it to apply_landlock.
+  -- apply_landlock must run AFTER pivot_root (so paths resolve inside
+  -- the jail) and AFTER no_new_privs (required by landlock_restrict_self).
+  return plan
+end
+
+--------------------------------------------------------------------------------
+-- Landlock ruleset construction.
+--
+-- Called AFTER pivot_root (paths are relative to the jail's new root),
+-- AFTER drop_privs (we are no longer root), and AFTER no_new_privs.
+-- landlock_restrict_self requires no_new_privs unless CAP_SYS_ADMIN is
+-- held; since we've already dropped caps, no_new_privs must come first.
+-- landlock.restrict() sets no_new_privs itself by default, but we
+-- already called proc.no_new_privs() above — passing no_new_privs=false
+-- skips the redundant prctl (which is harmless; idempotent).
+--
+-- Fail-closed policy: if landlock is unavailable (old kernel, or not
+-- compiled in), we REFUSE to run rather than silently falling back to
+-- the weaker pivot_root-only jail.  Claude Code is the flagship AI-agent
+-- use case; a jail that appears secure but isn't is worse than a clear
+-- refusal.  Operators who genuinely need to run on kernels < 5.13 must
+-- explicitly fork this file and document the weaker posture.
+
+local function apply_landlock(opts, plan, real_home)
+  if not landlock.available() then
+    -- Fail closed: refuse to exec without LSM enforcement.
+    io.stderr:write(
+      "claude-sandbox: FATAL: landlock is not available on this kernel.\n"
+      .. "  Filesystem confinement requires Linux ≥ 5.13 with landlock enabled.\n"
+      .. "  Refusing to run without LSM enforcement (fail-closed).\n"
+    )
+    unix.exit(1)
+  end
+
+  -- Build the rule list from the same bind-plan that build_jail used.
+  -- After pivot_root the paths are the same as inside the jail's root.
+  --
+  -- System paths (executables, libraries, certs, …) get READ | EXEC so
+  -- the child can read and run binaries but not write to them.  Data-only
+  -- paths (resolv.conf, /etc/nsswitch.conf, …) get READ only, but we
+  -- can't easily distinguish them here — READ|EXEC on a file is harmless
+  -- because EXECUTE on a regular file only matters when you try to exec()
+  -- it, and all of those bind-mounts are already MS_RDONLY anyway.
+  local rules = {}
+  for _, ent in ipairs(plan) do
+    if ent.ro then
+      rules[#rules + 1] = {path = ent.src, access = landlock.READ | landlock.EXEC}
+    end
+  end
+
+  -- Project directory: read + write + create/remove files; NO execute
+  -- (the child shouldn't exec arbitrary files it just downloaded).
+  rules[#rules + 1] = {path = opts.project, access = landlock.RW}
+
+  -- ~/.claude: read + write (config and history).
+  if real_home then
+    local cdir = real_home .. "/.claude"
+    rules[#rules + 1] = {path = cdir, access = landlock.RW}
+  end
+
+  -- /tmp: read + write scratch space.
+  rules[#rules + 1] = {path = "/tmp", access = landlock.RW}
+
+  -- no_new_privs was already set; skip the redundant prctl in restrict().
+  local ok, err = landlock.restrict{
+    handled      = landlock.ALL,
+    rules        = rules,
+    no_new_privs = false,
+  }
+  if not ok then
+    io.stderr:write("claude-sandbox: landlock.restrict: " .. tostring(err) .. "\n")
+    unix.exit(1)
+  end
 end
 
 --------------------------------------------------------------------------------
@@ -273,11 +350,19 @@ local function main(argv)
     assert(unix.unshare(unix.CLONE_NEWNET | unix.CLONE_NEWNS))
     unshared:signal()
     assert(fs.private_root())
-    build_jail(opts, real_home)
+    -- build_jail returns the bind plan for use by apply_landlock below.
+    local plan = build_jail(opts, real_home)
     proxy_up:wait()
-    -- Drop privileges last, so build_jail/etc. could use root.
+    -- Drop privileges before landlock so we hold no caps when we call
+    -- landlock_restrict_self (caps are not needed for landlock; only
+    -- no_new_privs or CAP_SYS_ADMIN is, and we're setting the former).
     assert(proc.drop_privs(real_uid, real_gid))
+    -- no_new_privs must be set before landlock_restrict_self.
     assert(proc.no_new_privs())
+    -- Apply landlock FS confinement (fail-closed if unavailable).
+    -- Composition order: mounts → pivot_root → drop_privs →
+    --                    no_new_privs → landlock → exec.
+    apply_landlock(opts, plan, real_home)
     unix.chdir(opts.project)
     local env = build_env()
     local argv = {claude_bin}

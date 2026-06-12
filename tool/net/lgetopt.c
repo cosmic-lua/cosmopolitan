@@ -120,28 +120,31 @@ static int LuaGetoptNew(lua_State *L) {
     lua_pop(L, 1);
   }
 
-  // Allocate C memory
-  argv = calloc(argc + 2, sizeof(char *));
-  if (!argv)
-    return luaL_error(L, "out of memory");
-
-  longopts = calloc(nlong + 1, sizeof(struct option));
-  if (!longopts) {
-    free(argv);
-    return luaL_error(L, "out of memory");
-  }
-
-  // Create parser userdata
+  // Create parser userdata FIRST so __gc owns everything from this point on.
+  // Fields are zeroed / set to LUA_NOREF so __gc is safe if it fires before
+  // the C allocations succeed (lua_newuserdata / luaL_ref can raise OOM).
   parser = lua_newuserdata(L, sizeof(GetoptParser));
-  luaL_setmetatable(L, PARSER_MT);
-
-  parser->argv = argv;
-  parser->longopts = longopts;
+  parser->argv = NULL;
+  parser->longopts = NULL;
   parser->argc = argc + 1;
   parser->nlong = nlong;
   parser->optstring = optstring;
   parser->done = 0;
   parser->unknown_count = 0;
+  parser->refs_idx = LUA_NOREF;
+  parser->unknown_idx = LUA_NOREF;
+  luaL_setmetatable(L, PARSER_MT);
+
+  // Allocate C memory and assign into the userdata so __gc can free them.
+  argv = calloc(argc + 2, sizeof(char *));
+  if (!argv)
+    return luaL_error(L, "out of memory");
+  parser->argv = argv;
+
+  longopts = calloc(nlong + 1, sizeof(struct option));
+  if (!longopts)
+    return luaL_error(L, "out of memory");
+  parser->longopts = longopts;
 
   // Create a table to hold references to all Lua strings
   lua_newtable(L);
