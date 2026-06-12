@@ -34,6 +34,17 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — M1 (getsslroots hardening) implemented** on this branch.
+  `SSL_CERT_FILE` and a new `SSL_USE_SYSTEM_CERTS` gate are now read via
+  `secure_getenv()` (ignored under setuid/setgid/AT_SECURE), so an
+  attacker-controlled inherited environment can't inject a rogue root CA into a
+  privileged process. System CA bundles (`/etc/ssl/...`) are now **opt-in**
+  (only with `SSL_USE_SYSTEM_CERTS`), restoring the pre-fork "embedded pinned
+  roots only" default; the 14 embedded CAs cover the major public roots
+  (ISRG/Let's Encrypt, DigiCert, GlobalSign, ...). A `tinyprint` diagnostic
+  now fires if the trust store ends up empty. **Behavioral change:** clients
+  relying on a system-only CA must now set `SSL_USE_SYSTEM_CERTS=1`. Builds
+  clean; `getsslroots_test` passes.
 - **2026-06-12 — M7 (`fs.proc()` + PID namespace) implemented** on this branch
   as composable building blocks. `fs.proc(dir)` mounts a hardened private
   procfs (`MS_NOSUID|MS_NODEV|MS_NOEXEC`) and `proc.fork_pidns()` does
@@ -275,6 +286,8 @@ Additionally, `BUILD.mk:112` `fexecve_test.dbg` is missing the
 
 - **File:** `net/https/getsslroots.c:49-73`, `:110-121`.
 - **Severity:** MEDIUM.
+- **Status: IMPLEMENTED on this branch (2026-06-12)** — `secure_getenv` for
+  trust-anchor env vars; system CAs opt-in; empty-store diagnostic restored.
 
 Two issues:
 
@@ -610,8 +623,8 @@ be "fixed":
    **[done]**, ~~M4 (recursive RO remount)~~ **[done]**, ~~M5 (CLOEXEC on
    namespace/listen/control fds)~~ **[done]**, ~~M6 (resolve timeout on the HTTP
    path)~~ **[done]**, M7 (`fs.proc()` + PID namespace).
-3. **PR 3 (TLS / certs):** M1 (`secure_getenv`, opt-in system CAs, restore
-   diagnostics), M2 (`resettls` scope), M3 (handshake deadline).
+3. **PR 3 (TLS / certs):** ~~M1 (`secure_getenv`, opt-in system CAs, restore
+   diagnostics)~~ **[done]**, M2 (`resettls` scope), M3 (handshake deadline).
 4. **PR 4 (correctness/robustness):** the lzip atomicity/`data_end`/`GetZipEocd`
    bounds fixes and the various LOW `lunix`/`lgetopt`/`bin/cosmic` items.
    (The `parsehttpmessage` clamp ordering originally listed here was fixed
