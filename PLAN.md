@@ -34,6 +34,18 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — M7 (`fs.proc()` + PID namespace) implemented** on this branch
+  as composable building blocks. `fs.proc(dir)` mounts a hardened private
+  procfs (`MS_NOSUID|MS_NODEV|MS_NOEXEC`) and `proc.fork_pidns()` does
+  `unshare(CLONE_NEWPID)` + `fork()` so the child is PID 1 of a fresh pid
+  namespace (the process that must call `fs.proc()` for it to show only
+  sandbox processes). The host-`/proc` leak hazard (`/proc/<pid>/environ`,
+  `cmdline`, `root`, `/proc/sys`) is documented. The examples were
+  intentionally NOT rewired to compose a PID-ns layer (that changes the
+  supervisor topology and interacts with the proxy netns/setns flow — a
+  separate focused change). Minor API note: `fork_pidns()` returns `nil` for
+  the child and `nil, err` on error, so callers must check the second value.
+  Loads/syntax-check; smoke tests pass.
 - **2026-06-12 — M6 (proxy HTTP-path resolve timeout) implemented** on this
   branch. The plain-HTTP `dial()` call now passes `self._resolve_timeout_ms`
   (matching the CONNECT path), so a tarpitting resolver can no longer wedge a
