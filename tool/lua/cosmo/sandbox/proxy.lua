@@ -661,7 +661,7 @@ local function handle(self, client_fd)
     end
     body = b
   end
-  local up, derr = dial(host, port, self._upstream_ns_fd)
+  local up, derr = dial(host, port, self._upstream_ns_fd, self._resolve_timeout_ms)
   if not up then
     logger.warn("upstream_fail",
                 {method = method, host = host, port = port, err = derr})
