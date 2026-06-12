@@ -221,6 +221,45 @@ assert(#entries == 51, "should have 51 entries (1 initial + 50 appended), got " 
 reader:close()
 
 --------------------------------------------------------------------------------
+-- H2 regression: cnt == 0 path (empty central directory, valid archive)
+-- Exercises the calloc(cnt, ...) branch where cnt == 0 must not be treated
+-- as an allocation failure (malloc(0) / calloc(0,...) may return NULL).
+--------------------------------------------------------------------------------
+
+-- Create a zip, remove all entries so the archive on disk has cnt=0, then
+-- open it in append mode.  The appender must not error on the NULL return from
+-- calloc(0, ...) and must accept new entries correctly.
+local empty_cdir_zip = tmpdir .. "/empty_cdir.zip"
+writer = zip.open(empty_cdir_zip, "w")
+writer:add("will_be_removed.txt", "placeholder")
+writer:close()
+
+-- Open for append and immediately remove the only entry (leaving cnt == 0 on
+-- the *next* open, after close rewrites the archive with an empty cdir).
+appender = zip.open(empty_cdir_zip, "a")
+assert(appender, "should open archive for append")
+ok, err = appender:remove("will_be_removed.txt")
+assert(ok, "remove should succeed: " .. tostring(err))
+ok, err = appender:close()
+assert(ok, "close after remove-all should succeed: " .. tostring(err))
+
+-- The archive now has cnt == 0.  Opening for append must succeed (not OOM-error
+-- on NULL calloc(0,...)) and must be able to add a new entry.
+appender, err = zip.open(empty_cdir_zip, "a")
+assert(appender, "opening zero-entry archive for append must succeed: " .. tostring(err))
+ok, err = appender:add("new_entry.txt", "fresh content")
+assert(ok, "adding to formerly-empty archive should succeed: " .. tostring(err))
+ok, err = appender:close()
+assert(ok, "close on formerly-empty archive should succeed: " .. tostring(err))
+
+reader = zip.open(empty_cdir_zip)
+assert(reader, "should open formerly-empty archive for read")
+entries = reader:list()
+assert(#entries == 1, "should have exactly 1 entry, got " .. #entries)
+assert(reader:read("new_entry.txt") == "fresh content", "content must match")
+reader:close()
+
+--------------------------------------------------------------------------------
 -- Test handling of truncated/corrupted zip files
 --------------------------------------------------------------------------------
 

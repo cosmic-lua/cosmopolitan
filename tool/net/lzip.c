@@ -1309,12 +1309,25 @@ static int LuaZipAppend(lua_State *L) {
     return ZipError(L, "central directory offset out of bounds");
   }
 
-  // Parse central directory entries directly from mmap
-  a->existing = malloc(cnt * sizeof(*a->existing));
-  if (!a->existing) {
+  // Bound cnt against cdir_size before allocation to prevent heap overflow.
+  // Each central directory record is at least kZipCfileHdrMinSize bytes, so a
+  // valid archive cannot have more records than cdir_size / kZipCfileHdrMinSize.
+  // An attacker-controlled ZIP64 cnt (~2^61) would otherwise wrap the size_t
+  // multiply in malloc(cnt * sizeof(*a->existing)) producing a tiny buffer.
+  if (cnt < 0 || (cdir_size > 0 && cnt > cdir_size / kZipCfileHdrMinSize)) {
     munmap(map, zsize);
     AppenderCleanup(a);
-    return SysError(L, "malloc");
+    return ZipError(L, "central directory record count out of range");
+  }
+
+  // Use calloc for overflow-safe allocation and zero-initialization.
+  // When cnt == 0 (valid empty archive), calloc(0, ...) may return NULL;
+  // only treat NULL as an allocation failure when cnt > 0.
+  a->existing = cnt > 0 ? calloc(cnt, sizeof(*a->existing)) : NULL;
+  if (cnt > 0 && !a->existing) {
+    munmap(map, zsize);
+    AppenderCleanup(a);
+    return SysError(L, "calloc");
   }
 
   uint8_t *cdir = map + cdir_off;
