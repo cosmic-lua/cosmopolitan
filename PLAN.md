@@ -34,6 +34,11 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — M6 (proxy HTTP-path resolve timeout) implemented** on this
+  branch. The plain-HTTP `dial()` call now passes `self._resolve_timeout_ms`
+  (matching the CONNECT path), so a tarpitting resolver can no longer wedge a
+  per-connection worker on the HTTP path with unbounded DNS. Proxy unit +
+  smoke tests pass.
 - **2026-06-12 — M5 (CLOEXEC on namespace/listen/control fds) implemented** on
   this branch. The network-namespace fd (`netns.lua` `unix.open(".../ns/net")`)
   now uses `O_CLOEXEC` — closing the direct escape where a leaked ns fd would
@@ -358,6 +363,8 @@ pattern with `O_PATH|O_CLOEXEC`.)
 
 - **File:** `tool/lua/cosmo/sandbox/proxy.lua:654`.
 - **Severity:** MEDIUM.
+- **Status: IMPLEMENTED on this branch (2026-06-12)** — plain-HTTP `dial()`
+  now passes `self._resolve_timeout_ms`.
 
 ```lua
 local up, derr = dial(host, port, self._upstream_ns_fd)   -- no resolve timeout
@@ -589,8 +596,8 @@ be "fixed":
    `fexecve_test.c:31`, add the `echo.zip.o` BUILD.mk dep)~~ **[done]**.
 2. **PR 2 (sandbox hardening):** ~~H3 (wire landlock + `no_new_privs`)~~
    **[done]**, ~~M4 (recursive RO remount)~~ **[done]**, ~~M5 (CLOEXEC on
-   namespace/listen/control fds)~~ **[done]**, M6 (resolve timeout on the HTTP
-   path), M7 (`fs.proc()` + PID namespace).
+   namespace/listen/control fds)~~ **[done]**, ~~M6 (resolve timeout on the HTTP
+   path)~~ **[done]**, M7 (`fs.proc()` + PID namespace).
 3. **PR 3 (TLS / certs):** M1 (`secure_getenv`, opt-in system CAs, restore
    diagnostics), M2 (`resettls` scope), M3 (handshake deadline).
 4. **PR 4 (correctness/robustness):** the lzip atomicity/`data_end`/`GetZipEocd`
