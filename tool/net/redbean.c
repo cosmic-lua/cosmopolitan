@@ -3778,6 +3778,24 @@ static int LuaNilTlsError(lua_State *L, const char *s, int r) {
                      gc(xasprintf("-0x%04x", -r)));
 }
 
+// Redbean-specific TLS client reset: only reseed the client DRBG after fork.
+// We must NOT free confcli or set sslinitialized=false here because confcli is
+// shared server+client config initialized by TlsInit() along with the server
+// structures (conf, ssl, LoadCertificates). Freeing confcli without also
+// freeing conf/ssl/ssltick would leak their internal buffers, and resetting
+// sslinitialized would cause TlsInit() to run mbedtls_ssl_config_defaults()
+// on already-initialized server structures — leaking cert chains on every call.
+// Reseeding rngcli is sufficient to get fresh post-fork entropy for HTTPS
+// client fetch without touching any server state.
+#ifndef UNSECURE
+static void LuaResetFetchTlsState(void) {
+  if (sslinitialized && !unsecure) {
+    ReseedRng(&rngcli, "fetch");
+  }
+}
+#define HAVE_LUA_RESET_FETCH_TLS_STATE
+#endif
+
 #include "tool/net/fetch.inc"
 
 static int LuaGetDate(lua_State *L) {
