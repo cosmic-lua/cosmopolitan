@@ -34,6 +34,18 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — M4 (recursive RO bind) implemented** on this branch.
+  `fs.bind()` now, after the top-level `MS_REMOUNT|MS_BIND|MS_RDONLY`, parses
+  `/proc/self/mountinfo` (`submounts_under()`) and RO-remounts every mount
+  strictly under `dst`, since `MS_REC` on a remount does not propagate
+  `MS_RDONLY` to sub-mounts. The initial bind keeps `MS_REC` so sub-mounts are
+  replicated under `dst` first; the walk is guarded by `if rec` and is a no-op
+  when there are no sub-mounts. `mount_setattr(2)` + `AT_RECURSIVE` would be
+  the atomic single-syscall fix but `unix.mount_setattr` is not exposed by
+  lunix.c (a worthwhile future binding). Minor follow-up: only the `\040`
+  (space) mountinfo escape is decoded, not tab/newline/backslash (a mismatched
+  exotic path would just fail the remount — fail-closed). Loads/syntax-checks;
+  smoke tests pass.
 - **2026-06-12 — H3 (landlock wiring) implemented** on this branch.
   `claude-code.lua` and `fs-jail.lua` now apply `landlock.restrict{}` after
   `pivot_root` + privilege drop + `no_new_privs` and before `exec`
@@ -296,6 +308,9 @@ exceeded.
 
 - **File:** `tool/lua/cosmo/sandbox/fs.lua:67-82`, `:118-123`.
 - **Severity:** MEDIUM.
+- **Status: IMPLEMENTED on this branch (2026-06-12)** — `bind()` now walks
+  `/proc/self/mountinfo` and RO-remounts each sub-mount under `dst`.
+  Description below records the original defect.
 
 `private_root()` correctly applies `MS_REC|MS_PRIVATE` to `/`. However `bind()`
 performs the read-only remount with
@@ -557,9 +572,10 @@ be "fixed":
 1. **PR 1 (quick, high-value):** ~~H1 (`!IsPublicIp` in fetch + sandbox
    proxy)~~ **[done]**, ~~H2 (bound the ZIP64 `cnt`)~~ **[done]**, ~~H4 (delete
    `fexecve_test.c:31`, add the `echo.zip.o` BUILD.mk dep)~~ **[done]**.
-2. **PR 2 (sandbox hardening):** H3 (wire landlock + `no_new_privs`), M4
-   (recursive RO remount), M5 (CLOEXEC on namespace/listen/control fds), M6
-   (resolve timeout on the HTTP path), M7 (`fs.proc()` + PID namespace).
+2. **PR 2 (sandbox hardening):** ~~H3 (wire landlock + `no_new_privs`)~~
+   **[done]**, ~~M4 (recursive RO remount)~~ **[done]**, M5 (CLOEXEC on
+   namespace/listen/control fds), M6 (resolve timeout on the HTTP path), M7
+   (`fs.proc()` + PID namespace).
 3. **PR 3 (TLS / certs):** M1 (`secure_getenv`, opt-in system CAs, restore
    diagnostics), M2 (`resettls` scope), M3 (handshake deadline).
 4. **PR 4 (correctness/robustness):** the lzip atomicity/`data_end`/`GetZipEocd`
