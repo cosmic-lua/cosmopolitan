@@ -223,6 +223,51 @@ function M.pivot_to(jail)
   return true
 end
 
+--- fs.proc(dir) → true | nil, err
+---
+--- Mount a private procfs at `dir` (default "/proc") using hardened
+--- flags: MS_NOSUID | MS_NODEV | MS_NOEXEC.
+---
+--- PRECONDITION — PID namespace: this function is most useful when the
+--- calling process is PID 1 of a freshly created PID namespace.  On
+--- Linux, after `unshare(CLONE_NEWPID)` the CURRENT process is NOT
+--- moved into the new namespace — only its future children are.  To
+--- mount a procfs that shows only the sandbox's own processes you must:
+---
+---   1. Call `unix.unshare(unix.CLONE_NEWPID)` in the jail-setup process.
+---   2. Fork a child — that child is PID 1 of the new namespace.
+---   3. Call `fs.proc()` from inside that child (after pivot_root,
+---      within the new mount namespace).
+---
+--- When called correctly the mounted procfs is fully isolated: the
+--- sandboxed processes can only see each other's PIDs, preventing
+--- information leakage via /proc/<pid>/environ, /proc/<pid>/cmdline,
+--- /proc/<pid>/root, and /proc/sys of HOST processes.
+---
+--- HAZARD — binding the host /proc: if a consumer bind-mounts the host
+--- /proc into the jail (e.g. `fs.bind("/proc", jail.."/proc")`), ALL
+--- host-process information is visible inside the sandbox:
+---   - /proc/<pid>/environ leaks environment variables of host processes
+---   - /proc/<pid>/cmdline leaks command-line arguments
+---   - /proc/<pid>/root is a traversable fd into each process's root
+---   - /proc/sys exposes writable kernel tunables to the sandboxed process
+--- Always prefer `fs.proc()` (called from within a CLONE_NEWPID child)
+--- over binding the host /proc.  See proc.fork_pidns() for the helper
+--- that creates the correctly-placed child.
+---
+--- If mounting procfs fails (e.g. the caller is not in a PID namespace
+--- or there is a policy denial), the error is surfaced as nil, err so
+--- the caller can decide to abort the jail setup.
+function M.proc(dir)
+  dir = dir or "/proc"
+  local ok, err = unix.makedirs(dir, M.MODE_DIR)
+  if not ok then return nil, err end
+  local flags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
+  ok, err = unix.mount("proc", dir, "proc", flags, nil)
+  if not ok then return nil, err end
+  return true
+end
+
 --- fs.pivot_to_or_exit(jail[, exit_code])
 ---
 --- Like pivot_to, but enforces the documented failure contract: on
