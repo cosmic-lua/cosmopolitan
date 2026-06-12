@@ -34,6 +34,18 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — lunix LOW items (L3) implemented** on this branch.
+  (1) `unix.readlink` arg-2 `bufsiz` is read as `lua_Integer` and clamped to
+  `[BUFSIZ, 0x7ffff000]` (non-positive → BUFSIZ), with a comment noting the
+  fork's arg-2 dirfd→bufsiz API change; no more huge-alloc OOM on a negative
+  value. (2) Negative-size lower-clamp `if (bufsiz < 0) bufsiz = 0;` added to
+  all three read-family sites — `unix.read`/`pread` (1700), `recvfrom` (2252),
+  `recv` (2280) — before the existing `MIN(.., 0x7ffff000)` upper clamp.
+  (3) `unix.ioctl` string path uses `malloc(len ? len : 1)` to avoid a spurious
+  ENOMEM on an empty-string arg. Also corrected a pre-existing wrong assertion
+  in `readlink_test.lua` (the impl returns `ENAMETOOLONG` on a full buffer, not
+  silent truncation) and added bufsiz=0/-1 clamp tests. Builds clean; tests pass.
+
 - **2026-06-12 — fetch-client LOW/INFO items (L2) implemented** on this branch.
   (1) `maxresponse` is now read as a signed `lua_Integer` and rejected with
   `luaL_argerror` when `< 0` in both `lfetch.c` and `fetch.inc` (closes the
@@ -558,18 +570,18 @@ paths.
   and adds `testResumeWhenCapacityEqualsReceivedPlusOne` covering the
   `c == n+1` case. (The fork's original change already fixed a real upstream
   resume byte-skip / parser-desync bug; this completes it.)
-- **LOW — `unix.readlink` silently repurposed arg 2 from `dirfd` to `bufsiz`.**
+- **LOW — `unix.readlink` silently repurposed arg 2 from `dirfd` to `bufsiz`.** _[FIXED — L3: clamped + documented]_
   `third_party/lua/lunix.c:534-549`: upstream resolved `path` relative to a
   directory fd; the fork hardcodes `AT_FDCWD` and treats arg 2 as a buffer
   size. Existing callers passing a dirfd now mis-size the buffer. A negative
   `bufsiz` wraps to a huge `size_t` and raises a Lua memory error (fails safe).
   **Fix:** clamp `bufsiz` to a sane positive range; document the API break.
-- **LOW — `unix.read` negative bufsiz not lower-clamped.**
+- **LOW — `unix.read` negative bufsiz not lower-clamped.** _[FIXED — L3: read/recv/recvfrom]_
   `third_party/lua/lunix.c:1693-1696` clamps only the upper bound
   (`MIN(bufsiz, 0x7ffff000)`); a negative value survives and triggers a
   spurious OOM `luaL_error`. Same pattern at lines ~2246/2273. **Fix:**
   `if (bufsiz < 0) bufsiz = 0;`.
-- **LOW — `unix.ioctl` string path calls `malloc(0)` on an empty-string arg**
+- **LOW — `unix.ioctl` string path calls `malloc(0)` on an empty-string arg** _[FIXED — L3]_
   (surfaces a spurious `ENOMEM`). Guard `len == 0`.
 - **LOW — `lgetopt.c:124-135` leaks `argv`/`longopts` on OOM.** They are
   `calloc`'d before `lua_newuserdata`; if that raises an OOM Lua error
