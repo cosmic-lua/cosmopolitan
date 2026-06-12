@@ -34,6 +34,20 @@ Severity legend: **CRITICAL** / **HIGH** / **MEDIUM** / **LOW** / **INFO**.
 
 ## Status / changelog
 
+- **2026-06-12 — build/packaging LOW items (L5) implemented** on this branch.
+  (1) `bin/cosmic` now has fail-closed integrity verification: a portable
+  `_sha256` wrapper + `verify_file` that deletes the binary and exits non-zero
+  on mismatch, with precedence pinned `EXPECTED_SHA256` → sidecar
+  `${RELEASE_URL}.sha256` → a loud multi-line stderr WARNING when neither is
+  available (the download still runs, but the gap is no longer silent). The
+  happy path is preserved (skips straight to `exec` when the binary exists).
+  **Maintainer action:** pin the real cosmic-lua SHA-256 in `EXPECTED_SHA256`
+  (or publish a sidecar) to activate enforcement on first download.
+  (2) `build/download-cosmocc.sh`: removed the dead double-prefixed `URL2`
+  fallback (`cosmocc-cosmocc-...`, always 404, and would carry a non-matching
+  upstream SHA anyway); URL1 + the fail-closed `sha256sum -c ... || die`
+  verification are unchanged. Both scripts pass `sh -n`; no Makefile change.
+
 - **2026-06-12 — small-C LOW items (L4) implemented** on this branch.
   (1) `lgetopt.c` `LuaGetoptNew` now creates the parser userdata first (NULL
   pointers, `LUA_NOREF` refs, metatable set) before `calloc`'ing argv/longopts
@@ -613,11 +627,11 @@ paths.
 
 ### Build / packaging
 
-- **LOW — `bin/cosmic` downloads `cosmic-lua` over `curl` with no checksum**
+- **LOW — `bin/cosmic` downloads `cosmic-lua` over `curl` with no checksum** _[FIXED — L5: verification added; maintainer must pin hash]_
   and `exec`s it. Inconsistent with the SHA-256-pinned
   `build/download-cosmocc.sh`. **Fix:** pin and verify a digest of the
   downloaded binary.
-- **LOW — `build/download-cosmocc.sh:11` fallback URL is dead** for fork
+- **LOW — `build/download-cosmocc.sh:11` fallback URL is dead** for fork _[FIXED — L5: dead fallback removed]_
   versions: `URL2="https://cosmo.zip/pub/cosmocc/cosmocc-${COSMOCC_VERSION}.zip"`
   with `COSMOCC_VERSION=cosmocc-2025.12.30-...` yields a double `cosmocc-`
   prefix. Fails safe because `sha256sum -c` rejects any mismatch, but the
