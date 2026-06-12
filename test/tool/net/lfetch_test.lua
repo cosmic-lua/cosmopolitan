@@ -162,6 +162,22 @@ function test_ssrf_blocks_private()
     print("test_ssrf_blocks_private: PASS")
 end
 
+-- Test: SSRF protection blocks link-local / cloud metadata endpoint
+function test_ssrf_blocks_link_local()
+    local status, err = Fetch("http://169.254.169.254/")
+    assert(status == nil, "expected nil status for blocked cloud metadata IP")
+    assert(err:find("private network blocked"), "expected SSRF protection error, got: " .. err)
+    print("test_ssrf_blocks_link_local: PASS")
+end
+
+-- Test: SSRF protection blocks 0.0.0.0 (routes to localhost on Linux)
+function test_ssrf_blocks_zero_addr()
+    local status, err = Fetch("http://0.0.0.0/")
+    assert(status == nil, "expected nil status for blocked 0.0.0.0")
+    assert(err:find("private network blocked"), "expected SSRF protection error, got: " .. err)
+    print("test_ssrf_blocks_zero_addr: PASS")
+end
+
 -- Test: Invalid scheme
 function test_invalid_scheme()
     local status, err = Fetch("ftp://example.com/")

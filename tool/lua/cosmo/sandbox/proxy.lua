@@ -378,6 +378,13 @@ local function dial(host, port, upstream_ns_fd, resolve_timeout_ms)
   end
   local ip, rerr = resolve_v4(host, resolve_timeout_ms)
   if not ip then return nil, rerr end
+  -- Block non-public IPs to prevent SSRF. This covers loopback (127/8),
+  -- link-local (169.254/16) including the cloud metadata endpoint
+  -- 169.254.169.254, RFC1918, CGNAT (100.64/10), 0.0.0.0/8, and other
+  -- reserved ranges. Applies to both CONNECT and plain-HTTP paths.
+  if not cosmo.IsPublicIp(ip) then
+    return nil, "request to private network blocked (SSRF protection)"
+  end
   local sk, serr = unix.socket(unix.AF_INET, unix.SOCK_STREAM, 0)
   if not sk then return nil, serr end
   local ok, cerr = unix.connect(sk, ip, port)

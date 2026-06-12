@@ -420,9 +420,12 @@ int LuaFetch(lua_State *L) {
     DEBUGF("(ftch) client connecting %hhu.%hhu.%hhu.%hhu:%d", ip >> 24,
            ip >> 16, ip >> 8, ip,
            ntohs(((struct sockaddr_in *)addr->ai_addr)->sin_port));
-    // Prevent SSRF by blocking requests to private/internal networks
+    // Prevent SSRF by blocking requests to non-public networks.
+    // This covers loopback (127/8), link-local (169.254/16, including the
+    // cloud metadata endpoint 169.254.169.254), RFC1918, CGNAT (100.64/10),
+    // 0.0.0.0/8, and other reserved ranges via IsPublicIp().
     // Skip SSRF check for proxy connections (proxy handles target resolution)
-    if (!proxyhost && (IsLoopbackIp(ip) || IsPrivateIp(ip))) {
+    if (!proxyhost && !IsPublicIp(ip)) {
       freeaddrinfo(addr);
       return LuaNilError(L, "request to private network blocked (SSRF protection)");
     }

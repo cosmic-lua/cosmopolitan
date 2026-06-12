@@ -889,7 +889,7 @@ int LuaFetchStream(lua_State *L) {
       return LuaNilError(L, "getaddrinfo(%s:%s) error: EAI_%s %s", connecthost,
                          connectport, gai_strerror(rc), strerror(errno));
     ip = ntohl(((struct sockaddr_in *)addr->ai_addr)->sin_addr.s_addr);
-    if (!proxyhost && (IsLoopbackIp(ip) || IsPrivateIp(ip))) {
+    if (!proxyhost && !IsPublicIp(ip)) {
       freeaddrinfo(addr);
       return LuaNilError(L, "request to private network blocked (SSRF protection)");
     }
