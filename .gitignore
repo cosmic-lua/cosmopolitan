@@ -17,5 +17,3 @@ __pycache__
 /perf.data
 /perf.data.old
 /qemu*core
-tool/lua/.lua/definitions.lua
-bin/
