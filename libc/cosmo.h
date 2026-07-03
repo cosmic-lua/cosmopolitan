@@ -52,6 +52,11 @@ void *cosmo_leak_untrack(void *);
 void cosmo_leak_finalize(void);
 int cosmo_leak_print(int (*)(void *));
 
+void cosmo_smoothsort(void *, size_t, size_t,
+                      int (*)(const void *, const void *));
+void cosmo_smoothsort_r(void *, size_t, size_t,
+                        int (*)(const void *, const void *, void *), void *);
+
 extern void *(*__dlmalloc)(size_t);
 extern void (*__dlfree)(void *);
 extern void *(*__dlcalloc)(size_t, size_t);

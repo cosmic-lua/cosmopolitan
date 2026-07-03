@@ -111,7 +111,7 @@
 #define CONCERN_LOAD      .90     // avoid keepalive, upon this connection load
 #define PANIC_LOAD        .98     // meltdown if this percent of pool connected
 #define PANIC_MSGS        10      // msgs per conn can't exceed it in meltdown
-#define QUEUE_MAX         15000   // maximum pending claim items in queue
+#define QUEUE_MAX         1500000 // maximum pending claim items in queue
 #define BATCH_MAX         3000    // max claims to insert per transaction
 #define NICK_MAX          40      // max length of user nickname string
 #define TB_INTERVAL       1000    // millis between token replenishes

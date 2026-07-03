@@ -43,7 +43,7 @@
 // such as the behavior of null or zero parameters, roundups and copying
 
 #ifndef TINYMALLOC_MAX_BYTES
-#define TINYMALLOC_MAX_BYTES 1073741824
+#define TINYMALLOC_MAX_BYTES 268435456
 #endif
 #ifndef TINYMALLOC_ALIGN
 #define TINYMALLOC_ALIGN sizeof(max_align_t)

@@ -161,4 +161,4 @@ wontreturn void pthread_exit(void *rc) {
   __builtin_longjmp(pt->pt_exiter, 1);
 }
 
-__weak_reference(pthread_exit, thr_exit);
+__weak_reference(pthread_exit, thrd_exit);

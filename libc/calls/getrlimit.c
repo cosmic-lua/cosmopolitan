@@ -40,14 +40,6 @@ static int getrlimit_impl(int resource, struct rlimit *rlim) {
   if (IsWindows() || IsMetal() || (IsXnu() && resource == RLIMIT_AS)) {
     rlim->rlim_cur = ~__get_pib()->rlimit[resource].rlim_cur;
     rlim->rlim_max = ~__get_pib()->rlimit[resource].rlim_max;
-
-    // avoid closefrom polyfill spinning its wheels forever
-    if ((IsWindows() || IsMetal()) && resource == RLIMIT_NOFILE) {
-      unsigned long maxfd = __get_pib()->fds.n;
-      if (rlim->rlim_cur > maxfd)
-        rlim->rlim_cur = maxfd;
-    }
-
     return 0;
   }
 

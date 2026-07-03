@@ -25,6 +25,8 @@ void *nsync_per_thread_waiter_(void (*dest)(void *));
 uint32_t nsync_spin_test_and_set_(nsync_atomic_uint32_ *w, uint32_t test,
                                   uint32_t set, uint32_t clear, void *symbol);
 
+void nsync_mu_release_spinlock_(nsync_mu *mu);
+
 /* Abort after printing the nul-temrinated string s[]. */
 void nsync_panic_(const char *s) wontreturn relegated;
 

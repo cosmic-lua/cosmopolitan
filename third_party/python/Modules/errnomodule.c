@@ -196,7 +196,7 @@ PyInit_errno(void)
     inscode(d, ds, de, "EPERM", EPERM, "Operation not permitted");
     inscode(d, ds, de, "ENOENT", ENOENT, "No such file or directory");
     inscode(d, ds, de, "ESRCH", ESRCH, "No such process");
-    inscode(d, ds, de, "EINTR", EINTR, "The greatest of all errnos");
+    inscode(d, ds, de, "EINTR", EINTR, "Interrupted");
     inscode(d, ds, de, "EIO", EIO, "I/O error");
     inscode(d, ds, de, "ENXIO", ENXIO, "No such device or address");
     inscode(d, ds, de, "E2BIG", E2BIG, "Argument list too long");

@@ -17,7 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "libc/intrin/kprintf.h"
 
 // test chdir(), fchdir(), etc.
 

@@ -108,6 +108,7 @@ errno_t nsync_mu_semaphore_p_with_deadline_futex (nsync_semaphore *s, int clock,
 							 clock, ts);
 			unassert (futex_result == 0 ||
 				  futex_result == -EINTR ||
+				  futex_result == -EINVAL ||
 				  futex_result == -EAGAIN ||
 				  futex_result == -ECANCELED ||
 				  futex_result == -ETIMEDOUT ||
@@ -122,6 +123,9 @@ errno_t nsync_mu_semaphore_p_with_deadline_futex (nsync_semaphore *s, int clock,
 			}
 			if (futex_result == -ECANCELED) {
 				result = ECANCELED;
+			}
+			if (futex_result == -EINVAL) {
+				result = EINVAL;
 			}
 		}
 	} while (result == 0 && (i == 0 ||

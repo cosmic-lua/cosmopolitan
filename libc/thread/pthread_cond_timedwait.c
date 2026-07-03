@@ -32,9 +32,11 @@
 #include "third_party/nsync/cv.h"
 #include "third_party/nsync/time.h"
 
+#if PTHREAD_USE_NSYNC
 __static_yoink("nsync_mu_lock");
 __static_yoink("nsync_mu_unlock");
 __static_yoink("nsync_mu_trylock");
+#endif
 
 struct PthreadWait {
   pthread_cond_t *cond;
@@ -77,11 +79,19 @@ static errno_t pthread_cond_timedwait_impl(pthread_cond_t *cond,
   int rc;
   struct PthreadWait waiter = {cond, mutex};
   pthread_cleanup_push(pthread_cond_leave, &waiter);
-  rc = cosmo_futex_wait((atomic_int *)&cond->_sequence, seq1, cond->_pshared,
-                        cond->_clock, abstime);
+  for (;;) {
+    rc = cosmo_futex_wait((atomic_int *)&cond->_sequence, seq1, cond->_pshared,
+                          cond->_clock, abstime);
+    if (rc == -EAGAIN || rc == -EINTR) {
+      uint32_t seq2 =
+          atomic_load_explicit(&cond->_sequence, memory_order_relaxed);
+      if (seq2 == seq1)
+        continue;
+      rc = 0;
+    }
+    break;
+  }
   pthread_cleanup_pop(true);
-  if (rc == -EAGAIN)
-    rc = 0;
 
   // turn linux syscall status into posix errno
   return -rc;
@@ -114,13 +124,6 @@ static errno_t pthread_cond_timedwait_impl(pthread_cond_t *cond,
  */
 errno_t pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
                                const struct timespec *abstime) {
-
-  // validate arguments
-  struct PosixThread *pt;
-  if (!(pt = _pthread_self()))
-    return EINVAL;
-  if (abstime && !(0 <= abstime->tv_nsec && abstime->tv_nsec < 1000000000))
-    return EINVAL;
 
   // look at the mutex argument
   uint64_t muword = atomic_load_explicit(&mutex->_word, memory_order_relaxed);

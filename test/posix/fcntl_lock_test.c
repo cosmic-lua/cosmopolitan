@@ -18,7 +18,6 @@
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include "libc/intrin/kprintf.h"
 
 int main() {
   int fd;
@@ -34,10 +33,8 @@ int main() {
   lock.l_start = 0;
   lock.l_len = 0;
 
-  if (fcntl(fd, F_SETLK, &lock) != 0) {
-    kprintf("%m\n");
+  if (fcntl(fd, F_SETLK, &lock) != 0)
     return 2;
-  }
 
   pid = fork();
   if (pid == 0) {

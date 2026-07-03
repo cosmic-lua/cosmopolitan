@@ -20,12 +20,34 @@
 #include "libc/thread/threads.h"
 
 /**
- * Allocates TLS slot.
+ * Allocates thread-specific storage key.
  *
- * This API is part of the C11 standard, and it is designed to be nearly
- * identical to pthread_key_create() which has further documentation.
+ * A `tss_t` key names a slot that holds a separate `void *` value in each
+ * thread. Every thread initially sees NULL for a freshly created key, and one
+ * thread's value is invisible to others, e.g.
  *
- * @return `thrd_success` on success, or `thrd_error` on error
+ *     tss_t key;
+ *     tss_create(&key, free);          // destructor called at thread exit
+ *     tss_set(key, malloc(32));        // this thread's private pointer
+ *     void *p = tss_get(key);          // reads back what this thread set
+ *
+ * If `destructor` is non-NULL, then when a thread exits with a non-NULL value
+ * stored under this key, the destructor is called with that value. The C11
+ * standard repeats this up to `TSS_DTOR_ITERATIONS` times for keys whose
+ * destructor re-sets a non-NULL value, after which any remaining value is
+ * abandoned. Destructors run on thread termination, not at normal process
+ * exit.
+ *
+ * Keys are a finite resource; release them with tss_delete() when done. This
+ * API is part of the C11 standard, and is nearly identical to
+ * pthread_key_create(), which has further documentation.
+ *
+ * @param tss_key is output parameter for the new key
+ * @param destructor is called on each thread's non-NULL value at thread exit,
+ *     or may be NULL for no cleanup
+ * @return `thrd_success` on success, or `thrd_error` on error, e.g. if too
+ *     many keys exist
+ * @see tss_get(), tss_set(), tss_delete()
  */
 int tss_create(tss_t* tss_key, tss_dtor_t destructor) {
   static_assert(sizeof(tss_t) == sizeof(pthread_key_t), "");

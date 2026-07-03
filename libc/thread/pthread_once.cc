@@ -98,6 +98,8 @@ dontinline static errno_t pthread_once_impl(pthread_once_t *once,
  * This implementation is process private. Consider cosmo_once() when it
  * is necessary to synchronize initialization across multiple processes.
  *
+ * This function is equivalent to call_once().
+ *
  * @return 0 on success, or errno on error
  */
 errno_t pthread_once(pthread_once_t *once, void init(void)) {
