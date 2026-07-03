@@ -5104,6 +5104,103 @@ unix = {
     --- @type integer sysconf: number of processors currently online
     SC_NPROCESSORS_ONLN = nil,
 
+    --- @type integer termios input mode flags (Termios.iflag)
+    BRKINT = nil,
+    ICRNL = nil,
+    IGNBRK = nil,
+    IGNCR = nil,
+    IGNPAR = nil,
+    INLCR = nil,
+    INPCK = nil,
+    ISTRIP = nil,
+    IXANY = nil,
+    IXOFF = nil,
+    IXON = nil,
+    PARMRK = nil,
+
+    --- @type integer termios output mode flags (Termios.oflag)
+    OPOST = nil,
+    OCRNL = nil,
+    ONLCR = nil,
+    ONLRET = nil,
+    ONOCR = nil,
+
+    --- @type integer termios control mode flags (Termios.cflag)
+    CLOCAL = nil,
+    CREAD = nil,
+    CS5 = nil,
+    CS6 = nil,
+    CS7 = nil,
+    CS8 = nil,
+    CSIZE = nil,
+    CSTOPB = nil,
+    HUPCL = nil,
+    PARENB = nil,
+    PARODD = nil,
+
+    --- @type integer termios local mode flags (Termios.lflag)
+    ECHO = nil,
+    ECHOE = nil,
+    ECHOK = nil,
+    ECHONL = nil,
+    ICANON = nil,
+    IEXTEN = nil,
+    ISIG = nil,
+    NOFLSH = nil,
+    TOSTOP = nil,
+
+    --- @type integer termios control-character indices (Termios.cc)
+    VEOF = nil,
+    VEOL = nil,
+    VERASE = nil,
+    VINTR = nil,
+    VKILL = nil,
+    VMIN = nil,
+    VQUIT = nil,
+    VSTART = nil,
+    VSTOP = nil,
+    VTIME = nil,
+    NCCS = nil,
+
+    --- @type integer tcsetattr() action values
+    TCSANOW = nil,
+    TCSADRAIN = nil,
+    TCSAFLUSH = nil,
+
+    --- @type integer network interface ioctls (siocgifconf/ifreq)
+    IFNAMSIZ = nil,
+    IFF_UP = nil,
+    SIOCGIFFLAGS = nil,
+    SIOCSIFFLAGS = nil,
+
+    --- @type integer unshare()/setns() namespace flags
+    CLONE_NEWNET = nil,
+    CLONE_NEWNS = nil,
+    CLONE_NEWPID = nil,
+    CLONE_NEWUSER = nil,
+    CLONE_NEWUTS = nil,
+
+    --- @type integer landlock access-rights bits (landlock_add_rule)
+    LANDLOCK_ACCESS_FS_EXECUTE = nil,
+    LANDLOCK_ACCESS_FS_WRITE_FILE = nil,
+    LANDLOCK_ACCESS_FS_READ_FILE = nil,
+    LANDLOCK_ACCESS_FS_READ_DIR = nil,
+    LANDLOCK_ACCESS_FS_REMOVE_DIR = nil,
+    LANDLOCK_ACCESS_FS_REMOVE_FILE = nil,
+    LANDLOCK_ACCESS_FS_MAKE_CHAR = nil,
+    LANDLOCK_ACCESS_FS_MAKE_DIR = nil,
+    LANDLOCK_ACCESS_FS_MAKE_REG = nil,
+    LANDLOCK_ACCESS_FS_MAKE_SOCK = nil,
+    LANDLOCK_ACCESS_FS_MAKE_FIFO = nil,
+    LANDLOCK_ACCESS_FS_MAKE_BLOCK = nil,
+    LANDLOCK_ACCESS_FS_MAKE_SYM = nil,
+    LANDLOCK_ACCESS_FS_REFER = nil,
+    LANDLOCK_ACCESS_FS_TRUNCATE = nil,
+
+    --- @type integer prctl() options
+    PR_SET_KEEPCAPS = nil,
+    PR_SET_NO_NEW_PRIVS = nil,
+
     --- @type integer
     RUSAGE_BOTH = nil,
     --- @type integer
@@ -5466,7 +5563,7 @@ function unix.exit(exitcode) end
 --- command prompt inserts multiple environment variables with empty
 --- string as keys, for its internal bookkeeping.
 ---
----@return table<string, string?>
+---@return string[] environ list of `"KEY=value"` strings
 ---@nodiscard
 function unix.environ() end
 
@@ -7267,9 +7364,10 @@ function unix.recvfrom(fd, bufsiz, flags) end
 --- - `MSG_OOB`: Send stream data through out of bound channel
 --- - `MSG_DONTROUTE`: Don't go through gateway (for diagnostics)
 --- - `MSG_MORE`: Manual corking to belay nodelay (0 on non-Linux)
+---@param offset integer? byte offset into `data` at which to start sending
 ---@return integer sent
----@overload fun(fd: integer, data: string, flags?: integer): nil, unix.Errno
-function unix.send(fd, data, flags) end
+---@overload fun(fd: integer, data: string, flags?: integer, offset?: integer): nil, unix.Errno
+function unix.send(fd, data, flags, offset) end
 
 --- This is useful for sending messages over UDP sockets to specific
 --- addresses.
@@ -8788,6 +8886,18 @@ function unix.Stat:gen() end
 ---@return integer flags User-defined flags on the file.
 ---@nodiscard
 function unix.Stat:flags() end
+
+--- Extracts the major device number from a device id such as `Stat:rdev()`.
+---@param rdev integer
+---@return integer major
+---@nodiscard
+function unix.major(rdev) end
+
+--- Extracts the minor device number from a device id such as `Stat:rdev()`.
+---@param rdev integer
+---@return integer minor
+---@nodiscard
+function unix.minor(rdev) end
 
 ---@class unix.Statfs: userdata
 --- Filesystem statistics returned by `statfs()` and `fstatfs()`.
