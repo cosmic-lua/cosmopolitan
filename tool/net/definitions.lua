@@ -4905,9 +4905,27 @@ unix = {
     IPPROTO_UDP = nil,
 
     --- @type integer
+    IP_ADD_MEMBERSHIP = nil,
+    --- @type integer
+    IP_DROP_MEMBERSHIP = nil,
+    --- @type integer
     IP_HDRINCL = nil,
     --- @type integer
     IP_MTU = nil,
+    --- @type integer
+    IP_MULTICAST_IF = nil,
+    --- @type integer
+    IP_MULTICAST_LOOP = nil,
+    --- @type integer
+    IP_MULTICAST_TTL = nil,
+    --- @type integer
+    IP_OPTIONS = nil,
+    --- @type integer
+    IP_PKTINFO = nil,
+    --- @type integer
+    IP_RECVTOS = nil,
+    --- @type integer
+    IP_RECVTTL = nil,
     --- @type integer
     IP_TOS = nil,
     --- @type integer
@@ -5520,6 +5538,8 @@ unix = {
     SO_KEEPALIVE = nil,
     --- @type integer
     SO_LINGER = nil,
+    --- @type integer
+    SO_OOBINLINE = nil,
     --- @type integer
     SO_RCVBUF = nil,
     --- @type integer

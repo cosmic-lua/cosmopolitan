@@ -142,7 +142,7 @@ o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua
 	$< tool/lua/test_fetch_unix_proxy.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua third_party/lua/lunix.c tool/net/definitions.lua
+o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua third_party/lua/lunix.c tool/net/definitions.lua libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
 	$< tool/lua/test_definitions_coverage.lua
 	@touch $@
 

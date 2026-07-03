@@ -1,18 +1,21 @@
 -- Annotation-coverage ratchet for the unix.* C bindings.
 --
--- Every function registered in kLuaUnix[] and every constant registered via
--- LuaSetIntField() in third_party/lua/lunix.c must have a matching declaration
--- in tool/net/definitions.lua, so downstream type generators (e.g. cosmic's
+-- Every function registered in kLuaUnix[] and every constant registered in
+-- third_party/lua/lunix.c must have a matching declaration in
+-- tool/net/definitions.lua, so downstream type generators (e.g. cosmic's
 -- gentype) can emit the whole surface instead of hand-maintaining it.
+--
+-- Constants are registered two ways, both covered here:
+--   * literal LuaSetIntField(L, "NAME", ...) calls, and
+--   * dynamic LoadMagnums(L, kTable, "PFX_") calls, which register PFX_ + each
+--     string in the corresponding libc/intrin/<ktable>.S magnum table (the
+--     IP_/TCP_/SO_/CLOCK_ families).
 --
 -- ALLOW_* below are the symbols that are knowingly not yet annotated. This list
 -- is a RATCHET: it may only shrink. Adding a new binding without its annotation
 -- fails this test -- annotate the binding, do not append to the allowlist. When
 -- you annotate an allowlisted symbol (or drop it from the C), remove it here or
 -- the stale-entry check fails.
---
--- Limitation: constants registered dynamically via LoadMagnums() (the IP_/TCP_/
--- SO_/CLOCK_ families) are not covered -- only literal LuaSetIntField() names.
 
 local function slurp(path)
   local f = assert(io.open(path, "r"), "cannot open " .. path)
@@ -36,6 +39,16 @@ end
 local reg_consts = {}
 for name in C:gmatch('LuaSetIntField%(L,%s*"([%u][%w_]*)"') do
   reg_consts[name] = true
+end
+
+-- Registered constants: dynamic LoadMagnums(L, kTable, "PFX_"). Each call
+-- registers PFX_ .. <string> for every entry in the magnum table, which lives
+-- in libc/intrin/<lowercased table>.S as `.e SYMBOL,"STRING"` rows.
+for tbl, pfx in C:gmatch('LoadMagnums%(L,%s*(k%w+),%s*"([%u_]*)"%)') do
+  local S = slurp("libc/intrin/" .. tbl:lower() .. ".S")
+  for suffix in S:gmatch('%.e%s+[%u][%w_]*%s*,%s*"([%w_]+)"') do
+    reg_consts[pfx .. suffix] = true
+  end
 end
 
 -- Annotated functions: function unix.name(
