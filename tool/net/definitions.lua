@@ -5104,6 +5104,103 @@ unix = {
     --- @type integer sysconf: number of processors currently online
     SC_NPROCESSORS_ONLN = nil,
 
+    --- @type integer termios input mode flags (Termios.iflag)
+    BRKINT = nil,
+    ICRNL = nil,
+    IGNBRK = nil,
+    IGNCR = nil,
+    IGNPAR = nil,
+    INLCR = nil,
+    INPCK = nil,
+    ISTRIP = nil,
+    IXANY = nil,
+    IXOFF = nil,
+    IXON = nil,
+    PARMRK = nil,
+
+    --- @type integer termios output mode flags (Termios.oflag)
+    OPOST = nil,
+    OCRNL = nil,
+    ONLCR = nil,
+    ONLRET = nil,
+    ONOCR = nil,
+
+    --- @type integer termios control mode flags (Termios.cflag)
+    CLOCAL = nil,
+    CREAD = nil,
+    CS5 = nil,
+    CS6 = nil,
+    CS7 = nil,
+    CS8 = nil,
+    CSIZE = nil,
+    CSTOPB = nil,
+    HUPCL = nil,
+    PARENB = nil,
+    PARODD = nil,
+
+    --- @type integer termios local mode flags (Termios.lflag)
+    ECHO = nil,
+    ECHOE = nil,
+    ECHOK = nil,
+    ECHONL = nil,
+    ICANON = nil,
+    IEXTEN = nil,
+    ISIG = nil,
+    NOFLSH = nil,
+    TOSTOP = nil,
+
+    --- @type integer termios control-character indices (Termios.cc)
+    VEOF = nil,
+    VEOL = nil,
+    VERASE = nil,
+    VINTR = nil,
+    VKILL = nil,
+    VMIN = nil,
+    VQUIT = nil,
+    VSTART = nil,
+    VSTOP = nil,
+    VTIME = nil,
+    NCCS = nil,
+
+    --- @type integer tcsetattr() action values
+    TCSANOW = nil,
+    TCSADRAIN = nil,
+    TCSAFLUSH = nil,
+
+    --- @type integer network interface ioctls (siocgifconf/ifreq)
+    IFNAMSIZ = nil,
+    IFF_UP = nil,
+    SIOCGIFFLAGS = nil,
+    SIOCSIFFLAGS = nil,
+
+    --- @type integer unshare()/setns() namespace flags
+    CLONE_NEWNET = nil,
+    CLONE_NEWNS = nil,
+    CLONE_NEWPID = nil,
+    CLONE_NEWUSER = nil,
+    CLONE_NEWUTS = nil,
+
+    --- @type integer landlock access-rights bits (landlock_add_rule)
+    LANDLOCK_ACCESS_FS_EXECUTE = nil,
+    LANDLOCK_ACCESS_FS_WRITE_FILE = nil,
+    LANDLOCK_ACCESS_FS_READ_FILE = nil,
+    LANDLOCK_ACCESS_FS_READ_DIR = nil,
+    LANDLOCK_ACCESS_FS_REMOVE_DIR = nil,
+    LANDLOCK_ACCESS_FS_REMOVE_FILE = nil,
+    LANDLOCK_ACCESS_FS_MAKE_CHAR = nil,
+    LANDLOCK_ACCESS_FS_MAKE_DIR = nil,
+    LANDLOCK_ACCESS_FS_MAKE_REG = nil,
+    LANDLOCK_ACCESS_FS_MAKE_SOCK = nil,
+    LANDLOCK_ACCESS_FS_MAKE_FIFO = nil,
+    LANDLOCK_ACCESS_FS_MAKE_BLOCK = nil,
+    LANDLOCK_ACCESS_FS_MAKE_SYM = nil,
+    LANDLOCK_ACCESS_FS_REFER = nil,
+    LANDLOCK_ACCESS_FS_TRUNCATE = nil,
+
+    --- @type integer prctl() options
+    PR_SET_KEEPCAPS = nil,
+    PR_SET_NO_NEW_PRIVS = nil,
+
     --- @type integer
     RUSAGE_BOTH = nil,
     --- @type integer
@@ -5466,7 +5563,7 @@ function unix.exit(exitcode) end
 --- command prompt inserts multiple environment variables with empty
 --- string as keys, for its internal bookkeeping.
 ---
----@return table<string, string?>
+---@return string[] environ list of `"KEY=value"` strings
 ---@nodiscard
 function unix.environ() end
 
@@ -5475,11 +5572,11 @@ function unix.environ() end
 --- This wraps the C `setenv()` function to allow Lua scripts to set
 --- environment variables.
 ---
---- @param name string environment variable name
---- @param value string value to set
---- @param overwrite? boolean if false, won't overwrite existing variables (defaults to true)
---- @return true
---- @overload fun(name: string, value: string, overwrite?: boolean): nil, error: unix.Errno
+---@param name string environment variable name
+---@param value string value to set
+---@param overwrite? boolean if false, won't overwrite existing variables (defaults to true)
+---@return true
+---@overload fun(name: string, value: string, overwrite?: boolean): nil, error: unix.Errno
 function unix.setenv(name, value, overwrite) end
 
 --- Unsets environment variable.
@@ -5487,9 +5584,9 @@ function unix.setenv(name, value, overwrite) end
 --- This wraps the C `unsetenv()` function to allow Lua scripts to remove
 --- environment variables.
 ---
---- @param name string environment variable name to unset
---- @return true
---- @overload fun(name: string): nil, error: unix.Errno
+---@param name string environment variable name to unset
+---@return true
+---@overload fun(name: string): nil, error: unix.Errno
 function unix.unsetenv(name) end
 
 --- Clears all environment variables.
@@ -7267,9 +7364,10 @@ function unix.recvfrom(fd, bufsiz, flags) end
 --- - `MSG_OOB`: Send stream data through out of bound channel
 --- - `MSG_DONTROUTE`: Don't go through gateway (for diagnostics)
 --- - `MSG_MORE`: Manual corking to belay nodelay (0 on non-Linux)
+---@param offset integer? byte offset into `data` at which to start sending
 ---@return integer sent
----@overload fun(fd: integer, data: string, flags?: integer): nil, unix.Errno
-function unix.send(fd, data, flags) end
+---@overload fun(fd: integer, data: string, flags?: integer, offset?: integer): nil, unix.Errno
+function unix.send(fd, data, flags, offset) end
 
 --- This is useful for sending messages over UDP sockets to specific
 --- addresses.
@@ -7968,7 +8066,7 @@ function unix.opendir(path) end
 
 --- Opens directory for listing its contents, via an fd.
 ---
---- @param fd integer should be created by `open(path, O_RDONLY|O_DIRECTORY)`.
+---@param fd integer should be created by `open(path, O_RDONLY|O_DIRECTORY)`.
 --- The returned `unix.Dir` takes ownership of the file descriptor
 --- and will close it automatically when garbage collected.
 ---
@@ -7998,6 +8096,15 @@ function unix.isatty(fd) end
 ---@overload fun(fd: integer): nil, error: unix.Errno
 function unix.tiocgwinsz(fd) end
 
+---@class unix.Termios
+---@field iflag integer Input mode flags (e.g. `unix.BRKINT`, `unix.ICRNL`).
+---@field oflag integer Output mode flags (e.g. `unix.OPOST`, `unix.ONLCR`).
+---@field cflag integer Control mode flags (e.g. `unix.CS8`, `unix.CREAD`).
+---@field lflag integer Local mode flags (e.g. `unix.ECHO`, `unix.ICANON`).
+---@field cc integer[] Control characters array (indexed 1 to `unix.NCCS`).
+---@field ispeed integer Input baud rate.
+---@field ospeed integer Output baud rate.
+
 --- Gets terminal attributes.
 ---
 --- Returns a termios table containing the terminal I/O settings for the
@@ -8022,7 +8129,7 @@ function unix.tiocgwinsz(fd) end
 ---     unix.tcsetattr(0, unix.TCSANOW, tio)
 ---
 ---@param fd integer
----@return table termios
+---@return unix.Termios termios
 ---@nodiscard
 ---@overload fun(fd: integer): nil, error: unix.Errno
 function unix.tcgetattr(fd) end
@@ -8043,9 +8150,9 @@ function unix.tcgetattr(fd) end
 ---
 ---@param fd integer
 ---@param action integer
----@param termios table
+---@param termios unix.Termios
 ---@return true
----@overload fun(fd: integer, action: integer, termios: table): nil, error: unix.Errno
+---@overload fun(fd: integer, action: integer, termios: unix.Termios): nil, error: unix.Errno
 function unix.tcsetattr(fd, action, termios) end
 
 --- Returns file descriptor of open anonymous file.
@@ -8779,6 +8886,101 @@ function unix.Stat:gen() end
 ---@return integer flags User-defined flags on the file.
 ---@nodiscard
 function unix.Stat:flags() end
+
+--- Extracts the major device number from a device id such as `Stat:rdev()`.
+---@param rdev integer
+---@return integer major
+---@nodiscard
+function unix.major(rdev) end
+
+--- Extracts the minor device number from a device id such as `Stat:rdev()`.
+---@param rdev integer
+---@return integer minor
+---@nodiscard
+function unix.minor(rdev) end
+
+---@class unix.Statfs: userdata
+--- Filesystem statistics returned by `statfs()` and `fstatfs()`.
+
+--- Returns filesystem type identifier.
+---@return integer
+---@nodiscard
+function unix.Statfs:type() end
+
+--- Returns optimal transfer block size.
+---@return integer bsize
+---@nodiscard
+function unix.Statfs:bsize() end
+
+--- Returns total data blocks in filesystem.
+---@return integer blocks
+---@nodiscard
+function unix.Statfs:blocks() end
+
+--- Returns free blocks in filesystem.
+---@return integer bfree
+---@nodiscard
+function unix.Statfs:bfree() end
+
+--- Returns free blocks available to unprivileged user.
+---@return integer bavail
+---@nodiscard
+function unix.Statfs:bavail() end
+
+--- Returns total file nodes in filesystem.
+---@return integer files
+---@nodiscard
+function unix.Statfs:files() end
+
+--- Returns free file nodes in filesystem.
+---@return integer ffree
+---@nodiscard
+function unix.Statfs:ffree() end
+
+--- Returns filesystem ID as two numbers.
+---@return integer id0
+---@return integer id1
+---@nodiscard
+function unix.Statfs:fsid() end
+
+--- Returns maximum length of filenames.
+---@return integer namelen
+---@nodiscard
+function unix.Statfs:namelen() end
+
+--- Returns fragment size.
+---@return integer frsize
+---@nodiscard
+function unix.Statfs:frsize() end
+
+--- Returns mount flags.
+---@return integer flags
+---@nodiscard
+function unix.Statfs:flags() end
+
+--- Returns the owner of the mount.
+---@return integer owner
+---@nodiscard
+function unix.Statfs:owner() end
+
+--- Returns the filesystem type name, e.g. "ext4".
+---@return string fstypename
+---@nodiscard
+function unix.Statfs:fstypename() end
+
+--- Gets filesystem statistics for the filesystem that contains `path`.
+---@param path string
+---@return unix.Statfs
+---@nodiscard
+---@overload fun(path: string): nil, error: unix.Errno
+function unix.statfs(path) end
+
+--- Gets filesystem statistics via an open file descriptor.
+---@param fd integer
+---@return unix.Statfs
+---@nodiscard
+---@overload fun(fd: integer): nil, error: unix.Errno
+function unix.fstatfs(fd) end
 
 ---@class unix.Sigset: userdata
 --- Signal set for blocking, unblocking, and waiting on signals.
