@@ -103,6 +103,12 @@ o/$(MODE)/libc/str/iso8601us.o: private				\
 		CFLAGS +=					\
 			-O3
 
+ifeq ($(ARCH), x86_64)
+o/$(MODE)/libc/str/smoothsort.o: private			\
+		COPTS +=					\
+			-mstringop-strategy=libcall
+endif
+
 $(LIBC_STR_A_OBJS): private					\
 		CFLAGS +=					\
 			-fno-sanitize=all			\

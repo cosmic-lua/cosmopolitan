@@ -27,8 +27,6 @@
 #include "tool/net/lfetch.h"
 #include "tool/net/lgetopt.h"
 #include "tool/net/lzip.h"
-#include "tool/net/lhttp.h"
-#include "tool/net/lgoodsocket.h"
 #include "net/http/http.h"
 #include <stdlib.h>
 #include <string.h>
@@ -310,24 +308,12 @@ int luaopen_cosmo(lua_State *L) {
   lua_pop(L, 1);
 
   LuaZip(L);
-  register_submodule(L, "cosmo.zip.c");
-  lua_pop(L, 1);
-  /* cosmo.zip Lua wrapper is loaded on first require("cosmo.zip") */
-
-  LuaHttp(L);
-  register_submodule(L, "cosmo.http");
-  lua_pop(L, 1);
-
-  LuaGoodSocket(L);
-  register_submodule(L, "cosmo.goodsocket");
+  register_submodule(L, "cosmo.zip");
   lua_pop(L, 1);
 
   luaopen_repl(L);
   register_submodule(L, "cosmo.repl");
   lua_pop(L, 1);
-
-  /* make help() global for convenience */
-  (void)luaL_dostring(L, "_G.help = require('cosmo.help')");
 
   return 1;
 }

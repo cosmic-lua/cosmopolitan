@@ -9,7 +9,6 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "libc/runtime/runtime.h"
 
 int main(void) {
   int result = 0;

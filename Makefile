@@ -227,7 +227,8 @@ ifneq ($(TOOLCHAIN),)
 	~/.ape.revoke				\
 	/proc/self/status			\
 	rx:/usr/bin/qemu-aarch64		\
-	rx:/usr/bin/qemu-x86_64
+	rx:/usr/bin/qemu-x86_64			\
+	rx:/usr/libexec/qemu-binfmt/aarch64-binfmt-P
 endif
 
 PKGS =
@@ -315,6 +316,7 @@ include tool/viz/lib/BUILD.mk
 include tool/args/BUILD.mk
 include tool/chat/BUILD.mk
 include test/math/BUILD.mk
+include test/c11/BUILD.mk
 include test/posix/BUILD.mk
 include test/ctl/BUILD.mk
 include test/libcxx/BUILD.mk

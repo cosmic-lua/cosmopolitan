@@ -108,6 +108,16 @@ uint32_t nsync_spin_test_and_set_ (nsync_atomic_uint32_ *w, uint32_t test,
 	return (old);
 }
 
+/* Release the mutex spinlock. */
+void nsync_mu_release_spinlock_ (nsync_mu *mu) {
+	uint32_t old_word = atomic_load_explicit (&mu->word,
+						  memory_order_relaxed);
+	while (!atomic_compare_exchange_weak_explicit (
+		       &mu->word, &old_word, old_word & ~MU_SPINLOCK,
+		       memory_order_release, memory_order_relaxed)) {
+	}
+}
+
 /* ====================================================================================== */
 
 #if NSYNC_DEBUG

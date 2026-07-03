@@ -32,16 +32,6 @@ void nsync_mu_init (nsync_mu *mu) {
 	bzero ((void *) mu, sizeof (*mu));
 }
 
-/* Release the mutex spinlock. */
-static void mu_release_spinlock (nsync_mu *mu) {
-	uint32_t old_word = atomic_load_explicit (&mu->word,
-						  memory_order_relaxed);
-	while (!atomic_compare_exchange_weak_explicit (
-		       &mu->word, &old_word, old_word & ~MU_SPINLOCK,
-		       memory_order_release, memory_order_relaxed)) {
-	}
-}
-
 /* Lock *mu using the specified lock_type, waiting on *w if necessary.
    "clear" should be zero if the thread has not previously slept on *mu, and
    MU_DESIG_WAKER if it has; this represents bits that nsync_mu_lock_slow_() must clear when
@@ -101,7 +91,7 @@ void nsync_mu_lock_slow_ (nsync_mu *mu, waiter *w, uint32_t clear, lock_type *l_
 			   another thread were a designated waker, the mutex
 			   holder could be concurrently unlocking, even though
 			   we hold the spinlock. */
-			mu_release_spinlock (mu);
+			nsync_mu_release_spinlock_ (mu);
 
 			/* wait until awoken. */
 			while (ATM_LOAD_ACQ (&w->nw.waiting) != 0) { /* acquire load */
@@ -371,7 +361,7 @@ void nsync_mu_unlock_slow_ (nsync_mu *mu, lock_type *l_type) {
 				   This is so that the spinlock is not held
 				   while the conditions are evaluated.  */
 				if (testing_conditions) {
-					mu_release_spinlock (mu);
+					nsync_mu_release_spinlock_ (mu);
 				}
 
 				/* Process the new waiters picked up in this iteration of the

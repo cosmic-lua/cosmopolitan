@@ -32,7 +32,7 @@ const char* _strerdoc(int e) {
     case ESRCH:
       return "No such process";
     case EINTR:
-      return "The greatest of all errnos";
+      return "Interrupted";
     case EIO:
       return "I/O error";
     case ENXIO:

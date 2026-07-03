@@ -23,7 +23,6 @@
 #include "libc/errno.h"
 #include "libc/intrin/atomic.h"
 #include "libc/intrin/describeflags.h"
-#include "libc/intrin/kprintf.h"
 #include "libc/intrin/likely.h"
 #include "libc/intrin/strace.h"
 #include "libc/intrin/weaken.h"
@@ -200,10 +199,8 @@ dontinline static errno_t pthread_mutex_lock_impl(pthread_mutex_t *mutex,
        (IsModeDbg() && MUTEX_TYPE(word) == PTHREAD_MUTEX_DEFAULT))) {
     if (__deadlock_tracked(mutex) == 1) {
       if (IsModeDbg() && MUTEX_TYPE(word) != PTHREAD_MUTEX_ERRORCHECK) {
-        kprintf("error: attempted to lock non-recursive mutex that's already "
-                "held by the calling thread: %t\n",
-                mutex);
-        DebugBreak();
+        npassert(!"error: attempted to lock non-recursive mutex that's already "
+                  "held by the calling thread\n");
       }
       return EDEADLK;
     }

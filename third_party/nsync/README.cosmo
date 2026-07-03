@@ -21,6 +21,8 @@ LOCAL CHANGES
 
   - Time APIs were so good that they're now in libc
 
+  - Introduce nsync_mu_timedlock() and nsync_mu_clocklock()
+
   - Double linked list API was so good that it's now in libc
 
   - Max delay on sleep should be 20ms (not 4ms) on OpenBSD and NetBSD

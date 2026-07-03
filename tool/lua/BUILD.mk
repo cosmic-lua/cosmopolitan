@@ -27,7 +27,6 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/lua/lcosmo.o					\
 	o/$(MODE)/tool/net/lfuncs.o					\
 	o/$(MODE)/tool/net/lpath.o					\
-	o/$(MODE)/tool/net/lhttp.o					\
 	o/$(MODE)/tool/net/lre.o					\
 	o/$(MODE)/tool/net/ljson.o					\
 	o/$(MODE)/tool/net/lsqlite3.o					\
@@ -35,7 +34,6 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/net/lfetch.o					\
 	o/$(MODE)/tool/net/lgetopt.o					\
 	o/$(MODE)/tool/net/lzip.o					\
-	o/$(MODE)/tool/net/lgoodsocket.o				\
 	o/$(MODE)/third_party/lz4cli/lz4.o
 
 TOOL_LUA_DIRECTDEPS =							\
@@ -80,22 +78,8 @@ o/$(MODE)/tool/lua/lua.main.o: third_party/lua/lua.main.c
 	@$(COMPILE) -AOBJECTIFY.c $(OBJECTIFY.c) $(OUTPUT_OPTION) -DLUA_COSMO $<
 
 TOOL_LUA_ASSETS =							\
-	o/$(MODE)/tool/lua/definitions.lua.zip.o			\
-	o/$(MODE)/tool/lua/cosmo/help/init.lua.zip.o			\
-	o/$(MODE)/tool/lua/cosmo/skill/init.lua.zip.o			\
-	o/$(MODE)/tool/lua/cosmo/zip/init.lua.zip.o			\
-	o/$(MODE)/tool/lua/cosmo/http/init.lua.zip.o			\
-	o/$(MODE)/tool/lua/cosmo/embed/init.lua.zip.o			\
-	o/$(MODE)/tool/lua/cosmo/embed/luarocks.lua.zip.o		\
-	o/$(MODE)/tool/lua/cosmo/sandbox/init.lua.zip.o		\
-	o/$(MODE)/tool/lua/cosmo/sandbox/netns.lua.zip.o	\
-	o/$(MODE)/tool/lua/cosmo/sandbox/fs.lua.zip.o		\
-	o/$(MODE)/tool/lua/cosmo/sandbox/proc.lua.zip.o		\
-	o/$(MODE)/tool/lua/cosmo/sandbox/landlock.lua.zip.o	\
-	o/$(MODE)/tool/lua/cosmo/sandbox/proxy.lua.zip.o
+	o/$(MODE)/tool/lua/definitions.lua.zip.o
 
-# Strip tool/lua/ prefix and prepend .lua/ so files end up at /zip/.lua/
-o/$(MODE)/tool/lua/cosmo/%.zip.o: private ZIPOBJ_FLAGS += -C2 -P.lua
 # definitions.lua is copied to o/$(MODE)/ so needs -C4 to strip o/MODE/tool/lua/
 o/$(MODE)/tool/lua/definitions.lua.zip.o: private ZIPOBJ_FLAGS += -C4 -P.lua
 
@@ -122,18 +106,6 @@ o/$(MODE)/tool/lua/test_cosmo.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_cosmo
 	$< tool/lua/test_cosmo.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/cosmo/help/test.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/help/test.lua
-	$< tool/lua/cosmo/help/test.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/cosmo/skill/test.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/skill/test.lua
-	$< tool/lua/cosmo/skill/test.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/test_docs.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_docs.lua
-	$< tool/lua/test_docs.lua
-	@touch $@
-
 o/$(MODE)/tool/lua/test_strftime.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_strftime.lua
 	$< tool/lua/test_strftime.lua
 	@touch $@
@@ -146,44 +118,16 @@ o/$(MODE)/tool/lua/test_lz4.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_lz4.lua
 	$< tool/lua/test_lz4.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/cosmo/zip/test.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/zip/test.lua
-	$< tool/lua/cosmo/zip/test.lua
+o/$(MODE)/tool/lua/test_zip.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip.lua
+	$< tool/lua/test_zip.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/cosmo/zip/test_append.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/zip/test_append.lua
-	$< tool/lua/cosmo/zip/test_append.lua
+o/$(MODE)/tool/lua/test_zip_append.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip_append.lua
+	$< tool/lua/test_zip_append.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/cosmo/zip/test_security.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/zip/test_security.lua
-	$< tool/lua/cosmo/zip/test_security.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/cosmo/http/test.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/http/test.lua
-	$< tool/lua/cosmo/http/test.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/cosmo/http/test_server.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/http/test_server.lua
-	$< tool/lua/cosmo/http/test_server.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/cosmo/http/test_security.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/http/test_security.lua
-	$< tool/lua/cosmo/http/test_security.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/cosmo/http/test_server_security.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/cosmo/http/test_server_security.lua
-	$< tool/lua/cosmo/http/test_server_security.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/test_goodsocket.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_goodsocket.lua
-	$< tool/lua/test_goodsocket.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/test_embed.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_embed.lua
-	$< tool/lua/test_embed.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/test_embed_integration.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_embed_integration.lua
-	$< tool/lua/test_embed_integration.lua
+o/$(MODE)/tool/lua/test_zip_security.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip_security.lua
+	$< tool/lua/test_zip_security.lua
 	@touch $@
 
 o/$(MODE)/tool/lua/test_unix_proc.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_proc.lua
@@ -198,60 +142,17 @@ o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua
 	$< tool/lua/test_fetch_unix_proxy.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/cosmo/sandbox/test.ok:				\
-		o/$(MODE)/tool/lua/lua.dbg				\
-		tool/lua/cosmo/sandbox/init.lua				\
-		tool/lua/cosmo/sandbox/netns.lua			\
-		tool/lua/cosmo/sandbox/fs.lua				\
-		tool/lua/cosmo/sandbox/proc.lua				\
-		tool/lua/cosmo/sandbox/landlock.lua			\
-		tool/lua/cosmo/sandbox/test.lua
-	$< tool/lua/cosmo/sandbox/test.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/cosmo/sandbox/test_proxy.ok:				\
-		o/$(MODE)/tool/lua/lua.dbg				\
-		tool/lua/cosmo/sandbox/proxy.lua			\
-		tool/lua/cosmo/sandbox/test_proxy.lua
-	$< tool/lua/cosmo/sandbox/test_proxy.lua
-	@touch $@
-
-o/$(MODE)/tool/lua/cosmo/sandbox/test_integration.ok:			\
-		o/$(MODE)/tool/lua/lua.dbg				\
-		tool/lua/cosmo/sandbox/init.lua				\
-		tool/lua/cosmo/sandbox/netns.lua			\
-		tool/lua/cosmo/sandbox/fs.lua				\
-		tool/lua/cosmo/sandbox/proc.lua				\
-		tool/lua/cosmo/sandbox/landlock.lua			\
-		tool/lua/cosmo/sandbox/proxy.lua			\
-		tool/lua/cosmo/sandbox/test_integration.lua
-	$< tool/lua/cosmo/sandbox/test_integration.lua
-	@touch $@
-
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
-	o/$(MODE)/tool/lua/cosmo/help/test.ok				\
-	o/$(MODE)/tool/lua/cosmo/skill/test.ok				\
-	o/$(MODE)/tool/lua/test_docs.ok					\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
 	o/$(MODE)/tool/lua/test_lz4.ok					\
 	o/$(MODE)/tool/lua/test_strftime.ok				\
-	o/$(MODE)/tool/lua/cosmo/zip/test.ok				\
-	o/$(MODE)/tool/lua/cosmo/zip/test_append.ok			\
-	o/$(MODE)/tool/lua/cosmo/zip/test_security.ok			\
-	o/$(MODE)/tool/lua/cosmo/http/test.ok				\
-	o/$(MODE)/tool/lua/cosmo/http/test_server.ok			\
-	o/$(MODE)/tool/lua/cosmo/http/test_security.ok			\
-	o/$(MODE)/tool/lua/cosmo/http/test_server_security.ok		\
-	o/$(MODE)/tool/lua/test_goodsocket.ok				\
-	o/$(MODE)/tool/lua/test_embed.ok				\
-	o/$(MODE)/tool/lua/test_embed_integration.ok			\
+	o/$(MODE)/tool/lua/test_zip.ok					\
+	o/$(MODE)/tool/lua/test_zip_append.ok				\
+	o/$(MODE)/tool/lua/test_zip_security.ok				\
 	o/$(MODE)/tool/lua/test_unix_proc.ok				\
 	o/$(MODE)/tool/lua/test_isatty.ok				\
-	o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok			\
-	o/$(MODE)/tool/lua/cosmo/sandbox/test.ok			\
-	o/$(MODE)/tool/lua/cosmo/sandbox/test_proxy.ok			\
-	o/$(MODE)/tool/lua/cosmo/sandbox/test_integration.ok
+	o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok
 
 .PHONY: o/$(MODE)/tool/lua
 o/$(MODE)/tool/lua:							\

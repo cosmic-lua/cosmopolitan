@@ -20,6 +20,7 @@
 #include "libc/atomic.h"
 #include "libc/calls/internal.h"
 #include "libc/calls/sig.internal.h"
+#include "libc/calls/struct/rlimit.h"
 #include "libc/calls/syscall-nt.internal.h"
 #include "libc/calls/syscall_support-nt.internal.h"
 #include "libc/intrin/dll.h"
@@ -332,6 +333,10 @@ abi int64_t WinMain(int64_t hInstance, int64_t hPrevInstance,
     __builtin_longjmp(__winmain_jmpbuf, 1);
   kStartTsc = rdtsc();
   struct CosmoPib *pib = __get_pib();
+
+  // TODO(jart): do something better to save/restore this
+  pib->rlimit[RLIMIT_NOFILE].rlim_cur = ~1024L;
+
   if ((pib->pid = WinGetPid(u"_COSMO_PID"))) {
     if (!(pib->sigpending = __sig_map_process(pib->pid, kNtOpenAlways)))
       pib->sigpending = &__fake_process_signals;

@@ -24,15 +24,13 @@
 #include "libc/cosmo.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
+#include "libc/intrin/atomic.h"
 #include "libc/intrin/dll.h"
 #include "libc/intrin/strace.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/f.h"
 #include "libc/thread/thread.h"
-#include "third_party/nsync/time.h"
 #include "third_party/nsync/mu_semaphore.h"
-#include "libc/intrin/atomic.h"
-#include "libc/intrin/kprintf.h"
 #include "third_party/nsync/time.h"
 
 /**
@@ -93,8 +91,10 @@ errno_t nsync_mu_semaphore_p_sem (nsync_semaphore *s) {
 	errno_t result;
 	struct sem *f = (struct sem *) s;
 	e = errno;
-	rc = sys_sem_wait (f->id);
-	STRACE ("sem_wait(%ld) → %d% m", f->id, rc);
+	do {
+		rc = sys_sem_wait (f->id);
+		STRACE ("sem_wait(%ld) → %d% m", f->id, rc);
+	} while (rc != 0 && errno == EINTR); /* posix locks aren't interruptible */
 	if (!rc) {
 		result = 0;
 	} else {
@@ -115,20 +115,30 @@ errno_t nsync_mu_semaphore_p_with_deadline_sem (nsync_semaphore *s, int clock,
 	errno_t result;
 	struct sem *f = (struct sem *) s;
 
+	if (!(0 <= abs_deadline.tv_nsec && abs_deadline.tv_nsec < 1000000000))
+		return EINVAL;
+
 	// convert monotonic back to realtime just for netbsd
 	if (clock && nsync_time_cmp (abs_deadline, nsync_time_no_deadline)) {
 		struct timespec now, delta;
 		if (clock_gettime (clock, &now))
 			return EINVAL;
-		delta = timespec_subz (abs_deadline, now);
+		if (timespec_cmp (abs_deadline, now) < 0)
+			return ETIMEDOUT;
+		delta = timespec_sub (abs_deadline, now);
 		clock_gettime (CLOCK_REALTIME, &now);
 		abs_deadline = timespec_add (now, delta);
 	}
 
+	char buf[45];
 	e = errno;
-	rc = sys_sem_timedwait (f->id, &abs_deadline);
-	STRACE ("sem_timedwait(%ld, %s) → %d% m", f->id,
-		DescribeTimespec(0, &abs_deadline), rc);
+	do {
+		rc = sys_sem_timedwait (f->id, &abs_deadline);
+		STRACE ("sem_timedwait(%ld, %s) → %d% m", f->id,
+			_DescribeTimespec(buf, 0, &abs_deadline), rc);
+	} while (rc != 0 && errno == EINTR); /* not a cancelation point; the
+					        absolute deadline is unchanged,
+					        so just keep waiting on EINTR */
 	if (!rc) {
 		result = 0;
 	} else {
