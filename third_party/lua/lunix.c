@@ -4368,6 +4368,7 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "O_NOATIME", O_NOATIME);
   LuaSetIntField(L, "O_CLOEXEC", O_CLOEXEC);
   LuaSetIntField(L, "O_UNLINK", O_UNLINK);
+  LuaSetIntField(L, "O_PATH", _O_PATH);
 
   // seek() whence
   LuaSetIntField(L, "SEEK_SET", SEEK_SET);

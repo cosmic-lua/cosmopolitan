@@ -4971,6 +4971,10 @@ unix = {
     O_NOFOLLOW = nil,
     --- @type integer automatically delete file upon close()
     O_UNLINK = nil,
+    --- @type integer open a path reference only, without read/write access
+    --- (Linux only; fails with EINVAL elsewhere). Usable with landlock
+    --- rule paths and *at() calls even when the path itself is unreadable.
+    O_PATH = nil,
     --- @type integer it's complicated (zero on non-Linux/Apple)
     O_DSYNC = nil,
     --- @type integer it's complicated (zero on non-Linux/Apple)
