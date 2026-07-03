@@ -173,7 +173,7 @@ static ssize_t ReaderPread(struct LuaZipReader *z, void *buf, size_t count,
 ////////////////////////////////////////////////////////////////////////////////
 
 // zip.open(path|fd, [options]) -> reader, nil | nil, error
-static int LuaZipOpen(lua_State *L) {
+static int LuaZipOpenReader(lua_State *L) {
   const char *path = NULL;
   struct LuaZipReader *z;
   int64_t zsize;
@@ -1837,6 +1837,33 @@ static const luaL_Reg kLuaZipAppenderMethods[] = {
 
 // zip.validate_name(name) -> true | nil, error
 // Validates a zip entry name without adding it to an archive
+// zip.open(path|fd, [mode], [options]) -> reader/writer/appender | nil, error
+// mode is "r" (read, default), "w" (write), or "a" (append); when mode is
+// omitted, an options table may be passed as the second argument instead
+static int LuaZipOpen(lua_State *L) {
+  const char *mode = "r";
+  if (lua_type(L, 2) == LUA_TSTRING) {
+    mode = lua_tostring(L, 2);
+    if (strcmp(mode, "r") && strcmp(mode, "w") && strcmp(mode, "a")) {
+      lua_pushnil(L);
+      lua_pushfstring(L, "invalid mode: %s (use 'r', 'w', or 'a')", mode);
+      return 2;
+    }
+    lua_remove(L, 2);  // shift options table down to argument 2
+  }
+  if (mode[0] == 'w')
+    return LuaZipCreate(L);
+  if (mode[0] == 'a') {
+    if (lua_isinteger(L, 1)) {
+      lua_pushnil(L);
+      lua_pushstring(L, "append mode with file descriptor is not supported");
+      return 2;
+    }
+    return LuaZipAppend(L);
+  }
+  return LuaZipOpenReader(L);
+}
+
 static int LuaZipValidateName(lua_State *L) {
   size_t namelen;
   const char *name = luaL_checklstring(L, 1, &namelen);

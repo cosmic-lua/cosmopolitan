@@ -303,25 +303,6 @@ THIRD_PARTY_LUA_INCS = $(foreach x,$(THIRD_PARTY_LUA_ARTIFACTS),$($(x)_INCS))
 THIRD_PARTY_LUA_OBJS = $(foreach x,$(THIRD_PARTY_LUA_ARTIFACTS),$($(x)_OBJS))
 $(THIRD_PARTY_LUA_OBJS): third_party/lua/BUILD.mk
 
-################################################################################
-# lua-amalg.c / lua-amalg.h (amalgamated source for vendoring)
-
-o/$(MODE)/third_party/lua/lua-amalg.c			\
-o/$(MODE)/third_party/lua/lua-amalg.h:			\
-		third_party/lua/amalgamate.sh			\
-		$(THIRD_PARTY_LUA_A_SRCS)			\
-		$(THIRD_PARTY_LUA_A_HDRS)			\
-		$(THIRD_PARTY_LUA_A_INCS)
-	@mkdir -p o/$(MODE)/third_party/lua
-	third_party/lua/amalgamate.sh o/$(MODE)/third_party/lua
-
-.PHONY: o/$(MODE)/third_party/lua/lua-amalg
-o/$(MODE)/third_party/lua/lua-amalg:			\
-		o/$(MODE)/third_party/lua/lua-amalg.c	\
-		o/$(MODE)/third_party/lua/lua-amalg.h
-
-################################################################################
-
 .PHONY: o/$(MODE)/third_party/lua
 o/$(MODE)/third_party/lua:					\
 		$(THIRD_PARTY_LUA_LIBS)				\
