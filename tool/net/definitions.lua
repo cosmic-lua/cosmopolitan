@@ -5089,6 +5089,21 @@ unix = {
     --- @type integer getpriority/setpriority: target is a user id
     PRIO_USER = nil,
 
+    --- @type integer sysconf: maximum length of arguments to exec()
+    SC_ARG_MAX = nil,
+    --- @type integer sysconf: maximum simultaneous processes per user id
+    SC_CHILD_MAX = nil,
+    --- @type integer sysconf: clock ticks per second
+    SC_CLK_TCK = nil,
+    --- @type integer sysconf: maximum number of open files per process
+    SC_OPEN_MAX = nil,
+    --- @type integer sysconf: size of a memory page in bytes
+    SC_PAGESIZE = nil,
+    --- @type integer sysconf: number of processors configured
+    SC_NPROCESSORS_CONF = nil,
+    --- @type integer sysconf: number of processors currently online
+    SC_NPROCESSORS_ONLN = nil,
+
     --- @type integer
     RUSAGE_BOTH = nil,
     --- @type integer
@@ -6602,6 +6617,33 @@ function unix.setresgid(real, effective, saved) end
 ---@param newmask integer
 ---@return integer oldmask
 function unix.umask(newmask) end
+
+--- Queries a configurable system limit or value.
+---
+--- `name` selects which value to return, e.g.
+---
+---     unix.sysconf(unix.SC_NPROCESSORS_ONLN)  -- online cpu count
+---     unix.sysconf(unix.SC_PAGESIZE)          -- mmap() page size
+---     unix.sysconf(unix.SC_CLK_TCK)           -- clock ticks per second
+---
+--- Returns `nil` with an `EINVAL` errno when `name` isn't recognized.
+---@param name integer
+---@return integer value
+---@nodiscard
+---@overload fun(name: integer): nil, error: unix.Errno
+function unix.sysconf(name) end
+
+--- Returns identity of the current operating system.
+---
+--- Example:
+---
+---     local u = assert(unix.uname())
+---     print(u.sysname, u.release, u.machine)
+---
+---@return { sysname: string, nodename: string, release: string, version: string, machine: string, domainname: string } uts
+---@nodiscard
+---@overload fun(): nil, error: unix.Errno
+function unix.uname() end
 
 --- Generates a log message, which will be distributed by syslogd.
 ---
@@ -8726,15 +8768,15 @@ function unix.Stat:dev() end
 --- may be used to extract the device numbers.
 function unix.Stat:rdev() end
 
----@return any
+---@return integer nlink Number of hard links to the file.
 ---@nodiscard
 function unix.Stat:nlink() end
 
----@return any
+---@return integer gen Inode generation number.
 ---@nodiscard
 function unix.Stat:gen() end
 
----@return any
+---@return integer flags User-defined flags on the file.
 ---@nodiscard
 function unix.Stat:flags() end
 
