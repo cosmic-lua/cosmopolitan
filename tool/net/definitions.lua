@@ -4459,6 +4459,8 @@ unix = {
     --- @type integer
     AT_EACCES = nil,
     --- @type integer
+    AT_EACCESS = nil,
+    --- @type integer
     AT_FDCWD = nil,
     --- @type integer
     AT_SYMLINK_NOFOLLOW = nil,
@@ -4604,10 +4606,14 @@ unix = {
     ---
     --- Raised by `copy_file_range`, `open`, `truncate`, `write`.
     EFBIG = nil,
+    --- @type integer Inappropriate file type or format.
+    EFTYPE = nil,
     --- @type integer Host is down. Raised by `accept`.
     EHOSTDOWN = nil,
     --- @type integer Host is unreachable. Raised by `accept`.
     EHOSTUNREACH = nil,
+    --- @type integer Memory page has hardware error.
+    EHWPOISON = nil,
     --- @type integer Identifier removed. Raised by `msgctl`.
     EIDRM = nil,
     --- @type integer
@@ -4643,6 +4649,8 @@ unix = {
     --- mkdir, mknod, open, readlink, rename, rmdir, stat, symlink,
     --- truncate, unlink, utimensat.
     ELOOP = nil,
+    --- @type integer Wrong medium type. Raised by `mount`.
+    EMEDIUMTYPE = nil,
     --- @type integer Too many open files.
     ---
     --- Raised by `accept`, `dup`, `execve`, `fanotify_init`, `fcntl`,
@@ -4654,6 +4662,8 @@ unix = {
     EMLINK = nil,
     --- @type integer Message too long. Raised by `send`.
     EMSGSIZE = nil,
+    --- @type integer Multihop attempted.
+    EMULTIHOP = nil,
     --- @type integer Filename too long. Cosmopolitan Libc currently defines `PATH_MAX` as
     --- 1024 characters. On UNIX that limit should only apply to system call
     --- wrappers like realpath. On Windows NT it's observed by all system
@@ -4699,6 +4709,10 @@ unix = {
     ENOEXEC = nil,
     --- @type integer No locks available. Raised by `fcntl`, `flock`.
     ENOLCK = nil,
+    --- @type integer Link has been severed.
+    ENOLINK = nil,
+    --- @type integer No medium found. Raised by `mount`.
+    ENOMEDIUM = nil,
     --- @type integer
     ENOMEM = nil,
     --- @type integer Raised by `msgop`.
@@ -4712,6 +4726,10 @@ unix = {
     --- Raised by `copy_file_range`, `fsync`, `link`, `mkdir`, `mknod`,
     --- `open`, `rename`, `symlink`, `sync_file_range`, `write`.
     ENOSPC = nil,
+    --- @type integer Out of streams resources.
+    ENOSR = nil,
+    --- @type integer Device not a stream.
+    ENOSTR = nil,
     --- @type integer System call not available on this platform. On
     ---     Windows this is raised by `chroot`, `setuid`, `setgid`,
     ---     `getsid`, `setsid`, and others we're doing our best to
@@ -4810,6 +4828,8 @@ unix = {
     EREMOTE = nil,
     --- @type integer
     ERESTART = nil,
+    --- @type integer Operation not possible due to RF-kill.
+    ERFKILL = nil,
     --- @type integer Read-only filesystem.
     ---
     --- Raised by access, bind, chmod, chown, link, mkdir, mknod, open,
@@ -4855,6 +4875,8 @@ unix = {
     --- @type integer
     F_GETFL = nil,
     --- @type integer
+    F_GETLK = nil,
+    --- @type integer
     F_OK = nil,
     --- @type integer
     F_RDLCK = nil,
@@ -4883,9 +4905,27 @@ unix = {
     IPPROTO_UDP = nil,
 
     --- @type integer
+    IP_ADD_MEMBERSHIP = nil,
+    --- @type integer
+    IP_DROP_MEMBERSHIP = nil,
+    --- @type integer
     IP_HDRINCL = nil,
     --- @type integer
     IP_MTU = nil,
+    --- @type integer
+    IP_MULTICAST_IF = nil,
+    --- @type integer
+    IP_MULTICAST_LOOP = nil,
+    --- @type integer
+    IP_MULTICAST_TTL = nil,
+    --- @type integer
+    IP_OPTIONS = nil,
+    --- @type integer
+    IP_PKTINFO = nil,
+    --- @type integer
+    IP_RECVTOS = nil,
+    --- @type integer
+    IP_RECVTTL = nil,
     --- @type integer
     IP_TOS = nil,
     --- @type integer
@@ -4916,7 +4956,11 @@ unix = {
     LOG_WARNING = nil,
 
     --- @type integer
+    MSG_CTRUNC = nil,
+    --- @type integer
     MSG_DONTROUTE = nil,
+    --- @type integer
+    MSG_DONTWAIT = nil,
     --- @type integer
     MSG_MORE = nil,
     --- @type integer
@@ -4925,6 +4969,8 @@ unix = {
     MSG_OOB = nil,
     --- @type integer
     MSG_PEEK = nil,
+    --- @type integer
+    MSG_TRUNC = nil,
     --- @type integer
     MSG_WAITALL = nil,
 
@@ -5169,14 +5215,46 @@ unix = {
 
     --- @type integer network interface ioctls (siocgifconf/ifreq)
     IFNAMSIZ = nil,
+    IFF_ALLMULTI = nil,
+    IFF_AUTOMEDIA = nil,
+    IFF_BROADCAST = nil,
+    IFF_DEBUG = nil,
+    IFF_DYNAMIC = nil,
+    IFF_LOOPBACK = nil,
+    IFF_MASTER = nil,
+    IFF_MULTICAST = nil,
+    IFF_NOARP = nil,
+    IFF_NOTRAILERS = nil,
+    IFF_POINTOPOINT = nil,
+    IFF_PORTSEL = nil,
+    IFF_PROMISC = nil,
+    IFF_RUNNING = nil,
+    IFF_SLAVE = nil,
     IFF_UP = nil,
+    SIOCGIFADDR = nil,
+    SIOCGIFBRDADDR = nil,
+    SIOCGIFDSTADDR = nil,
     SIOCGIFFLAGS = nil,
+    SIOCGIFINDEX = nil,
+    SIOCGIFMETRIC = nil,
+    SIOCGIFMTU = nil,
+    SIOCGIFNAME = nil,
+    SIOCGIFNETMASK = nil,
+    SIOCSIFADDR = nil,
+    SIOCSIFBRDADDR = nil,
+    SIOCSIFDSTADDR = nil,
     SIOCSIFFLAGS = nil,
+    SIOCSIFMETRIC = nil,
+    SIOCSIFMTU = nil,
+    SIOCSIFNETMASK = nil,
 
     --- @type integer unshare()/setns() namespace flags
+    CLONE_NEWCGROUP = nil,
+    CLONE_NEWIPC = nil,
     CLONE_NEWNET = nil,
     CLONE_NEWNS = nil,
     CLONE_NEWPID = nil,
+    CLONE_NEWTIME = nil,
     CLONE_NEWUSER = nil,
     CLONE_NEWUTS = nil,
 
@@ -5196,10 +5274,110 @@ unix = {
     LANDLOCK_ACCESS_FS_MAKE_SYM = nil,
     LANDLOCK_ACCESS_FS_REFER = nil,
     LANDLOCK_ACCESS_FS_TRUNCATE = nil,
+    LANDLOCK_CREATE_RULESET_VERSION = nil,
+    LANDLOCK_RULE_PATH_BENEATH = nil,
 
     --- @type integer prctl() options
+    PR_CAPBSET_DROP = nil,
+    PR_CAPBSET_READ = nil,
+    PR_GET_CHILD_SUBREAPER = nil,
+    PR_GET_DUMPABLE = nil,
+    PR_GET_KEEPCAPS = nil,
+    PR_GET_NAME = nil,
+    PR_GET_NO_NEW_PRIVS = nil,
+    PR_GET_PDEATHSIG = nil,
+    PR_SET_CHILD_SUBREAPER = nil,
+    PR_SET_DUMPABLE = nil,
     PR_SET_KEEPCAPS = nil,
+    PR_SET_NAME = nil,
     PR_SET_NO_NEW_PRIVS = nil,
+    PR_SET_PDEATHSIG = nil,
+
+    --- @type integer Linux capability bits (prctl PR_CAPBSET_*, capget/capset).
+    CAP_AUDIT_CONTROL = nil,
+    CAP_AUDIT_READ = nil,
+    CAP_AUDIT_WRITE = nil,
+    CAP_BLOCK_SUSPEND = nil,
+    CAP_BPF = nil,
+    CAP_CHECKPOINT_RESTORE = nil,
+    CAP_CHOWN = nil,
+    CAP_DAC_OVERRIDE = nil,
+    CAP_DAC_READ_SEARCH = nil,
+    CAP_FOWNER = nil,
+    CAP_FSETID = nil,
+    CAP_IPC_LOCK = nil,
+    CAP_IPC_OWNER = nil,
+    CAP_KILL = nil,
+    CAP_LAST_CAP = nil,
+    CAP_LEASE = nil,
+    CAP_LINUX_IMMUTABLE = nil,
+    CAP_MAC_ADMIN = nil,
+    CAP_MAC_OVERRIDE = nil,
+    CAP_MKNOD = nil,
+    CAP_NET_ADMIN = nil,
+    CAP_NET_BIND_SERVICE = nil,
+    CAP_NET_BROADCAST = nil,
+    CAP_NET_RAW = nil,
+    CAP_PERFMON = nil,
+    CAP_SETFCAP = nil,
+    CAP_SETGID = nil,
+    CAP_SETPCAP = nil,
+    CAP_SETUID = nil,
+    CAP_SYSLOG = nil,
+    CAP_SYS_ADMIN = nil,
+    CAP_SYS_BOOT = nil,
+    CAP_SYS_CHROOT = nil,
+    CAP_SYS_MODULE = nil,
+    CAP_SYS_NICE = nil,
+    CAP_SYS_PACCT = nil,
+    CAP_SYS_PTRACE = nil,
+    CAP_SYS_RAWIO = nil,
+    CAP_SYS_RESOURCE = nil,
+    CAP_SYS_TIME = nil,
+    CAP_SYS_TTY_CONFIG = nil,
+    CAP_WAKE_ALARM = nil,
+
+    --- @type integer mount()/umount2() flags
+    MS_BIND = nil,
+    MS_DIRSYNC = nil,
+    MS_LAZYTIME = nil,
+    MS_MANDLOCK = nil,
+    MS_MOVE = nil,
+    MS_NOATIME = nil,
+    MS_NODEV = nil,
+    MS_NODIRATIME = nil,
+    MS_NOEXEC = nil,
+    MS_NOSUID = nil,
+    MS_POSIXACL = nil,
+    MS_PRIVATE = nil,
+    MS_RDONLY = nil,
+    MS_REC = nil,
+    MS_RELATIME = nil,
+    MS_REMOUNT = nil,
+    MS_SHARED = nil,
+    MS_SILENT = nil,
+    MS_SLAVE = nil,
+    MS_STRICTATIME = nil,
+    MS_SYNCHRONOUS = nil,
+    MS_UNBINDABLE = nil,
+    MNT_DETACH = nil,
+    MNT_EXPIRE = nil,
+    MNT_FORCE = nil,
+    UMOUNT_NOFOLLOW = nil,
+
+    --- @type integer statvfs f_flag bits (unix.Statfs / statvfs)
+    ST_APPEND = nil,
+    ST_IMMUTABLE = nil,
+    ST_MANDLOCK = nil,
+    ST_NOATIME = nil,
+    ST_NODEV = nil,
+    ST_NODIRATIME = nil,
+    ST_NOEXEC = nil,
+    ST_NOSUID = nil,
+    ST_RDONLY = nil,
+    ST_RELATIME = nil,
+    ST_SYNCHRONOUS = nil,
+    ST_WRITE = nil,
 
     --- @type integer
     RUSAGE_BOTH = nil,
@@ -5360,6 +5538,8 @@ unix = {
     SO_KEEPALIVE = nil,
     --- @type integer
     SO_LINGER = nil,
+    --- @type integer
+    SO_OOBINLINE = nil,
     --- @type integer
     SO_RCVBUF = nil,
     --- @type integer
@@ -6661,6 +6841,12 @@ function unix.setuid(uid) end
 ---@overload fun(uid: integer): nil, error: unix.Errno
 function unix.setfsuid(uid) end
 
+---Sets group id for file system ops.
+---@param gid integer
+---@return true
+---@overload fun(gid: integer): nil, error: unix.Errno
+function unix.setfsgid(gid) end
+
 ---Sets group id.
 ---
 ---Returns `ENOSYS` on Windows NT if `gid` isn't `getgid()`.
@@ -7508,6 +7694,12 @@ function unix.sigaction(sig, handler, flags, mask) end
 ---@return nil, unix.Errno error
 function unix.sigsuspend(mask) end
 
+--- Returns the set of signals pending delivery to the calling process
+--- that are currently blocked.
+---@return unix.Sigset mask
+---@overload fun(): nil, error: unix.Errno
+function unix.sigpending() end
+
 --- Causes `SIGALRM` signals to be generated at some point(s) in the
 --- future. The `which` parameter should be `ITIMER_REAL`.
 ---
@@ -7613,6 +7805,12 @@ function unix.getrlimit(resource) end
 ---@return integer priority
 ---@overload fun(inc: integer): nil, error: unix.Errno
 function unix.nice(inc) end
+
+--- Lowers the calling process to the lowest scheduling priority.
+---
+--- On Linux this additionally requests the idle scheduling policy and a
+--- best-effort idle i/o priority. This function does not fail.
+function unix.verynice() end
 
 --- Gets the scheduling priority of a process, process group, or user.
 ---

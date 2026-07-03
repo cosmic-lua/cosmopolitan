@@ -1,18 +1,21 @@
 -- Annotation-coverage ratchet for the unix.* C bindings.
 --
--- Every function registered in kLuaUnix[] and every constant registered via
--- LuaSetIntField() in third_party/lua/lunix.c must have a matching declaration
--- in tool/net/definitions.lua, so downstream type generators (e.g. cosmic's
+-- Every function registered in kLuaUnix[] and every constant registered in
+-- third_party/lua/lunix.c must have a matching declaration in
+-- tool/net/definitions.lua, so downstream type generators (e.g. cosmic's
 -- gentype) can emit the whole surface instead of hand-maintaining it.
+--
+-- Constants are registered two ways, both covered here:
+--   * literal LuaSetIntField(L, "NAME", ...) calls, and
+--   * dynamic LoadMagnums(L, kTable, "PFX_") calls, which register PFX_ + each
+--     string in the corresponding libc/intrin/<ktable>.S magnum table (the
+--     IP_/TCP_/SO_/CLOCK_ families).
 --
 -- ALLOW_* below are the symbols that are knowingly not yet annotated. This list
 -- is a RATCHET: it may only shrink. Adding a new binding without its annotation
 -- fails this test -- annotate the binding, do not append to the allowlist. When
 -- you annotate an allowlisted symbol (or drop it from the C), remove it here or
 -- the stale-entry check fails.
---
--- Limitation: constants registered dynamically via LoadMagnums() (the IP_/TCP_/
--- SO_/CLOCK_ families) are not covered -- only literal LuaSetIntField() names.
 
 local function slurp(path)
   local f = assert(io.open(path, "r"), "cannot open " .. path)
@@ -38,6 +41,16 @@ for name in C:gmatch('LuaSetIntField%(L,%s*"([%u][%w_]*)"') do
   reg_consts[name] = true
 end
 
+-- Registered constants: dynamic LoadMagnums(L, kTable, "PFX_"). Each call
+-- registers PFX_ .. <string> for every entry in the magnum table, which lives
+-- in libc/intrin/<lowercased table>.S as `.e SYMBOL,"STRING"` rows.
+for tbl, pfx in C:gmatch('LoadMagnums%(L,%s*(k%w+),%s*"([%u_]*)"%)') do
+  local S = slurp("libc/intrin/" .. tbl:lower() .. ".S")
+  for suffix in S:gmatch('%.e%s+[%u][%w_]*%s*,%s*"([%w_]+)"') do
+    reg_consts[pfx .. suffix] = true
+  end
+end
+
 -- Annotated functions: function unix.name(
 local ann_fns = {}
 for name in D:gmatch("\nfunction unix%.([%a_][%w_]*)%s*%(") do
@@ -57,46 +70,14 @@ local function set(list)
 end
 
 -- ===== ratchet allowlist (may only shrink) =====
+--
+-- The whole unix.* surface is now annotated, so both allowlists are empty.
+-- The ratchet has become a pure regression check: any new binding added to
+-- lunix.c without a matching annotation in definitions.lua fails this test.
 
-local ALLOW_FNS = set({
-  "setfsgid", "sigpending", "verynice",})
+local ALLOW_FNS = set({})
 
-local ALLOW_CONSTS = set({
-  "AT_EACCESS", "CAP_AUDIT_CONTROL", "CAP_AUDIT_READ", "CAP_AUDIT_WRITE",
-  "CAP_BLOCK_SUSPEND", "CAP_BPF", "CAP_CHECKPOINT_RESTORE", "CAP_CHOWN",
-  "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH", "CAP_FOWNER", "CAP_FSETID",
-  "CAP_IPC_LOCK", "CAP_IPC_OWNER", "CAP_KILL", "CAP_LAST_CAP",
-  "CAP_LEASE", "CAP_LINUX_IMMUTABLE", "CAP_MAC_ADMIN", "CAP_MAC_OVERRIDE",
-  "CAP_MKNOD", "CAP_NET_ADMIN", "CAP_NET_BIND_SERVICE", "CAP_NET_BROADCAST",
-  "CAP_NET_RAW", "CAP_PERFMON", "CAP_SETFCAP", "CAP_SETGID",
-  "CAP_SETPCAP", "CAP_SETUID", "CAP_SYSLOG", "CAP_SYS_ADMIN",
-  "CAP_SYS_BOOT", "CAP_SYS_CHROOT", "CAP_SYS_MODULE", "CAP_SYS_NICE",
-  "CAP_SYS_PACCT", "CAP_SYS_PTRACE", "CAP_SYS_RAWIO", "CAP_SYS_RESOURCE",
-  "CAP_SYS_TIME", "CAP_SYS_TTY_CONFIG", "CAP_WAKE_ALARM", "CLONE_NEWCGROUP",
-  "CLONE_NEWIPC", "CLONE_NEWTIME", "EFTYPE", "EHWPOISON",
-  "EMEDIUMTYPE", "EMULTIHOP", "ENOLINK", "ENOMEDIUM",
-  "ENOSR", "ENOSTR", "ERFKILL", "F_GETLK",
-  "IFF_ALLMULTI", "IFF_AUTOMEDIA", "IFF_BROADCAST", "IFF_DEBUG",
-  "IFF_DYNAMIC", "IFF_LOOPBACK", "IFF_MASTER", "IFF_MULTICAST",
-  "IFF_NOARP", "IFF_NOTRAILERS", "IFF_POINTOPOINT", "IFF_PORTSEL",
-  "IFF_PROMISC", "IFF_RUNNING", "IFF_SLAVE", "LANDLOCK_CREATE_RULESET_VERSION",
-  "LANDLOCK_RULE_PATH_BENEATH", "MNT_DETACH", "MNT_EXPIRE", "MNT_FORCE",
-  "MSG_CTRUNC", "MSG_DONTWAIT", "MSG_TRUNC", "MS_BIND",
-  "MS_DIRSYNC", "MS_LAZYTIME", "MS_MANDLOCK", "MS_MOVE",
-  "MS_NOATIME", "MS_NODEV", "MS_NODIRATIME", "MS_NOEXEC",
-  "MS_NOSUID", "MS_POSIXACL", "MS_PRIVATE", "MS_RDONLY",
-  "MS_REC", "MS_RELATIME", "MS_REMOUNT", "MS_SHARED",
-  "MS_SILENT", "MS_SLAVE", "MS_STRICTATIME", "MS_SYNCHRONOUS",
-  "MS_UNBINDABLE", "PR_CAPBSET_DROP", "PR_CAPBSET_READ", "PR_GET_CHILD_SUBREAPER",
-  "PR_GET_DUMPABLE", "PR_GET_KEEPCAPS", "PR_GET_NAME", "PR_GET_NO_NEW_PRIVS",
-  "PR_GET_PDEATHSIG", "PR_SET_CHILD_SUBREAPER", "PR_SET_DUMPABLE", "PR_SET_NAME",
-  "PR_SET_PDEATHSIG", "SIOCGIFADDR", "SIOCGIFBRDADDR", "SIOCGIFDSTADDR",
-  "SIOCGIFINDEX", "SIOCGIFMETRIC", "SIOCGIFMTU", "SIOCGIFNAME",
-  "SIOCGIFNETMASK", "SIOCSIFADDR", "SIOCSIFBRDADDR", "SIOCSIFDSTADDR",
-  "SIOCSIFMETRIC", "SIOCSIFMTU", "SIOCSIFNETMASK", "ST_APPEND",
-  "ST_IMMUTABLE", "ST_MANDLOCK", "ST_NOATIME", "ST_NODEV",
-  "ST_NODIRATIME", "ST_NOEXEC", "ST_NOSUID", "ST_RDONLY",
-  "ST_RELATIME", "ST_SYNCHRONOUS", "ST_WRITE", "UMOUNT_NOFOLLOW",})
+local ALLOW_CONSTS = set({})
 
 -- ===== checks =====
 
