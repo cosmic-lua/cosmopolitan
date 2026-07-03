@@ -39,6 +39,7 @@
 #include "libc/calls/struct/statfs.h"
 #include "libc/calls/struct/timespec.h"
 #include "libc/calls/struct/timeval.h"
+#include "libc/calls/struct/utsname.h"
 #include "libc/calls/struct/winsize.h"
 #include "libc/calls/ucontext.h"
 #include "libc/calls/weirdtypes.h"
@@ -4037,6 +4038,62 @@ static void LuaUnixDirObj(lua_State *L) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// SYSTEM INFORMATION
+
+// unix.sysconf(name:int)
+//     ├─→ value:int
+//     └─→ nil, unix.Errno
+//
+// Queries a configurable system limit or value, e.g.
+//
+//     unix.sysconf(unix.SC_NPROCESSORS_ONLN)  // online cpu count
+//     unix.sysconf(unix.SC_PAGESIZE)          // mmap() page size
+//     unix.sysconf(unix.SC_CLK_TCK)           // clock ticks per second
+//
+// Returns `nil, unix.Errno` with `EINVAL` when `name` isn't recognized.
+static int LuaUnixSysconf(lua_State *L) {
+  long rc;
+  int olderr = errno;
+  int name = luaL_checkinteger(L, 1);
+  errno = 0;
+  rc = sysconf(name);
+  if (rc == -1 && errno) {
+    return LuaUnixSysretErrno(L, "sysconf", olderr);
+  }
+  errno = olderr;
+  lua_pushinteger(L, rc);
+  return 1;
+}
+
+// unix.uname()
+//     ├─→ {sysname:str, nodename:str, release:str,
+//     │    version:str, machine:str, domainname:str}
+//     └─→ nil, unix.Errno
+//
+// Returns identity of the current operating system as a table.
+static int LuaUnixUname(lua_State *L) {
+  struct utsname u;
+  int olderr = errno;
+  if (uname(&u) == -1) {
+    return LuaUnixSysretErrno(L, "uname", olderr);
+  }
+  lua_newtable(L);
+  lua_pushstring(L, u.sysname);
+  lua_setfield(L, -2, "sysname");
+  lua_pushstring(L, u.nodename);
+  lua_setfield(L, -2, "nodename");
+  lua_pushstring(L, u.release);
+  lua_setfield(L, -2, "release");
+  lua_pushstring(L, u.version);
+  lua_setfield(L, -2, "version");
+  lua_pushstring(L, u.machine);
+  lua_setfield(L, -2, "machine");
+  lua_pushstring(L, u.domainname);
+  lua_setfield(L, -2, "domainname");
+  return 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // UNIX module
 
 static const luaL_Reg kLuaUnix[] = {
@@ -4173,6 +4230,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"strsignal", LuaUnixStrsignal},      // turn signal into string
     {"symlink", LuaUnixSymlink},          // create symbolic link
     {"sync", LuaUnixSync},                // flushes files and disks
+    {"sysconf", LuaUnixSysconf},          // query system configuration value
     {"syslog", LuaUnixSyslog},            // logs to system log
     {"tcgetattr", LuaUnixTcgetattr},      // get terminal attributes
     {"tcsetattr", LuaUnixTcsetattr},      // set terminal attributes
@@ -4180,6 +4238,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"tmpfd", LuaUnixTmpfd},              // create anonymous file
     {"truncate", LuaUnixTruncate},        // shrink or extend file medium
     {"umask", LuaUnixUmask},              // set default file mask
+    {"uname", LuaUnixUname},              // get operating system identity
     {"unlink", LuaUnixUnlink},            // remove file
     {"unmount", LuaUnixUnmount},          // unmount filesystem
     {"unsetenv", LuaUnixUnsetenv},        // unset environment variable
@@ -4406,6 +4465,15 @@ int LuaUnix(lua_State *L) {
   LuaSetIntField(L, "PRIO_PROCESS", PRIO_PROCESS);
   LuaSetIntField(L, "PRIO_PGRP", PRIO_PGRP);
   LuaSetIntField(L, "PRIO_USER", PRIO_USER);
+
+  // sysconf() names
+  LuaSetIntField(L, "SC_ARG_MAX", _SC_ARG_MAX);
+  LuaSetIntField(L, "SC_CHILD_MAX", _SC_CHILD_MAX);
+  LuaSetIntField(L, "SC_CLK_TCK", _SC_CLK_TCK);
+  LuaSetIntField(L, "SC_OPEN_MAX", _SC_OPEN_MAX);
+  LuaSetIntField(L, "SC_PAGESIZE", _SC_PAGESIZE);
+  LuaSetIntField(L, "SC_NPROCESSORS_CONF", _SC_NPROCESSORS_CONF);
+  LuaSetIntField(L, "SC_NPROCESSORS_ONLN", _SC_NPROCESSORS_ONLN);
 
   // wait() options
   LuaSetIntField(L, "WNOHANG", WNOHANG);
