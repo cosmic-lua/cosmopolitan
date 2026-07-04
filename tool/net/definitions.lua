@@ -2077,11 +2077,11 @@ function VisualizeControlCodes(str) end
 function Underlong(str) end
 
 --- Generate a uuid_v4
---- @return string
+---@return string
 function UuidV4() end
 
 --- Generate a uuid_v7
---- @return string
+---@return string
 function UuidV7() end
 
 ---@param x integer
@@ -5774,8 +5774,8 @@ function unix.unsetenv(name) end
 --- This wraps the C `clearenv()` function to allow Lua scripts to remove
 --- all environment variables at once.
 ---
---- @return true
---- @overload fun(): nil, error: unix.Errno
+---@return true
+---@overload fun(): nil, error: unix.Errno
 function unix.clearenv() end
 
 --- Gets login name of current user.
@@ -5783,8 +5783,8 @@ function unix.clearenv() end
 --- This wraps the C `getlogin()` function to retrieve the login name
 --- associated with the current session.
 ---
---- @return string login name
---- @overload fun(): nil, error: unix.Errno
+---@return string login name
+---@overload fun(): nil, error: unix.Errno
 function unix.getlogin() end
 
 --- Creates a new process mitosis style.
@@ -8949,7 +8949,7 @@ function unix.Rusage:nsignals() end
 --- remaining time to the system.
 function unix.Rusage:nvcsw() end
 
---- @return integer count number of non-consensual context switches.
+---@return integer count number of non-consensual context switches.
 ---
 --- This number is a bad thing. It means your redbean was preempted by a
 --- higher priority process after failing to finish its work, within the

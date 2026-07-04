@@ -16,6 +16,10 @@
 -- fails this test -- annotate the binding, do not append to the allowlist. When
 -- you annotate an allowlisted symbol (or drop it from the C), remove it here or
 -- the stale-entry check fails.
+--
+-- This test also lints annotation SYNTAX (check 3): a LuaLS tag written
+-- `--- @tag` (with a space after the dashes) is silently ignored, so the
+-- coverage checks above can pass while the annotation does nothing.
 
 local function slurp(path)
   local f = assert(io.open(path, "r"), "cannot open " .. path)
@@ -125,6 +129,25 @@ end
 assert(#stale == 0,
   "the annotation-coverage allowlist has stale entries (remove them so the\n" ..
   "ratchet stays tight):\n  " .. table.concat(stale, "\n  "))
+
+-- 3) Malformed annotation syntax: a LuaLS tag must be written `---@tag`, with
+-- no space between the comment dashes and the `@`. A stray `--- @tag` is
+-- treated as ordinary comment prose, so LuaLS -- and the downstream gentype
+-- generator -- silently ignore it: a function's @return/@overload vanishes and
+-- it renders as returning nothing (this is exactly how unix.clearenv lost its
+-- `boolean, unix.Errno` return). Catch it here so it can't recur.
+local malformed = {}
+local lineno = 0
+for line in (D .. "\n"):gmatch("([^\n]*)\n") do
+  lineno = lineno + 1
+  if line:match("^%-%-%-[ \t]+@%a") then
+    malformed[#malformed + 1] = "line " .. lineno .. ": " .. line
+  end
+end
+assert(#malformed == 0,
+  "these annotation lines put a space after `---`, so LuaLS and gentype\n" ..
+  "silently drop them (write `---@tag`, not `--- @tag`):\n  " ..
+  table.concat(malformed, "\n  "))
 
 print("definitions coverage: " ..
   tostring(#sorted_keys(reg_fns)) .. " functions, " ..
