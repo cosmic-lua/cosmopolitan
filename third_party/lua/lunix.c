@@ -4001,7 +4001,7 @@ static int LuaUnixOpendir(lua_State *L) {
 }
 
 // unix.fdopendir(fd:int)
-//     ├─→ next:function, state:unix.Dir
+//     ├─→ state:unix.Dir
 //     └─→ nil, unix.Errno
 static int LuaUnixFdopendir(lua_State *L) {
   DIR *dir;
