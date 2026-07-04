@@ -142,7 +142,7 @@ o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua
 	$< tool/lua/test_fetch_unix_proxy.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua third_party/lua/lunix.c tool/net/definitions.lua libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
+o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua tool/net/definitions.lua tool/lua/lcosmo.c third_party/lua/lunix.c third_party/lua/lreplmod.c tool/net/lpath.c tool/net/lre.c tool/net/largon2.c tool/net/lsqlite3.c tool/net/lgetopt.c tool/net/lzip.c libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
 	$< tool/lua/test_definitions_coverage.lua
 	@touch $@
 

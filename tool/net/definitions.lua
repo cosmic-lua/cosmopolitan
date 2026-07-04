@@ -648,7 +648,7 @@ function OnWorkerStop() end
 
 -- DATATYPES
 
----@class Url
+---@class cosmo.Url
 ---@field scheme string e.g. `"http"`
 ---@field user string? the username string, or nil if absent
 ---@field pass string? the password string, or nil if absent
@@ -664,7 +664,7 @@ function OnWorkerStop() end
 ---@alias uint8 integer Unsigned 8-bit integer
 ---@alias int8 integer Signed 8-bit integer
 
----@class EncoderOptions
+---@class cosmo.EncoderOptions
 ---@field useoutput boolean? defaults to `false`. Encodes the result directly to the output buffer and returns `nil` value. This option is ignored if used outside of request handling code.
 ---@field sorted boolean? defaults to `true`. Lua uses hash tables so the order of object keys is lost in a Lua table. So, by default, we use strcmp to impose a deterministic output order. If you don't care about ordering then setting sorted=false should yield a performance boost in serialization.
 ---@field pretty boolean? defaults to `false`. Setting this option to true will cause tables with more than one entry to be formatted across multiple lines for readability.
@@ -737,463 +737,18 @@ function SetCookie(name, value, options) end
 ---@nodiscard
 function GetParam(name) end
 
---- Escapes HTML entities: The set of entities is `&><"'` which become `&amp;&gt;&lt;&quot;&#39;`. This function is charset agnostic and will not canonicalize overlong encodings. It is assumed that a UTF-8 string will be supplied. See `escapehtml.c`.
----@param str string
----@return string
----@nodiscard
-function EscapeHtml(str) end
-
 --- Launches web browser on local machine with URL to this redbean server. This function may be called from your `/.init.lua`.
 ---@param path string?
 function LaunchBrowser(path) end
 
----@param ip uint32
----@return string # a string describing the IP address. This is currently Class A granular. It can tell you if traffic originated from private networks, ARIN, APNIC, DOD, etc.
----@nodiscard
-function CategorizeIp(ip) end
-
---- Turns ISO-8859-1 string into UTF-8.
----@param iso_8859_1 string
----@return string UTF8
----@nodiscard
-function DecodeLatin1(iso_8859_1) end
-
---- Turns binary into ASCII base-16 hexadecimal lowercase string.
----@param binary string
----@return string ascii
-function EncodeHex(binary) end
-
---- Turns ASCII base-16 hexadecimal byte string into binary string,
---- case-insensitively. Non-hex characters may not appear in string.
----@param ascii string
----@return string binary
-function DecodeHex(ascii) end
-
---- Decodes binary data encoded as base64.
----
---- This turns ASCII into binary, in a permissive way that ignores
---- characters outside the base64 alphabet, such as whitespace. See
---- `decodebase64.c`.
----
----@param ascii string
----@return string binary
----@nodiscard
-function DecodeBase64(ascii) end
-
---- Turns binary into ASCII. This can be used to create HTML data:
---- URIs that do things like embed a PNG file in a web page. See
---- encodebase64.c.
----@param binary string
----@return string ascii
----@nodiscard
-function EncodeBase64(binary) end
-
 ---@alias JsonEl<T> string|number|boolean|nil|{ [integer]: T }|{ [string]: T }
 ---@alias JsonValue JsonEl<JsonEl<JsonEl<JsonEl<JsonEl<JsonEl<JsonEl<any>>>>>>>
-
---- Turns JSON string into a Lua data structure.
----
---- This is a generally permissive parser, in the sense that like
---- v8, it permits scalars as top-level values. Therefore we must
---- note that this API can be thought of as special, in the sense
----
----     val = assert(DecodeJson(str))
----
---- will usually do the right thing, except in cases where `false`
---- or `null` are the top-level value. In those cases, it's needed
---- to check the second value too in order to discern from error
----
----     val, err = DecodeJson(str)
----     if not val then
----        if err then
----           print('bad json', err)
----        elseif val == nil then
----           print('val is null')
----        elseif val == false then
----           print('val is false')
----        end
----     end
----
---- This parser supports 64-bit signed integers. If an overflow
---- happens, then the integer is silently coerced to double, as
---- consistent with v8. If a double overflows into `Infinity`, we
---- coerce it to `null` since that's what v8 does, and the same
---- goes for underflows which, like v8, are coerced to `0.0`.
----
---- When objects are parsed, your Lua object can't preserve the
---- original ordering of fields. As such, they'll be sorted by
---- `EncodeJson()` and may not round-trip with original intent.
----
---- This parser has perfect conformance with JSONTestSuite.
----
---- This parser validates utf-8 and utf-16.
----@param input string
----@return JsonValue
----@nodiscard
----@overload fun(input: string): nil, error: string
-function DecodeJson(input) end
-
---- Turns Lua data structure into JSON string.
----
---- Since Lua uses tables are both hashmaps and arrays, we use a
---- simple fast algorithm for telling the two apart. Tables with
---- non-zero length (as reported by `#`) are encoded as arrays,
---- and any non-array elements are ignored. For example:
----
----     >: EncodeJson({2})
----     "[2]"
----     >: EncodeJson({[1]=2, ["hi"]=1})
----     "[2]"
----
---- If there are holes in your array, then the serialized array
---- will exclude everything after the first hole. If the beginning
---- of your array is a hole, then an error is returned.
----
----     >: EncodeJson({[1]=1, [3]=3})
----     "[1]"
----     >: EncodeJson({[2]=1, [3]=3})
----     "[]"
----     >: EncodeJson({[2]=1, [3]=3})
----     nil     "json objects must only use string keys"
----
---- If the raw length of a table is reported as zero, then we
---- check for the magic element `[0]=false`. If it's present, then
---- your table will be serialized as empty array `[]`. An entry is
---- inserted by `DecodeJson()` automatically, only when encountering
---- empty arrays, and it's necessary in order to make empty arrays
---- round-trip. If raw length is zero and `[0]=false` is absent,
---- then your table will be serialized as an iterated object.
----
----     >: EncodeJson({})
----     "{}"
----     >: EncodeJson({[0]=false})
----     "[]"
----     >: EncodeJson({["hi"]=1})
----     "{\"hi\":1}"
----     >: EncodeJson({["hi"]=1, [0]=false})
----     "[]"
----     >: EncodeJson({["hi"]=1, [7]=false})
----     nil     "json objects must only use string keys"
----
---- The following options may be used:
----
---- - `useoutput`: `(bool=false)` encodes the result directly to the output buffer
----   and returns nil value. This option is ignored if used outside of request
----   handling code.
---- - `sorted`: `(bool=true)` Lua uses hash tables so the order of object keys is
----   lost in a Lua table. So, by default, we use strcmp to impose a deterministic
----   output order. If you don't care about ordering then setting `sorted=false`
----   should yield a performance boost in serialization.
---- - `pretty`: `(bool=false)` Setting this option to true will cause tables with
----   more than one entry to be formatted across multiple lines for readability.
---- - `indent`: `(str=" ")` This option controls the indentation of pretty
----    formatting. This field is ignored if pretty isn't `true`.
---- - `maxdepth`: `(int=64)` This option controls the maximum amount of recursion
----   the serializer is allowed to perform. The max is 32767. You might not be able
----   to set it that high if there isn't enough C stack memory. Your serializer
----   checks for this and will return an error rather than crashing.
----
---- If the raw length of a table is reported as zero, then we
---- check for the magic element `[0]=false`. If it's present, then
---- your table will be serialized as empty array `[]`. An entry is
---- inserted by `DecodeJson()` automatically, only when encountering
---- empty arrays, and it's necessary in order to make empty arrays
---- round-trip. If raw length is zero and `[0]=false` is absent,
---- then your table will be serialized as an iterated object.
----
---- This function will return an error if:
----
---- - value is cyclic
---- - value has depth greater than 64
---- - value contains functions, user data, or threads
---- - value is table that blends string / non-string keys
---- - Your serializer runs out of C heap memory (setrlimit)
----
---- We assume strings in value contain UTF-8. This serializer currently does not
---- produce UTF-8 output. The output format is right now ASCII. Your UTF-8 data
---- will be safely transcoded to `\uXXXX` sequences which are UTF-16. Overlong
---- encodings in your input strings will be canonicalized rather than validated.
----
---- NaNs are serialized as `null` and Infinities are `null` which is consistent
---- with the v8 behavior.
----@param value JsonValue
----@param options { useoutput: false?, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }?
----@return string
----@nodiscard
----@overload fun(value: JsonValue, options: { useoutput: true, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }): true
----@overload fun(value: JsonValue, options: { useoutput: boolean?, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }? ): nil, error: string
-function EncodeJson(value, options) end
-
---- Turns Lua data structure into Lua code string.
----
---- Since Lua uses tables as both hashmaps and arrays, tables will only be
---- serialized as an array with determinate order, if it's an array in the
---- strictest possible sense.
----
---- 1. for all 𝑘=𝑣 in table, 𝑘 is an integer ≥1
---- 2. no holes exist between MIN(𝑘) and MAX(𝑘)
---- 3. if non-empty, MIN(𝑘) is 1
----
---- In all other cases, your table will be serialized as an object which is
---- iterated and displayed as a list of (possibly) sorted entries that have
---- equal signs.
----
----     >: EncodeLua({3, 2})
----     "{3, 2}"
----     >: EncodeLua({[1]=3, [2]=3})
----     "{3, 2}"
----     >: EncodeLua({[1]=3, [3]=3})
----     "{[1]=3, [3]=3}"
----     >: EncodeLua({["hi"]=1, [1]=2})
----     "{[1]=2, hi=1}"
----
---- The following options may be used:
----
---- - `useoutput`: `(bool=false)` encodes the result directly to the output buffer
----   and returns nil value. This option is ignored if used outside of request
----   handling code.
---- - `sorted`: `(bool=true)` Lua uses hash tables so the order of object keys is
----   lost in a Lua table. So, by default, we use strcmp to impose a deterministic
----   output order. If you don't care about ordering then setting `sorted=false`
----   should yield a performance boost in serialization.
---- - `pretty`: `(bool=false)` Setting this option to true will cause tables with
----   more than one entry to be formatted across multiple lines for readability.
---- - `indent`: `(str=" ")` This option controls the indentation of pretty
----    formatting. This field is ignored if pretty isn't `true`.
---- - `maxdepth`: `(int=64)` This option controls the maximum amount of recursion
----   the serializer is allowed to perform. The max is 32767. You might not be able
----   to set it that high if there isn't enough C stack memory. Your serializer
----   checks for this and will return an error rather than crashing.
----
---- If a user data object has a `__repr` or `__tostring` meta method, then that'll
---- be used to encode the Lua code.
----
---- This serializer is designed primarily to describe data. For example, it's used
---- by the REPL where we need to be able to ignore errors when displaying data
---- structures, since showing most things imperfectly is better than crashing.
---- Therefore this isn't the kind of serializer you'd want to use to persist data
---- in prod. Try using the JSON serializer for that purpose.
----
---- Non-encodable value types (e.g. threads, functions) will be represented as a
---- string literal with the type name and pointer address. The string description
---- is of an unspecified format that could most likely change. This encoder detects
---- cyclic tables; however instead of failing, it embeds a string of unspecified
---- layout describing the cycle.
----
---- Integer literals are encoded as decimal. However if the int64 number is ≥256
---- and has a population count of 1 then we switch to representating the number in
---- hexadecimal, for readability. Hex numbers have leading zeroes added in order
---- to visualize whether the number fits in a uint16, uint32, or int64. Also some
---- numbers can only be encoded expressionally. For example, `NaN`s are serialized
---- as `0/0`, and `Infinity` is `math.huge`.
----
----     >: 7000
----     7000
----     >: 0x100
----     0x0100
----     >: 0x10000
----     0x00010000
----     >: 0x100000000
----     0x0000000100000000
----     >: 0/0
----     0/0
----     >: 1.5e+9999
----     math.huge
----     >: -9223372036854775807 - 1
----     -9223372036854775807 - 1
----
---- The only failure return condition currently implemented is when C runs out of heap memory.
----@param options { useoutput: false?, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }?
----@return string
----@nodiscard
----@overload fun(value, options: { useoutput: true, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }): true
----@overload fun(value, options: EncoderOptions? ): nil, error: string
-function EncodeLua(value, options) end
-
---- Turns UTF-8 into ISO-8859-1 string.
----@param utf8 string
----@param flags integer
----@return string iso_8859_1
----@nodiscard
-function EncodeLatin1(utf8, flags) end
-
---- Escapes URL #fragment. The allowed characters are `-/?.~_@:!$&'()*+,;=0-9A-Za-z`
---- and everything else gets `%XX` encoded. Please note that `'&` can still break
---- HTML and that `'()` can still break CSS URLs. This function is charset agnostic
---- and will not canonicalize overlong encodings. It is assumed that a UTF-8 string
---- will be supplied. See `kescapefragment.S`.
----@param str string
----@return string
----@nodiscard
-function EscapeFragment(str) end
-
---- Escapes URL host. See `kescapeauthority.S`.
----@param str string
----@return string
----@nodiscard
-function EscapeHost(str) end
-
---- Escapes JavaScript or JSON string literal content. The caller is responsible
---- for adding the surrounding quotation marks. This implementation \uxxxx sequences
---- for all non-ASCII sequences. HTML entities are also encoded, so the output
---- doesn't need `EscapeHtml`. This function assumes UTF-8 input. Overlong
---- encodings are canonicalized. Invalid input sequences are assumed to
---- be ISO-8859-1. The output is UTF-16 since that's what JavaScript uses. For
---- example, some individual codepoints such as emoji characters will encode as
---- multiple `\uxxxx` sequences. Ints that are impossible to encode as UTF-16 are
---- substituted with the `\xFFFD` replacement character.
---- See `escapejsstringliteral.c`.
----@param str string
----@return string
----@nodiscard
-function EscapeLiteral(str) end
-
---- Escapes URL parameter name or value. The allowed characters are `-.*_0-9A-Za-z`
---- and everything else gets `%XX` encoded. This function is charset agnostic and
---- will not canonicalize overlong encodings. It is assumed that a UTF-8 string
---- will be supplied. See `kescapeparam.S`.
----@param str string
----@return string
----@nodiscard
-function EscapeParam(str) end
-
---- Unescapes URL parameter name or value. Decodes `%XX` hex sequences and
---- converts `+` to space (common in application/x-www-form-urlencoded).
---- This is the inverse of EscapeParam.
----@param str string
----@return string
----@nodiscard
-function UnescapeParam(str) end
-
---- Escapes URL password. See `kescapeauthority.S`.
----@param str string
----@return string
----@nodiscard
-function EscapePass(str) end
-
---- Escapes URL path. This is the same as EscapeSegment except slash is allowed.
---- The allowed characters are `-.~_@:!$&'()*+,;=0-9A-Za-z/` and everything else
---- gets `%XX` encoded. Please note that `'&` can still break HTML, so the output
---- may need EscapeHtml too. Also note that `'()` can still break CSS URLs. This
---- function is charset agnostic and will not canonicalize overlong encodings.
---- It is assumed that a UTF-8 string will be supplied. See `kescapepath.S`.
----@param str string
----@return string
----@nodiscard
-function EscapePath(str) end
-
---- Escapes URL path segment. This is the same as EscapePath except slash isn't
---- allowed. The allowed characters are `-.~_@:!$&'()*+,;=0-9A-Za-z` and everything
---- else gets `%XX` encoded. Please note that `'&` can still break HTML, so the
---- output may need EscapeHtml too. Also note that `'()` can still break CSS URLs.
---- This function is charset agnostic and will not canonicalize overlong encodings.
---- It is assumed that a UTF-8 string will be supplied. See `kescapesegment.S`.
----@param str string
----@return string
----@nodiscard
-function EscapeSegment(str) end
-
---- Escapes URL username. See `kescapeauthority.S`.
----@param str string
----@return string
----@nodiscard
-function EscapeUser(str) end
 
 --- If this option is programmed then redbean will not transmit a Server Name
 --- Indicator (SNI) when performing `Fetch()` requests. This function is not
 --- available in unsecure mode.
 ---@param bool boolean
 function EvadeDragnetSurveillance(bool) end
-
---- Sends an HTTP/HTTPS request to the specified URL. If only the URL is provided,
---- then a GET request is sent. If both URL and body parameters are specified, then
---- a POST request is sent. If any other method needs to be specified (for example,
---- PUT or DELETE), then passing a table as the second value allows setting method
---- and body values as well other options:
----
---- - `method` (default: `"GET"`): sets the method to be used for the request.
----   The specified method is converted to uppercase.
---- - `body` (default: `""`): sets the body value to be sent.
---- - `followredirect` (default: `true`): forces temporary and permanent redirects
----    to be followed. This behavior can be disabled by passing `false`.
---- - `maxredirects` (default: `5`): sets the number of allowed redirects to
----   minimize looping due to misconfigured servers. When the number is exceeded,
----   the result of the last redirect is returned.
---- - `keepalive` (default = `false`): configures each request to keep the
----   connection open (unless closed by the server) and reuse for the
----   next request to the same host. This option is disabled when SSL
----   connection is used.
----   The mapping of hosts and their sockets is stored in a table
----   assigned to the `keepalive` field itself, so it can be passed to
----   the next call.
----   If the table includes the `close` field set to a true value,
----   then the connection is closed after the request is made and the
----   host is removed from the mapping table.
---- - `proxy` (string): HTTP proxy URL, e.g. `"http://proxy:8080"`.
----   Supports Basic authentication: `"http://user:pass@proxy:8080"`.
---- - `maxresponse` (default: `104857600`): maximum response size in bytes.
----   Protects against memory exhaustion from large responses.  Must be >= 0;
----   negative values are rejected.
---- - `timeout` (number, seconds): per-operation socket timeout (read/write/
----   connect).  A value of `0` or absent keeps the 60-second default.  There
----   is no "infinite" option — use a large positive value if needed.  The
----   timeout also bounds the TLS handshake.
---- - `resettls` (default: `true`): reset TLS state after fork.
----   Ensures child processes get fresh DRBG entropy.
----
---- Environment variables:
----
---- - `http_proxy` / `HTTP_PROXY`: default proxy URL when `proxy` option
----   is not specified. Supports same format as the option.
---- - `SSL_CERT_FILE`: path to CA certificate bundle file for TLS verification.
----   Overrides default system CA locations.
---- - `SSL_NO_SYSTEM_CERTS`: if set, skip loading system CA certificates.
----   Only embedded certificates will be used.
----
---- When the redirect is being followed, the same method and body values are being
---- sent in all cases except when 303 status is returned. In that case the method
---- is set to GET and the body is removed before the redirect is followed. Note
---- that if these (method/body) values are provided as table fields, they will be
---- modified in place.
----@param url string
----@param body? string|{ headers: table<string,string>, method: string, body: string, maxredirects: integer?, keepalive: boolean?, proxy: string?, maxresponse: integer?, resettls: boolean? }
----@return integer status, table<string,string> headers, string body
----@nodiscard
----@overload fun(url:string, body?: string|{ headers: table<string,string>, method: string, body: string, maxredirects?: integer, keepalive: boolean?, proxy: string?, maxresponse: integer?, resettls: boolean? }): nil, error: string
-function Fetch(url, body) end
-
---- Sends an HTTP/HTTPS request and returns a streaming reader for the response body.
---- Useful for Server-Sent Events (SSE), large downloads, or processing data incrementally.
----
---- Accepts the same options table as `Fetch()`, including `timeout`, `maxresponse`,
---- `headers`, `method`, `body`, `proxy`, `followredirect`, and `maxredirects`.
---- Note: `timeout=0` (or absent) retains the 60-second default; there is no
---- "infinite" option.  `maxresponse` limits per-read buffer growth; negative
---- values are rejected.
----@param url string The URL to fetch
----@param options? { headers: table<string,string>, method: string, body: string, maxredirects?: integer, followredirect?: boolean, proxy: string?, timeout?: number, maxresponse?: integer } Request options
----@return integer status, table<string,string> headers, FetchReader reader
----@nodiscard
----@overload fun(url:string, options?: table): nil, error: string
-function FetchStream(url, options) end
-
----@class FetchReader
----@field read fun(self: FetchReader): string?, string? Returns next chunk, or nil on EOF, or nil,error on failure
----@field close fun(self: FetchReader) Closes the reader and releases resources (idempotent)
-
---- Converts UNIX timestamp to an RFC1123 string that looks like this:
---- `Mon, 29 Mar 2021 15:37:13 GMT`. See `formathttpdatetime.c`.
----@param seconds integer
----@return string
----@nodiscard rfc1123
-function FormatHttpDateTime(seconds) end
-
---- Turns integer like `0x01020304` into a string like `"1.2.3.4"`. See also
---- `ParseIp` for the inverse operation.
----@param uint32 integer
----@return string
----@nodiscard
-function FormatIp(uint32) end
 
 --- Returns client ip4 address and port, e.g. `0x01020304`,`31337` would represent
 --- `1.2.3.4:31337`. This is the same as `GetClientAddr` except it will use the
@@ -1278,30 +833,6 @@ function GetLogLevel() end
 ---@nodiscard
 function GetHost() end
 
----@return "LINUX"|"METAL"|"WINDOWS"|"XNU"|"NETBSD"|"FREEBSD"|"OPENBSD" osname string that describes the host OS.
----@nodiscard
-function GetHostOs() end
-
---- Returns string describing host instruction set architecture.
----
---- This can return:
----
---- - `"X86_64"` for Intel and AMD systems
---- - `"AARCH64"` for ARM64, M1, and Raspberry Pi systems
---- - `"POWERPC64"` for OpenPOWER Raptor Computing Systems
----@return "X86_64"|"AARCH64"|"POWERPC64"
----@nodiscard
-function GetHostIsa() end
-
----@param str string|integer monospace display width of string.
---- This is useful for fixed-width formatting. For example, CJK characters
---- typically take up two cells. This function takes into consideration combining
---- characters, which are discounted, as well as control codes and ANSI escape
---- sequences.
----@return integer
----@nodiscard
-function GetMonospaceWidth(str) end
-
 ---@return string method HTTP method.
 --- Normally this will be GET, HEAD, or POST in which case redbean normalizes this
 --- value to its uppercase form. Anything else that the RFC classifies as a "token"
@@ -1348,10 +879,6 @@ function GetScheme() end
 ---@nodiscard
 function GetStatus() end
 
----@return number seconds current time as a UNIX timestamp with 0.0001s precision.
----@nodiscard
-function GetTime() end
-
 ---@return string url the effective Request-URL as an ASCII string
 --- Illegal characters or UTF-8 is guaranteed to be percent encoded, and has been
 --- normalized to include either the Host or `X-Forwarded-Host` headers, if they
@@ -1374,16 +901,6 @@ function GetHttpVersion() end
 ---@nodiscard
 ---@deprecated Use `GetHttpVersion` instead.
 function GetVersion() end
-
----@param code integer
----@return string reason string describing the HTTP reason phrase. See `gethttpreason.c`.
----@nodiscard
-function GetHttpReason(code) end
-
----@param length integer?
----@return string # with the specified number of random bytes (1..256). If no length is specified, then a string of length 16 is returned.
----@nodiscard
-function GetRandomBytes(length) end
 
 ---@return integer redbeanversion the Redbean version in the format 0xMMmmpp, with major (MM), minor (mm), and patch (pp) versions encoded. The version value 1.4 would be represented as 0x010400.
 ---@nodiscard
@@ -1411,25 +928,9 @@ function HidePath(prefix) end
 ---@nodiscard
 function IsHiddenPath(path) end
 
----@param uint32 integer
----@return boolean # `true` if IP address is not a private network (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) and is not localhost (`127.0.0.0/8`).
---- Note: we intentionally regard TEST-NET IPs as public.
----@nodiscard
-function IsPublicIp(uint32) end
-
----@param uint32 integer
----@return boolean # `true` if IP address is part of a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).
----@nodiscard
-function IsPrivateIp(uint32) end
-
 ---@return boolean # `true` if the client IP address (returned by GetRemoteAddr) is part of the localhost network (127.0.0.0/8).
 ---@nodiscard
 function IsLoopbackClient() end
-
----@param uint32 integer
----@return boolean # true if IP address is part of the localhost network (127.0.0.0/8).
----@nodiscard
-function IsLoopbackIp(uint32) end
 
 ---@param path string
 ---@return boolean # `true` if ZIP artifact at path is stored on disk using DEFLATE compression.
@@ -1445,14 +946,6 @@ function IsCompressed(path) end
 ---@return boolean
 ---@nodiscard
 function IsClientUsingSsl() end
-
---- Adds spaces to beginnings of multiline string. If the int parameter is not
---- supplied then 1 space will be added.
----@param str string
----@param int integer?
----@return string
----@nodiscard
-function IndentLines(str, int) end
 
 ---@param path string
 ---@return string asset contents of file as string.
@@ -1484,87 +977,6 @@ function StoreAsset(path, data, mode) end
 ---@param level integer
 ---@param message string
 function Log(level, message) end
-
---- Converts RFC1123 string that looks like this: Mon, 29 Mar 2021 15:37:13 GMT to
---- a UNIX timestamp. See `parsehttpdatetime.c`.
----@param rfc1123 string
----@return integer seconds
----@nodiscard
-function ParseHttpDateTime(rfc1123) end
-
---- Parses URL.
----
----@return Url url An object containing the following fields is returned:
----
---- - `scheme` is a string, e.g. `"http"`
---- - `user` is the username string, or nil if absent
---- - `pass` is the password string, or nil if absent
---- - `host` is the hostname string, or nil if `url` was a path
---- - `port` is the port string, or nil if absent
---- - `path` is the path string, or nil if absent
---- - `params` is the URL paramaters, e.g. `/?a=b&c` would be
----   represented as the data structure `{{"a", "b"}, {"c"}, ...}`
---- - `fragment` is the stuff after the `#` character
----
----@param url string
----@param flags integer? may have:
----
---- - `kUrlPlus` to turn `+` into space
---- - `kUrlLatin1` to transcode ISO-8859-1 input into UTF-8
----
---- This parser is charset agnostic. Percent encoded bytes are
---- decoded for all fields. Returned values might contain things
---- like NUL characters, spaces, control codes, and non-canonical
---- encodings. Absent can be discerned from empty by checking if
---- the pointer is set.
----
---- There's no failure condition for this routine. This is a
---- permissive parser. This doesn't normalize path segments like
---- `.` or `..` so use IsAcceptablePath() to check for those. No
---- restrictions are imposed beyond that which is strictly
---- necessary for parsing. All the data that is provided will be
---- consumed to the one of the fields. Strict conformance is
---- enforced on some fields more than others, like scheme, since
---- it's the most non-deterministically defined field of them all.
----
---- Please note this is a URL parser, not a URI parser. Which
---- means we support everything the URI spec says we should do
---- except for the things we won't do, like tokenizing path
---- segments into an array and then nesting another array beneath
---- each of those for storing semicolon parameters. So this parser
---- won't make SIP easy. What it can do is parse HTTP URLs and most
---- URIs like data:opaque, better in fact than most things which
---- claim to be URI parsers.
----
----@nodiscard
-function ParseUrl(url, flags) end
-
----@param str string
----@return boolean # `true` if path doesn't contain ".", ".." or "//" segments See `isacceptablepath.c`
----@nodiscard
-function IsAcceptablePath(str) end
-
----@param str string
----@return boolean # `true` if path doesn't contain "." or ".." segments See `isreasonablepath.c`
----@nodiscard
-function IsReasonablePath(str) end
-
---- This function is the inverse of ParseUrl. The output will always be correctly
---- formatted. The exception is if illegal characters are supplied in the scheme
---- field, since there's no way of escaping those. Opaque parts are escaped as
---- though they were paths, since many URI parsers won't understand things like
---- an unescaped question mark in path.
----@param url Url
----@return string url
----@nodiscard
-function EncodeUrl(url) end
-
---- Converts IPv4 address string to integer, e.g. "1.2.3.4" → 0x01020304, or
---- returns -1 for invalid inputs. See also `FormatIp` for the inverse operation.
----@param ip string
----@return integer ip
----@nodiscard
-function ParseIp(ip) end
 
 ---@param path string
 ---@return string? comment comment text associated with asset in the ZIP central directory.
@@ -1611,49 +1023,6 @@ function GetPayload() end
 ---@return string cookie
 ---@nodiscard
 function GetCookie(name) end
-
---- Computes MD5 checksum, returning 16 bytes of binary.
----@param str string
----@return string checksum
----@nodiscard
-function Md5(str) end
-
---- Computes SHA1 checksum, returning 20 bytes of binary.
----@param str string
----@return string checksum
----@nodiscard
-function Sha1(str) end
-
---- Computes SHA224 checksum, returning 28 bytes of binary.
----@param str string
----@return string checksum
----@nodiscard
-function Sha224(str) end
-
---- Computes SHA256 checksum, returning 32 bytes of binary.
----@param str string
----@return string checksum
----@nodiscard
-function Sha256(str) end
-
---- Computes SHA384 checksum, returning 48 bytes of binary.
----@param str string
----@return string checksum
----@nodiscard
-function Sha384(str) end
-
---- Computes SHA512 checksum, returning 64 bytes of binary.
----@param str string
----@return string checksum
----@nodiscard
-function Sha512(str) end
-
----@param name "MD5"|"SHA1"|"SHA224"|"SHA256"|"SHA384"|"SHA512"|"BLAKE2B256"
----@param payload string
----@param key string? If the key is provided, then HMAC value of the same function is returned.
----@return string # value of the specified cryptographic hash function.
----@nodiscard
-function GetCryptoHash(name, payload, key) end
 
 --- Configures the address on which to listen. This can be called multiple times
 --- to set more than one address. If an integer is provided then it should be a
@@ -1906,106 +1275,6 @@ function ProgramPidPath(str) end
 ---@return boolean
 function ProgramUniprocess(bool) end
 
---- Reads all data from file the easy way.
----
---- This function reads file data from local file system. Zip file assets can be
---- accessed using the `/zip/...` prefix.
----
---- `i` and `j` may be used to slice a substring in filename. These parameters are
---- 1-indexed and behave consistently with Lua's `string.sub()` API. For example:
----
----     assert(Barf('x.txt', 'abc123'))
----     assert(assert(Slurp('x.txt', 2, 3)) == 'bc')
----
---- This function is uninterruptible so `unix.EINTR` errors will be ignored. This
---- should only be a concern if you've installed signal handlers. Use the UNIX API
---- if you need to react to it.
----
----@param filename string
----@param i integer?
----@param j integer?
----@return string data
----@nodiscard
----@overload fun(filename: string, i?: integer, j?: integer): nil, unix.Errno
-function Slurp(filename, i, j) end
-
---- Writes all data to file the easy way.
----
---- This function writes to the local file system.
----
----@param filename string
----@param data string
----@param mode integer? defaults to 0644. This parameter is ignored when flags doesn't have `unix.O_CREAT`.
----
----@param flags integer? defaults to `unix.O_TRUNC | unix.O_CREAT`.
----
----@param offset integer? is 1-indexed and may be used to overwrite arbitrary slices within a file when used in conjunction with `flags=0`.
---- For example:
----
----     assert(Barf('x.txt', 'abc123'))
----     assert(Barf('x.txt', 'XX', 0, 0, 3))
----     assert(assert(Slurp('x.txt', 1, 6)) == 'abXX23')
----
----@return true
----@overload fun(filename: string, data: string, mode?: integer, flags?: integer, offset?: integer): nil, error: unix.Errno
-function Barf(filename, data, mode, flags, offset) end
-
---- Sleeps the specified number of seconds (can be fractional).
---- The smallest interval is a microsecond.
----@param seconds number
-function Sleep(seconds) end
-
---- Formats a timestamp using strftime(3) format specifiers.
----
---- Common format specifiers:
---- - `%Y` four-digit year
---- - `%m` two-digit month (01-12)
---- - `%d` two-digit day (01-31)
---- - `%H` two-digit hour (00-23)
---- - `%M` two-digit minute (00-59)
---- - `%S` two-digit second (00-59)
---- - `%F` equivalent to `%Y-%m-%d`
---- - `%T` equivalent to `%H:%M:%S`
---- - `%a` abbreviated weekday name
---- - `%b` abbreviated month name
----
---- Example:
----
----     Strftime("%Y-%m-%d %H:%M:%S")           -- "2024-12-29 15:30:00"
----     Strftime("%F %T", os.time())            -- "2024-12-29 15:30:00"
----     Strftime("%a, %d %b %Y", 0)             -- "Thu, 01 Jan 1970"
----     Strftime("%F %T", os.time(), true)      -- local time instead of UTC
----
----@param format string strftime format string
----@param timestamp? integer UNIX timestamp (defaults to current time)
----@param localtime? boolean use local time instead of UTC (default false)
----@return string? formatted datetime string, or nil if buffer too small
----@nodiscard
-function Strftime(format, timestamp, localtime) end
-
---- Parses a datetime string using strptime(3) format specifiers.
----
---- Returns a table with parsed components and any unparsed remainder.
---- Uses the same format specifiers as `Strftime`.
----
---- Example:
----
----     local t = Strptime("2024-12-29", "%Y-%m-%d")
----     -- t = {year=2024, month=12, day=29, hour=0, min=0, sec=0, ...}
----
----     local t = Strptime("2024-12-29 15:30", "%Y-%m-%d %H:%M")
----     -- t.rest = "" (nothing unparsed)
----
----     local t = Strptime("2024-12-29 extra", "%Y-%m-%d")
----     -- t.rest = " extra"
----
----@param str string datetime string to parse
----@param format string strptime format string
----@return table? result {year, month, day, hour, min, sec, wday, yday, isdst, rest}
----@return string? error error message if parsing failed
----@nodiscard
-function Strptime(str, format) end
-
 --- Instructs redbean to follow the normal HTTP serving path. This function is
 --- useful when writing an OnHttpRequest handler, since that overrides the
 --- serving path entirely. So if the handler decides it doesn't want to do
@@ -2062,180 +1331,10 @@ function ServeRedirect(code, location) end
 ---@param level integer
 function SetLogLevel(level) end
 
---- Replaces C0 control codes and trojan source characters with descriptive
---- UNICODE pictorial representation. This function also canonicalizes overlong
---- encodings. C1 control codes are replaced with a JavaScript-like escape sequence.
----@param str string
----@return string
----@nodiscard
-function VisualizeControlCodes(str) end
-
---- Canonicalizes overlong encodings.
----@param str string
----@return string
----@nodiscard
-function Underlong(str) end
-
---- Generate a uuid_v4
----@return string
-function UuidV4() end
-
---- Generate a uuid_v7
----@return string
-function UuidV7() end
-
----@param x integer
----@return integer # position of first bit set.
---- Passing `0` will raise an error. Same as the Intel x86 instruction BSF.
----@nodiscard
-function Bsf(x) end
-
----@param x integer
----@return integer # binary logarithm of `x`
---- Passing `0` will raise an error. Same as the Intel x86 instruction BSR.
----@nodiscard
-function Bsr(x) end
-
---- Computes Phil Katz CRC-32 used by zip/zlib/gzip/etc.
----@param initial integer
----@param data string
----@return integer
----@nodiscard
-function Crc32(initial, data) end
-
---- Computes 32-bit Castagnoli Cyclic Redundancy Check.
----@param initial integer
----@param data string
----@return integer
----@nodiscard
-function Crc32c(initial, data) end
-
---- Returns number of bits set in integer.
----@param x integer
----@return integer
----@nodiscard
-function Popcnt(x) end
-
 --- Returns CPU timestamp counter.
 ---@return integer
 ---@nodiscard
 function Rdtsc() end
-
----@return integer # fastest pseudorandom non-cryptographic random number.
---- This linear congruential generator passes practrand and bigcrush.
----@nodiscard
-function Lemur64() end
-
----@return integer # nondeterministic pseudorandom non-cryptographic number.
---- This linear congruential generator passes practrand and bigcrush. This
---- generator is safe across `fork()`, threads, and signal handlers.
----@nodiscard
-function Rand64() end
-
----@return integer # 64-bit CSPRNG integer (arc4random64).  Despite the name, this does NOT
---- read raw hardware RDRAND; it returns output from the OS CSPRNG (arc4random64), which is
---- seeded from hardware entropy but is safer (no RNG fault exposure).
----@nodiscard
-function Rdrand() end
-
----@return integer # 64-bit CSPRNG integer (arc4random64).  Despite the name, this does NOT
---- read raw hardware RDSEED; it returns output from the OS CSPRNG (arc4random64), which is
---- seeded from hardware entropy but is safer (no RNG fault exposure).
----@nodiscard
-function Rdseed() end
-
----@return integer cpucount CPU core count or `0` if it couldn't be determined.
----@nodiscard
-function GetCpuCount() end
-
----@return integer # 0-indexed CPU core on which process is currently scheduled.
----@nodiscard
-function GetCpuCore() end
-
----@return integer # 0-indexed NUMA node on which process is currently scheduled.
----@nodiscard
-function GetCpuNode() end
-
---- Shrinks byte buffer in half using John Costella's magic kernel. This downscales
---- data 2x using an eight-tap convolution, e.g.
----
----     >: Decimate('\xff\xff\x00\x00\xff\xff\x00\x00\xff\xff\x00\x00')
----     "\xff\x00\xff\x00\xff\x00"
----
---- This is very fast if SSSE3 is available (Intel 2004+ / AMD 2011+).
----@param data string
----@return string
----@nodiscard
-function Decimate(data) end
-
----@param data string
----@return number # Shannon entropy of `data`.
---- This gives you an idea of the density of information. Cryptographic random
---- should be in the ballpark of `7.9` whereas plaintext will be more like `4.5`.
----@nodiscard
-function MeasureEntropy(data) end
-
---- Compresses data.
----
----     >: Deflate("hello")
----     "\xcbH\xcd\xc9\xc9\x07\x00"
----     >: Inflate("\xcbH\xcd\xc9\xc9\x07\x00", 5)
----     "hello"
----
---- The output format is raw DEFLATE that's suitable for embedding into formats
---- like a ZIP file. It's recommended that, like ZIP, you also store separately a
---- `Crc32()` checksum in addition to the original uncompressed size.
----
----@param uncompressed string
----@param level integer? the compression level, which defaults to `7`. The max is `9`.
---- Lower numbers go faster (4 for instance is a sweet spot) and higher numbers go
---- slower but have better compression.
----@return string compressed
----@nodiscard
----@overload fun(uncompressed: string, level?: integer): nil, error: string
-function Deflate(uncompressed, level) end
-
---- Decompresses data.
----
---- This function performs the inverse of Deflate(). It's recommended that you
---- perform a `Crc32()` check on the output string after this function succeeds.
----
----@param compressed string
----@param maxoutsize integer the uncompressed size, which should be known.
---- However, it is permissable (although not advised) to specify some large number
---- in which case (on success) the byte length of the output string may be less
---- than `maxoutsize`.
----@return string uncompressed
----@nodiscard
----@overload fun(compressed: string, maxoutsize: integer): nil, error: string
-function Inflate(compressed, maxoutsize) end
-
---- Compresses data using LZ4.
----
---- LZ4 is an extremely fast compression algorithm, trading compression ratio
---- for speed. It's particularly well-suited for real-time compression scenarios.
---- The compressed output is not compatible with other compression formats (use
---- Deflate/Inflate for standard zlib compatibility).
----
----@param data string the data to compress
----@param acceleration integer? acceleration factor (default 1). Higher values
---- produce faster compression but with worse compression ratio. Range is 1-65537.
----@return string compressed
----@nodiscard
----@overload fun(data: string, acceleration?: integer): nil, error: string
-function Lz4Compress(data, acceleration) end
-
---- Decompresses LZ4-compressed data.
----
---- You must know the maximum size of the decompressed output beforehand.
---- This is a limitation of the LZ4 format which doesn't store the original size.
----
----@param compressed string the LZ4-compressed data
----@param maxoutsize integer the maximum size of the decompressed output
----@return string decompressed
----@nodiscard
----@overload fun(compressed: string, maxoutsize: integer): nil, error: string
-function Lz4Decompress(compressed, maxoutsize) end
 
 --- Performs microbenchmark. Nanoseconds are computed from RDTSC tick counts,
 --- using an approximation that's measured beforehand with the
@@ -2254,55 +1353,6 @@ function Lz4Decompress(compressed, maxoutsize) end
 ---@return integer tries
 ---@nodiscard
 function Benchmark(func, count, maxattempts) end
-
---- Formats string as octal integer literal string. If the provided value is zero,
---- the result will be `"0"`. Otherwise the resulting value will be the
---- zero-prefixed octal string. The result is currently modulo 2^64. Negative
---- numbers are converted to unsigned.
----@param int integer
----@return string
----@nodiscard
-function oct(int) end
-
---- Formats string as hexadecimal integer literal string. If the provided value is
---- zero, the result will be `"0"`. Otherwise the resulting value will be the
---- "0x"-prefixed hex string. The result is currently modulo 2^64. Negative numbers
---- are converted to unsigned.
----@param int integer
----@return string
----@nodiscard
-function hex(int) end
-
---- Formats string as binary integer literal string. If the provided value is zero,
---- the result will be `"0"`. Otherwise the resulting value will be the
---- "0b"-prefixed binary str. The result is currently modulo 2^64. Negative numbers
---- are converted to unsigned.
----@param int integer
----@return string
----@nodiscard
-function bin(int) end
-
---- Gets IP address associated with hostname.
----
---- This function first checks if hostname is already an IP address, in which case
---- it returns the result of `ParseIp`. Otherwise, it checks HOSTS.TXT on the local
---- system and returns the first IPv4 address associated with hostname. If no such
---- entry is found, a DNS lookup is performed using the system configured (e.g.
---- `/etc/resolv.conf`) DNS resolution service. If the service returns multiple IN
---- A records then only the first one is returned.
----
---- The returned address is word-encoded in host endian order. For example,
---- 1.2.3.4 is encoded as 0x01020304. The `FormatIp` function may be used to turn
---- this value back into a string.
----
---- If no IP address could be found, then `nil` is returned alongside a string of
---- unspecified format describing the error. Calls to this function may be wrapped
---- in `assert()` if an exception is desired.
----@param hostname string
----@return uint32 ip uint32
----@nodiscard
----@overload fun(hostname: string): nil, error: string
-function ResolveIp(hostname) end
 
 --- Returns `true` if IP address is trustworthy.
 --- If the `ProgramTrustedIp()` function has NOT been called then redbean
@@ -2840,6 +1890,72 @@ lsqlite3 = {
     NULL = nil,
     ---@type integer
     FLOAT = nil,
+    ---@type integer
+    INTEGER = nil,
+
+    -- Config Options
+
+    ---@type integer selects single-threaded mode. See `lsqlite3.config`.
+    CONFIG_SINGLETHREAD = nil,
+    ---@type integer selects multi-threaded mode. See `lsqlite3.config`.
+    CONFIG_MULTITHREAD = nil,
+    ---@type integer selects serialized threading mode. See `lsqlite3.config`.
+    CONFIG_SERIALIZED = nil,
+    ---@type integer installs or removes the global log callback. See `lsqlite3.config`.
+    CONFIG_LOG = nil,
+
+    -- Checkpoint Modes
+
+    ---@type integer checkpoint as many frames as possible without waiting
+    --- for any database readers or writers to finish. See `db:wal_checkpoint`.
+    CHECKPOINT_PASSIVE = nil,
+    ---@type integer blocks until there is no writer and all readers are
+    --- reading from the most recent database snapshot, then checkpoints all
+    --- frames. See `db:wal_checkpoint`.
+    CHECKPOINT_FULL = nil,
+    ---@type integer same as `lsqlite3.CHECKPOINT_FULL`, but additionally
+    --- blocks until all readers are reading from the database file only.
+    --- See `db:wal_checkpoint`.
+    CHECKPOINT_RESTART = nil,
+    ---@type integer same as `lsqlite3.CHECKPOINT_RESTART`, but additionally
+    --- truncates the log file before returning. See `db:wal_checkpoint`.
+    CHECKPOINT_TRUNCATE = nil,
+
+    -- Session / Changeset Constants
+
+    ---@type integer flag for `db:iterate_changeset` that inverts the
+    --- changeset while iterating it.
+    CHANGESETSTART_INVERT = nil,
+    ---@type integer flag for `db:apply_changeset` that disables the wrapping
+    --- SAVEPOINT that is otherwise used to rollback partially applied changes.
+    CHANGESETAPPLY_NOSAVEPOINT = nil,
+    ---@type integer flag for `db:apply_changeset` that inverts the changeset
+    --- before applying it.
+    CHANGESETAPPLY_INVERT = nil,
+    ---@type integer conflict type: a change does not contain the expected
+    --- "before" values. See `db:apply_changeset`.
+    CHANGESET_DATA = nil,
+    ---@type integer conflict type: the required row is not present in the
+    --- database. See `db:apply_changeset`.
+    CHANGESET_NOTFOUND = nil,
+    ---@type integer conflict type: an INSERT collides with an existing row.
+    --- See `db:apply_changeset`.
+    CHANGESET_CONFLICT = nil,
+    ---@type integer conflict type: applying the change would violate a
+    --- constraint. See `db:apply_changeset`.
+    CHANGESET_CONSTRAINT = nil,
+    ---@type integer conflict type: foreign key constraint violations remain
+    --- after all changes were applied. See `db:apply_changeset`.
+    CHANGESET_FOREIGN_KEY = nil,
+    ---@type integer conflict handler return value: skip the conflicting
+    --- change. See `db:apply_changeset`.
+    CHANGESET_OMIT = nil,
+    ---@type integer conflict handler return value: replace the conflicting
+    --- row with the change. See `db:apply_changeset`.
+    CHANGESET_REPLACE = nil,
+    ---@type integer conflict handler return value: abort applying the
+    --- changeset. See `db:apply_changeset`.
+    CHANGESET_ABORT = nil,
 }
 
 --- Opens (or creates if it does not exist) an SQLite database with name filename
@@ -2881,58 +1997,80 @@ function lsqlite3.lversion() end
 ---@nodiscard
 function lsqlite3.version() end
 
+--- Sets global SQLite3 library configuration options.
+---
+--- `option` may be one of:
+---
+--- - `lsqlite3.CONFIG_SINGLETHREAD`, `lsqlite3.CONFIG_MULTITHREAD`, or
+---   `lsqlite3.CONFIG_SERIALIZED`: selects the global threading mode.
+---   Returns `lsqlite3.OK` on success, or `nil` plus a numerical error
+---   code on failure.
+--- - `lsqlite3.CONFIG_LOG`: installs a Lua callback that is invoked as
+---   `func(udata, errcode, message)` for every SQLite3 log event, or
+---   removes the current callback when `func` is `nil`. Returns
+---   `lsqlite3.OK` followed by the previously installed callback and its
+---   user data.
+---@param option integer
+---@param func function? callback for `lsqlite3.CONFIG_LOG`, or `nil` to remove it
+---@param udata any? user data passed to the log callback
+---@return integer rc, function? prev_func, any prev_udata
+---@overload fun(option: integer, func?: function, udata?: any): nil, errorcode: integer
+function lsqlite3.config(option, func, udata) end
+
 ---@class lsqlite3.Context: userdata
 --- A callback context is available as a parameter inside the callback functions
 --- `db:create_aggregate()` and `db:create_function()`. It can be used to get
 --- further information about the state of a query.
-local Context = nil
 
 ---@return any udata the user-definable data field for callback funtions.
 ---@nodiscard
-function Context:get_aggregate_data() end
+function lsqlite3.Context:get_aggregate_data() end
 
 --- Set the user-definable data field for callback funtions to `udata`.
-function Context:set_aggregate_data(udata) end
+function lsqlite3.Context:set_aggregate_data(udata) end
 
 --- Sets the result of a callback function to `res`. The type of the result
 --- depends on the type of `res` and is either a number or a string or `nil`.
 --- All other values will raise an error message.
 ---@param res string|number?
-function Context:result(res) end
+function lsqlite3.Context:result(res) end
 
 --- Sets the result of a callback function to the binary string in blob.
 ---@param blob string
-function Context:result_blob(blob) end
+function lsqlite3.Context:result_blob(blob) end
 
 --- Sets the result of a callback function to the value number.
 ---@param double number
-function Context:result_double(double) end
-Context.result_number = Context.result_double
+function lsqlite3.Context:result_double(double) end
+
+--- Sets the result of a callback function to the value number. Alias for
+--- `lsqlite3.Context:result_double()`.
+---@param double number
+function lsqlite3.Context:result_number(double) end
 
 --- Sets the result of a callback function to the error value in `err`.
-function Context:result_error(err) end
+function lsqlite3.Context:result_error(err) end
 
 --- Sets the result of a callback function to the integer `number`
 ---@param number integer
-function Context:result_int(number) end
+function lsqlite3.Context:result_int(number) end
 
 --- Sets the result of a callback function to `nil`.
-function Context:result_null() end
+function lsqlite3.Context:result_null() end
 
 --- Sets the result of a callback function to the string in `str`.
 ---@param str string
-function Context:result_text(str) end
+function lsqlite3.Context:result_text(str) end
 
 --- Returns the userdata parameter given in the call to install the callback
 --- function (see db:create_aggregate() and db:create_function() for details).
 ---@return any
-function Context:user_data() end
+function lsqlite3.Context:user_data() end
 
 ---@class lsqlite3.Database: userdata
 --- After opening a database with `lsqlite3.open()` or `lsqlite3.open_memory()`
 --- the returned database object should be used for all further method calls in
 --- connection with that database.
-local Database = {}
 
 ---@param changeset string
 ---@param filter_cb function
@@ -2948,7 +2086,7 @@ local Database = {}
 ---@overload fun(db: lsqlite3.Database, changeset: string, filter_cb: function, conflict_cb: function, udata?): nil, errno: integer
 ---@overload fun(db: lsqlite3.Database, changeset: string, conflict_cb?: function, udata?): true
 ---@overload fun(db: lsqlite3.Database, changeset: string, conflict_cb?: function, udata?): nil, errno: integer
-function Database:apply_changeset(changeset, conflict_cb, filter_cb, udata, rebaser, flags) end
+function lsqlite3.Database:apply_changeset(changeset, conflict_cb, filter_cb, udata, rebaser, flags) end
 
 --- Sets or removes a busy handler for a database.
 ---@generic Udata
@@ -2959,31 +2097,31 @@ function Database:apply_changeset(changeset, conflict_cb, filter_cb, udata, reba
 --- `0` if the transaction is to be aborted. All other values will result in
 --- another attempt to perform the transaction. (See the SQLite documentation
 --- for important hints about writing busy handlers.)
-function Database:busy_handler(func, udata) end
+function lsqlite3.Database:busy_handler(func, udata) end
 
 --- Sets a busy handler that waits for `milliseconds` if a transaction cannot proceed.
 --- Calling this function will remove any busy handler set by `db:busy_handler()`;
 --- calling it with an argument less than or equal to `0` will turn off all busy handlers.
 ---@param milliseconds integer
-function Database:busy_timeout(milliseconds) end
+function lsqlite3.Database:busy_timeout(milliseconds) end
 
 ---@return integer # the number of database rows that were changed (or inserted or deleted) by the most recent SQL statement.
 ---@nodiscard
 --- Only changes that are directly specified by INSERT, UPDATE, or DELETE
 --- statements are counted. Auxiliary changes caused by triggers are not
 --- counted. Use `db:total_changes()` to find the total number of changes.
-function Database:changes() end
+function lsqlite3.Database:changes() end
 
 --- Closes a database. All SQL statements prepared using `db:prepare()` should
 --- have been finalized before this function is called. The function returns
 --- `lsqlite3.OK` on success or else a numerical error code.
 ---@return integer
-function Database:close() end
+function lsqlite3.Database:close() end
 
 --- Finalizes all statements that have not been explicitly finalized. If
 --- `temponly` is `true`, only internal, temporary statements are finalized.
 ---@param temponly? boolean
-function Database:close_vm(temponly) end
+function lsqlite3.Database:close_vm(temponly) end
 
 --- This function installs a `commit_hook` callback handler.
 ---@generic Udata
@@ -2994,12 +2132,12 @@ function Database:close_vm(temponly) end
 --- otherwise the COMMIT is converted to a ROLLBACK.
 ---
 --- See: `db:rollback_hook` and `db:update_hook`
-function Database:commit_hook(func, udata) end
+function lsqlite3.Database:commit_hook(func, udata) end
 
 --- Concatenate a list of changesets.
 ---@param changesets string[]
 ---@return string changeset
-function Database:concat_changeset(changesets) end
+function lsqlite3.Database:concat_changeset(changesets) end
 
 --- This function creates an aggregate callback function. Aggregates perform an
 --- operation over all rows in a query.
@@ -3040,7 +2178,7 @@ function Database:concat_changeset(changesets) end
 ---     Sum of col 2:   66
 ---
 ---@return boolean success
-function Database:create_aggregate(name, nargs, step, final, userdata) end
+function lsqlite3.Database:create_aggregate(name, nargs, step, final, userdata) end
 
 --- This creates a collation callback. A collation callback is used to establish
 --- a collation order, mostly for string comparisons and sorting purposes.
@@ -3066,7 +2204,7 @@ function Database:create_aggregate(name, nargs, step, final, userdata) end
 ---      print(row.id, row.content)
 ---    end
 ---
-function Database:create_collation(name, func) end
+function lsqlite3.Database:create_collation(name, func) end
 
 --- This function creates a callback function. Callback function are called by
 --- SQLite3 once for every row in a query.
@@ -3090,18 +2228,18 @@ function Database:create_collation(name, func) end
 ---     end
 ---
 ---@return boolean success
-function Database:create_function(name, nargs, func, userdata) end
+function lsqlite3.Database:create_function(name, nargs, func, userdata) end
 
 ---@return lsqlite3.Rebaser
 ---@overload fun(self: lsqlite3.Database): nil, errno: integer
 ---@nodiscard
-function Database:create_rebaser() end
+function lsqlite3.Database:create_rebaser() end
 
 ---@param name string? defaults to `"main"`
 ---@return lsqlite3.Session
 ---@overload fun(self: lsqlite3.Database, name?: string): nil, errno: integer
 ---@nodiscard
-function Database:create_session(name) end
+function lsqlite3.Database:create_session(name) end
 
 ---@return string? filename associated with database `name` of connection `db`.
 ---@nodiscard
@@ -3109,24 +2247,30 @@ function Database:create_session(name) end
 --- If there is no attached database name on the database connection, then no value is
 --- returned; if database name is a temporary or in-memory database, then an
 --- empty string is returned.
-function Database:db_filename(name) end
+function lsqlite3.Database:db_filename(name) end
 
 --- Deserializes data from a string which was created by `db:serialize`.
 ---@param s string
-function Database:deserialize(s) end
+function lsqlite3.Database:deserialize(s) end
 
 ---@return integer error the numerical result code (or extended result code) for the most recent failed call associated with database db.
 --- See https://lua.sqlite.org/home/doc/tip/doc/lsqlite3.wiki#numerical_error_and_result_codes for details.
 ---@nodiscard
-function Database:error_code() end
+function lsqlite3.Database:error_code() end
 
-Database.errcode = Database.error_code
+--- Alias for `lsqlite3.Database:error_code()`.
+---@return integer error the numerical result code (or extended result code) for the most recent failed call associated with database db.
+---@nodiscard
+function lsqlite3.Database:errcode() end
 
 ---@return string message an error message for the most recent failed call associated with database `db`.
 ---@nodiscard
-function Database:error_message() end
+function lsqlite3.Database:error_message() end
 
-Database.errmsg = Database.error_message
+--- Alias for `lsqlite3.Database:error_message()`.
+---@return string message an error message for the most recent failed call associated with database `db`.
+---@nodiscard
+function lsqlite3.Database:errmsg() end
 
 --- Compiles and executes the SQL statement(s) given in string sql. The statements
 --- are simply executed one after the other and not stored. The function returns
@@ -3166,29 +2310,34 @@ Database.errmsg = Database.error_message
 ---@param sql string
 ---@param func? fun(udata: Udata, cols: integer, values: string[], names: string[]): integer
 ---@param udata? Udata
-function Database:execute(sql, func, udata) end
+function lsqlite3.Database:execute(sql, func, udata) end
 
-Database.exec = Database.execute
+--- Alias for `lsqlite3.Database:execute()`.
+---@generic Udata
+---@param sql string
+---@param func? fun(udata: Udata, cols: integer, values: string[], names: string[]): integer
+---@param udata? Udata
+function lsqlite3.Database:exec(sql, func, udata) end
 
 --- This function causes any pending database operation to abort and return at
 --- the next opportunity.
-function Database:interrupt() end
+function lsqlite3.Database:interrupt() end
 
 ---@param changeset string
 ---@return string
 ---@nodiscard
-function Database:invert_changeset(changeset) end
+function lsqlite3.Database:invert_changeset(changeset) end
 
 ---@return boolean
 ---@nodiscard
-function Database:isopen() end
+function lsqlite3.Database:isopen() end
 
 ---@param name string
 ---@param flags integer? defaults to `0`
 ---@return lsqlite3.Iterator
 ---@overload fun(self: lsqlite3.Database, name?: string, flags?: integer): nil, errno: integer
 ---@nodiscard
-function Database:iterate_changeset(name, flags) end
+function lsqlite3.Database:iterate_changeset(name, flags) end
 
 ---@return integer rowid the most recent INSERT into the database. If no inserts have ever occurred, `0` is returned.
 --- Each row in an SQLite table has a unique 64-bit signed integer key called
@@ -3200,7 +2349,7 @@ function Database:iterate_changeset(name, flags) end
 --- If an INSERT occurs within a trigger, then the rowid of the inserted row is
 --- returned as long as the trigger is running. Once the trigger terminates, the
 --- value returned reverts to the last value inserted before the trigger fired.
-function Database:last_insert_rowid() end
+function lsqlite3.Database:last_insert_rowid() end
 
 --- Creates an iterator that returns the successive rows selected by the
 --- SQL statement given in string `sql`. Each call to the iterator
@@ -3227,7 +2376,7 @@ function Database:last_insert_rowid() end
 ---@param sql string
 ---@return fun(vm: lsqlite3.VM) iterator, lsqlite3.VM vm
 ---@nodiscard
-function Database:nrows(sql) end
+function lsqlite3.Database:nrows(sql) end
 
 --- This function compiles the SQL statement in string sql into an internal
 --- representation and returns this as userdata. The returned object should be
@@ -3237,14 +2386,23 @@ function Database:nrows(sql) end
 ---@param sql string
 ---@return lsqlite3.Statement
 ---@nodiscard
-function Database:prepare(sql) end
+function lsqlite3.Database:prepare(sql) end
+
+--- Returns `true` if the database `name` of connection `db` is read-only,
+--- `false` if it is read/write. Returns `nil` plus an error message if
+--- `name` is not the name of a database on connection `db`.
+---@param name string? defaults to `"main"`
+---@return boolean
+---@nodiscard
+---@overload fun(self: lsqlite3.Database, name?: string): nil, error: string
+function lsqlite3.Database:readonly(name) end
 
 --- This function installs a rollback_hook callback handler.
 --- See: `db:commit_hook` and `db:update_hook`
 ---@generic Udata
 ---@param func fun(udata: Udata) a Lua function that is invoked by SQLite3 whenever a transaction is rolled back. This callback receives one argument: the `udata` argument used when the callback was installed.
 ---@param udata Udata
-function Database:rollback_hook(func, udata) end
+function lsqlite3.Database:rollback_hook(func, udata) end
 
 --- Creates an iterator that returns the successive rows selected by the SQL
 --- statement given in string `sql`. Each call to the iterator returns a table in
@@ -3271,19 +2429,19 @@ function Database:rollback_hook(func, udata) end
 ---@param sql string
 ---@return fun(vm: lsqlite3.VM): (string|number|nil)[]? iterator, lsqlite3.VM vm
 ---@nodiscard
-function Database:rows(sql) end
+function lsqlite3.Database:rows(sql) end
 
 --- Serialize a database to be restored later with `Database:deserialize`.
 ---@return string? -- `nil` if the database has no tables
 ---@nodiscard
-function Database:serialize() end
+function lsqlite3.Database:serialize() end
 
 ---@return integer # the number of database rows that have been modified by INSERT, UPDATE or DELETE statements since the database was opened.
 --- This includes UPDATE, INSERT and DELETE statements executed as part of trigger
 --- programs. All changes are counted as soon as the statement that produces them
 --- is completed by calling either `stmt:reset()` or `stmt:finalize()`.
 ---@nodiscard
-function Database:total_changes() end
+function lsqlite3.Database:total_changes() end
 
 --- This function installs an update_hook Data Change Notification
 --- Callback handler. See: `db:commit_hook` and `db:rollback_hook`
@@ -3300,7 +2458,7 @@ function Database:total_changes() end
 --- callback parameter is the rowid of the row. In the case of an
 --- update, this is the rowid after the update takes place.
 ---@param udata Udata
-function Database:update_hook(func, udata) end
+function lsqlite3.Database:update_hook(func, udata) end
 
 --- Creates an iterator that returns the successive rows selected by the SQL
 --- statement given in string sql. Each call to the iterator returns the values
@@ -3324,69 +2482,66 @@ function Database:update_hook(func, udata) end
 ---@param sql string
 ---@return fun(vm: lsqlite3.VM): ...: string|number|nil iterator, lsqlite3.VM vm
 ---@nodiscard
-function Database:urows(sql) end
+function lsqlite3.Database:urows(sql) end
 
 ---@param mode integer?
 ---@param name string?
 ---@return integer nlog, integer nckpt
 ---@overload fun(self, mode?: integer, name?: integer): nil, errno: integer
-function Database:wal_checkpoint(mode, name) end
+function lsqlite3.Database:wal_checkpoint(mode, name) end
 
 ---@generic Udata
 ---@param func (fun(udata: Udata, db: lsqlite3.Database, name: string, page_count: integer): integer)?
 ---@param udata Udata?
-function Database:wal_hook(func, udata) end
+function lsqlite3.Database:wal_hook(func, udata) end
 
 ---@class lsqlite3.Iterator: userdata
 --- Returned by `db:iterate_changeset`
-local Iterator = nil
 
 ---@return (string|number|false|nil)[]
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:conflict() end
+function lsqlite3.Iterator:conflict() end
 
 ---@return integer nout
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:fk_conflicts() end
+function lsqlite3.Iterator:fk_conflicts() end
 
 ---@return true
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:finalize() end
+function lsqlite3.Iterator:finalize() end
 
 ---@return integer
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:next() end
+function lsqlite3.Iterator:next() end
 
 ---@return (string|number|false?)[]
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:new() end
+function lsqlite3.Iterator:new() end
 
 ---@return (string|number|false?)[]
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:old() end
+function lsqlite3.Iterator:old() end
 
 ---@return string, integer, boolean indirect
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:op() end
+function lsqlite3.Iterator:op() end
 
 ---@return boolean[]
 ---@overload fun(self: lsqlite3.Iterator): nil, errno: integer
-function Iterator:pk() end
+function lsqlite3.Iterator:pk() end
 
 ---@class lsqlite3.Rebaser: userdata
 --- Returned by `db:create_rebaser`.
-local Rebaser = nil
 
-function Rebaser:delete() end
+function lsqlite3.Rebaser:delete() end
 
 ---@param changeset string
 ---@return string
 ---@overload fun(self: lsqlite3.Rebaser, changeset: string): nil, errno: integer
-function Rebaser:rebase(changeset) end
+function lsqlite3.Rebaser:rebase(changeset) end
 
 ---@class lsqlite3.Session: userdata
 --- Returned by `db:create_session`.
-local Session = nil
 
 ---@generic Udata
 ---@param filter_cb fun(udata: Udata)?
@@ -3395,39 +2550,38 @@ local Session = nil
 ---@overload fun(self: lsqlite3.Session, s: string): true
 ---@overload fun(self: lsqlite3.Session, s: string): nil, errno: integer
 ---@return true
-function Session:attach(filter_cb, udata) end
+function lsqlite3.Session:attach(filter_cb, udata) end
 
 ---@return string changeset
 ---@nodiscard
-function Session:changeset() end
+function lsqlite3.Session:changeset() end
 
 --- Closes the session. Further method calls on the session will throw errors.
-function Session:delete() end
+function lsqlite3.Session:delete() end
 
 ---@param s1 string
 ---@param s2 string
 ---@return boolean
 ---@nodiscard
-function Session:diff(s1, s2) end
+function lsqlite3.Session:diff(s1, s2) end
 
 ---@return boolean
-function Session:enable() end
+function lsqlite3.Session:enable() end
 
 ---@return boolean
-function Session:indirect() end
+function lsqlite3.Session:indirect() end
 
 ---@return boolean
 ---@nodiscard
-function Session:isempty() end
+function lsqlite3.Session:isempty() end
 
 ---@return string
 ---@nodiscard
-function Session:patchset() end
+function lsqlite3.Session:patchset() end
 
 ---@class lsqlite3.Statement: userdata
 --- After creating a prepared statement with `db:prepare()` the returned statement
 --- object should be used for all further calls in connection with that statement.
-local Statement = nil
 
 --- Binds `value` to statement parameter `n`. If the type of `value` is
 --- string it is bound as text. If the type of value is number, it is
@@ -3439,7 +2593,7 @@ local Statement = nil
 ---@return integer `lsqlite3.OK` on success or else a numerical error code,
 ---@param n integer
 ---@param value string|number|boolean|nil
-function Statement:bind(n, value) end
+function lsqlite3.Statement:bind(n, value) end
 
 --- Binds string `blob` (which can be a binary string) as a blob to
 --- statement parameter `n`.
@@ -3447,7 +2601,7 @@ function Statement:bind(n, value) end
 ---@param n integer
 ---@param blob string
 ---@return integer `lsqlite3.OK` on success or else a numerical error code,
-function Statement:bind_blob(n, blob) end
+function lsqlite3.Statement:bind_blob(n, blob) end
 
 --- Binds the values in `nametable` to statement parameters. If the
 --- statement parameters are named (i.e., of the form `":AAA"` or
@@ -3458,7 +2612,7 @@ function Statement:bind_blob(n, blob) end
 ---@return integer `lsqlite3.OK` on success or else a numerical error code,
 ---@param nametable table
 ---@return integer
-function Statement:bind_names(nametable) end
+function lsqlite3.Statement:bind_names(nametable) end
 
 ---@return any # the largest statement parameter index in prepared the statement.
 ---@nodiscard
@@ -3472,7 +2626,7 @@ function Statement:bind_names(nametable) end
 --- integer) then there might be gaps in the numbering and the value returned by
 --- this interface is the index of the statement parameter with the largest index
 --- value.
-function Statement:bind_parameter_count() end
+function lsqlite3.Statement:bind_parameter_count() end
 
 ---@param n integer
 ---@return string? -- the name of the n-th parameter in prepared statement.
@@ -3482,81 +2636,112 @@ function Statement:bind_parameter_count() end
 --- the form `"?"` or `"?NNN"` have no name. The first bound parameter has an index
 --- of `1`. If the value `n` is out of range or if the `n`-th parameter is nameless,
 --- then `nil` is returned.
-function Statement:bind_parameter_name(n) end
+function lsqlite3.Statement:bind_parameter_name(n) end
 
 --- Binds the given values to statement parameters.
 ---@param ... string|number|nil
 ---@return integer `lsqlite3.OK` on success or else a numerical error code,
-function Statement:bind_values(...) end
+function lsqlite3.Statement:bind_values(...) end
 
 ---@return integer cols the number of columns in the result set returned by the statement or `0` if the statement does not return data (for example an `UPDATE`).
 ---@nodiscard
-function Statement:columns() end
+function lsqlite3.Statement:columns() end
 
 --- This function frees the prepared statement.
 ---@return integer # If the statement was executed successfully, or not executed at all, then `lsqlite3.OK` is returned. If execution of the statement failed then an error code is returned.
-function Statement:finalize() end
+function lsqlite3.Statement:finalize() end
 
 ---@return any # the name of column n in the result set of statement. (The left-most column is number 0.)
 ---@nodiscard
-function Statement:get_name(n) end
+function lsqlite3.Statement:get_name(n) end
 
 ---@return table # the names and types of all columns in the result set of the statement.
 ---@nodiscard
-function Statement:get_named_types() end
+function lsqlite3.Statement:get_named_types() end
+
+--- Alias for `lsqlite3.Statement:get_named_types()`.
+---@return table # the names and types of all columns in the result set of the statement.
+---@nodiscard
+function lsqlite3.Statement:type() end
 
 ---@return table # the names and values of all columns in the current result row of a query.
 ---@nodiscard
-function Statement:get_named_values() end
+function lsqlite3.Statement:get_named_values() end
+
+--- Alias for `lsqlite3.Statement:get_named_values()`.
+---@return table # the names and values of all columns in the current result row of a query.
+---@nodiscard
+function lsqlite3.Statement:data() end
 
 ---@return string[] # the names of all columns in the result set returned by the statement.
 ---@nodiscard
-function Statement:get_names() end
+function lsqlite3.Statement:get_names() end
+
+--- Alias for `lsqlite3.Statement:get_names()`.
+---@return string[] # the names of all columns in the result set returned by the statement.
+---@nodiscard
+function lsqlite3.Statement:inames() end
 
 ---@return any # the type of column n in the result set of statement. (The left-most column is number 0.)
 ---@nodiscard
 ---@nodiscard
-function Statement:get_type(n) end
+function lsqlite3.Statement:get_type(n) end
 
 ---@return any[] # the types of all columns in the result set returned by the statement.
 ---@nodiscard
-function Statement:get_types() end
+function lsqlite3.Statement:get_types() end
+
+--- Alias for `lsqlite3.Statement:get_types()`.
+---@return any[] # the types of all columns in the result set returned by the statement.
+---@nodiscard
+function lsqlite3.Statement:itypes() end
 
 ---@return any[] unames the names of all columns in the result set returned by the statement.
 ---@nodiscard
-function Statement:get_unames() end
+function lsqlite3.Statement:get_unames() end
 
 ---@return any[] utypes the types of all columns in the result set returned by the statement.
 ---@nodiscard
-function Statement:get_utypes() end
+function lsqlite3.Statement:get_utypes() end
 
 ---@return any[] uvalues the values of all columns in the current result row of a query.
 ---@nodiscard
-function Statement:get_uvalues() end
+function lsqlite3.Statement:get_uvalues() end
 
 ---@param n any
 ---@return any value the value of column n in the result set of the statement. (The left-most column is number 0.)
 ---@nodiscard
-function Statement:get_value(n) end
+function lsqlite3.Statement:get_value(n) end
 
 ---@return any[] values the values of all columns in the result set returned by the statement.
 ---@nodiscard
-function Statement:get_values() end
+function lsqlite3.Statement:get_values() end
+
+--- Alias for `lsqlite3.Statement:get_values()`.
+---@return any[] values the values of all columns in the result set returned by the statement.
+---@nodiscard
+function lsqlite3.Statement:idata() end
 
 ---@return boolean isopen `true` if `stmt` has not yet been finalized, `false` otherwise.
 ---@nodiscard
-function Statement:isopen() end
+function lsqlite3.Statement:isopen() end
 
 ---@return function iterator iterates over the names and values of the result set of the statement. Each iteration returns a table with the names and values for the current row. This is the prepared statement equivalent of `db:nrows()`.
 ---@nodiscard
-function Statement:nrows() end
+function lsqlite3.Statement:nrows() end
+
+--- Returns `true` if the prepared statement makes no direct changes to
+--- the content of the database file, `false` otherwise.
+---@return boolean
+---@nodiscard
+function lsqlite3.Statement:readonly() end
 
 --- This function resets the SQL statement, so that it is ready to be re-executed. Any statement variables that had values bound to them using the `stmt:bind*()` functions retain their values.
-function Statement:reset() end
+function lsqlite3.Statement:reset() end
 
 ---@return function iterator iterates over the values of the result set of statement `stmt`. Each iteration returns an array with the values for the current row. This is the prepared statement equivalent of `db:rows()`.
 ---@nodiscard
-function Statement:rows() end
+function lsqlite3.Statement:rows() end
 
 --- This function must be called to evaluate the (next iteration of the) prepared statement.
 ---@return integer # one of the following values:
@@ -3580,135 +2765,160 @@ function Statement:rows() end
 ---    the statement has already been finalized or a previous call to `stmt:step()`
 ---    has returned `lsqlite3.ERROR` or `lsqlite3.DONE`.
 ---@nodiscard
-function Statement:step() end
+function lsqlite3.Statement:step() end
 
 ---@return function iterator iterates over the values of the result set of the statement.
 --- Each iteration returns the values for the current row. This is the prepared
 --- statement equivalent of `db:urows()`.
 ---@nodiscard
-function Statement:urows() end
+function lsqlite3.Statement:urows() end
 
 ---@return any row_id the rowid of the most recent `INSERT` into the database corresponding to this statement. See `db:last_insert_rowid()`.
 ---@nodiscard
-function Statement:last_insert_rowid() end
+function lsqlite3.Statement:last_insert_rowid() end
 
 ---@class lsqlite3.VM: userdata
-local VM = nil
 
 ---@param index integer
 ---@param value string|number|boolean|nil
 ---@return integer errno
-function VM:bind(index, value) end
+function lsqlite3.VM:bind(index, value) end
 
 ---@param index integer
 ---@param value string
 ---@return integer errno
-function VM:bind_blob(index, value) end
+function lsqlite3.VM:bind_blob(index, value) end
 
 ---@param names string[]
 ---@return integer errno
-function VM:bind_names(names) end
+function lsqlite3.VM:bind_names(names) end
 
 ---@return integer parameter_count
 ---@nodiscard
-function VM:bind_parameter_count() end
+function lsqlite3.VM:bind_parameter_count() end
 
 ---@param index number
 ---@return string parameter_name
 ---@nodiscard
-function VM:bind_parameter_name(index) end
+function lsqlite3.VM:bind_parameter_name(index) end
 
 ---@param ... string|number|nil
 ---@return integer errno
-function VM:bind_values(...) end
+function lsqlite3.VM:bind_values(...) end
 
 ---@return integer columns the column count
 ---@nodiscard
-function VM:columns() end
+function lsqlite3.VM:columns() end
 
 ---@return integer errno
-function VM:finalize() end
+function lsqlite3.VM:finalize() end
 
 ---@param index integer
 ---@return string name
 ---@nodiscard
-function VM:get_name(index) end
+function lsqlite3.VM:get_name(index) end
 
 ---@return string[]
 ---@nodiscard
-function VM:get_named_types() end
-VM.type = VM.get_named_types
+function lsqlite3.VM:get_named_types() end
+
+--- Alias for `lsqlite3.VM:get_named_types()`.
+---@return string[]
+---@nodiscard
+function lsqlite3.VM:type() end
 
 ---@return (string|number?)[]
 ---@nodiscard
-function VM:get_named_values() end
-VM.data = VM.get_named_values
+function lsqlite3.VM:get_named_values() end
+
+--- Alias for `lsqlite3.VM:get_named_values()`.
+---@return (string|number?)[]
+---@nodiscard
+function lsqlite3.VM:data() end
 
 ---@return string[]
 ---@nodiscard
-function VM:get_names() end
-VM.inames = VM.get_names
+function lsqlite3.VM:get_names() end
+
+--- Alias for `lsqlite3.VM:get_names()`.
+---@return string[]
+---@nodiscard
+function lsqlite3.VM:inames() end
 
 ---@param index integer
 ---@return string
 ---@nodiscard
-function VM:get_type(index) end
+function lsqlite3.VM:get_type(index) end
 
 ---@return string[]
 ---@nodiscard
-function VM:get_types() end
-VM.itypes = VM.get_types
+function lsqlite3.VM:get_types() end
+
+--- Alias for `lsqlite3.VM:get_types()`.
+---@return string[]
+---@nodiscard
+function lsqlite3.VM:itypes() end
 
 ---@return string ...
 ---@nodiscard
-function VM:get_unames() end
+function lsqlite3.VM:get_unames() end
 
 ---@return string ...
 ---@nodiscard
-function VM:get_utypes() end
+function lsqlite3.VM:get_utypes() end
 
 ---@return string|number? ...
 ---@nodiscard
-function VM:get_uvalues() end
+function lsqlite3.VM:get_uvalues() end
 
 ---@param index integer
 ---@return string|number?
 ---@nodiscard
-function VM:get_value(index) end
+function lsqlite3.VM:get_value(index) end
 
 ---@return (string|number?)[]
 ---@nodiscard
-function VM:get_values() end
-VM.idata = VM.get_values
+function lsqlite3.VM:get_values() end
+
+--- Alias for `lsqlite3.VM:get_values()`.
+---@return (string|number?)[]
+---@nodiscard
+function lsqlite3.VM:idata() end
 
 ---@return boolean
 ---@nodiscard
-function VM:isopen() end
+function lsqlite3.VM:isopen() end
 
 ---@return integer rowid
 ---@nodiscard
-function VM:last_insert_rowid() end
+function lsqlite3.VM:last_insert_rowid() end
 
 ---@param sql string
 ---@return fun(self: lsqlite3.VM): { [string]: string|number } iterator, self
 ---@nodiscard
-function VM:nrows(sql) end
+function lsqlite3.VM:nrows(sql) end
+
+--- Returns `true` if the prepared statement makes no direct changes to
+--- the content of the database file, `false` otherwise.
+---@return boolean
+---@nodiscard
+function lsqlite3.VM:readonly() end
 
 ---@return integer errno
-function VM:reset() end
+function lsqlite3.VM:reset() end
 
 ---@param sql string
 ---@return fun(self: lsqlite3.VM): (string|number|nil)[] iterator, self
 ---@nodiscard
-function VM:rows(sql) end
+function lsqlite3.VM:rows(sql) end
 
 ---@return integer
-function VM:step() end
+function lsqlite3.VM:step() end
 
 ---@param sql string
 ---@return fun(self: lsqlite3.VM): ...: string|number|nil iterator, self
 ---@nodiscard
-function VM:urows(sql) end
+function lsqlite3.VM:urows(sql) end
 
 --- This module exposes an API for POSIX regular expressions which enable you to
 --- validate input, search for substrings, extract pieces of strings, etc.
@@ -3941,8 +3151,12 @@ getopt = {}
 ---@param args string[] Command-line arguments (typically `arg`)
 ---@param optstring string Short options string (e.g., "hvo:")
 ---@param longopts? table[] Long option definitions: {{name, has_arg, short}, ...}
----@return table parser Parser object with next(), remaining(), and unknown() methods
+---@return getopt.parser parser Parser object with next(), remaining(), and unknown() methods
 function getopt.new(args, optstring, longopts) end
+
+---@class getopt.parser: userdata
+--- A parser object returned by `getopt.new` for iterating through
+--- command-line options.
 
 --- Get the next option from the parser.
 ---
@@ -4211,39 +3425,27 @@ function finger.DescribeSyn(syn_packet_bytes) end
 --- as easily become a denial of service vector. For example, you may want to
 --- consider throttling your login endpoint.
 argon2 = {
-    variants = {
-        ---@type integer blend of other two methods [default]
-        argon2_id = nil,
-        ---@type integer maximize resistance to side-channel attacks
-        argon2_i = nil,
-        ---@type integer maximize resistance to gpu cracking attacks
-        argon2_d = nil
-    }
+    --- Argon2 hashing variants. The fields are opaque read-only userdata
+    --- values that can be fed to `config.variant` or `argon2.variant`.
+    ---@type argon2.Variants
+    variants = nil,
 }
+
+---@class argon2.Variant: userdata
+--- An opaque handle identifying an Argon2 hashing variant. The available
+--- variants live in the `argon2.variants` table.
+
+---@class argon2.Variants
+---@field argon2_id argon2.Variant blend of other two methods [default]
+---@field argon2_i argon2.Variant maximize resistance to side-channel attacks
+---@field argon2_d argon2.Variant maximize resistance to gpu cracking attacks
 
 ---@class argon2.Config
-argon2.Config = {
-    --- The memory hardness in kibibytes, which defaults
-    --- to 4096 (4 mibibytes). It's recommended that this be tuned upwards.
-    m_cost = nil,
-
-    --- The number of iterations, which defaults to `3`.
-    t_cost = nil,
-
-    --- The parallelism factor, which defaults to `1`.
-    parallelism = nil,
-
-    --- the number of desired bytes in hash output,
-    --- which defaults to 32.
-    hash_len = nil,
-
-    ---@type integer `config.variant` may be:
-    ---
-    --- - `argon2.variants.argon2_id` blend of other two methods [default]
-    --- - `argon2.variants.argon2_i` maximize resistance to side-channel attacks
-    --- - `argon2.variants.argon2_d` maximize resistance to gpu cracking attacks
-    variant = nil
-}
+---@field m_cost integer? the memory hardness in kibibytes, which defaults to 4096 (4 mibibytes). It's recommended that this be tuned upwards.
+---@field t_cost integer? the number of iterations, which defaults to `3`.
+---@field parallelism integer? the parallelism factor, which defaults to `1`.
+---@field hash_len integer? the number of desired bytes in hash output, which defaults to 32.
+---@field variant argon2.Variant? may be `argon2.variants.argon2_id` blend of other two methods [default], `argon2.variants.argon2_i` maximize resistance to side-channel attacks, or `argon2.variants.argon2_d` maximize resistance to gpu cracking attacks
 
 --- Hashes password.
 ---
@@ -4294,6 +3496,42 @@ function argon2.hash_encoded(pass, salt, config) end
 ---@nodiscard
 ---@overload fun(encoded: string, pass: string): nil, error: string
 function argon2.verify(encoded, pass) end
+
+--- Gets or sets the default memory hardness in kibibytes used by
+--- `argon2.hash_encoded` when its config omits `m_cost`. Called with no
+--- argument (or `nil`), it returns the current default (initially 4096).
+---@param m_cost integer? new default memory hardness in kibibytes
+---@return integer m_cost the current default
+function argon2.m_cost(m_cost) end
+
+--- Gets or sets the default number of iterations used by
+--- `argon2.hash_encoded` when its config omits `t_cost`. Called with no
+--- argument (or `nil`), it returns the current default (initially 3).
+---@param t_cost integer? new default number of iterations
+---@return integer t_cost the current default
+function argon2.t_cost(t_cost) end
+
+--- Gets or sets the default parallelism factor used by
+--- `argon2.hash_encoded` when its config omits `parallelism`. Called with
+--- no argument (or `nil`), it returns the current default (initially 1).
+---@param parallelism integer? new default parallelism factor
+---@return integer parallelism the current default
+function argon2.parallelism(parallelism) end
+
+--- Gets or sets the default hash output length in bytes used by
+--- `argon2.hash_encoded` when its config omits `hash_len`. Called with no
+--- argument (or `nil`), it returns the current default (initially 32).
+---@param hash_len integer? new default hash length in bytes
+---@return integer hash_len the current default
+function argon2.hash_len(hash_len) end
+
+--- Sets the default variant used by `argon2.hash_encoded` when its config
+--- omits `variant`, e.g. `argon2.variant(argon2.variants.argon2_id)`.
+--- Unlike the other configuration functions, the argument is required.
+--- The default is `argon2.variants.argon2_id`.
+---@param variant argon2.Variant one of the `argon2.variants` values
+---@return argon2.Variant variant the variant that was set
+function argon2.variant(variant) end
 
 --- ### ZIP
 ---
@@ -4355,6 +3593,35 @@ function zip.open(path, mode, options) end
 ---@return string? error Error message on failure
 ---@nodiscard
 function zip.from(data, options) end
+
+--- Creates a new ZIP archive for writing. This is equivalent to
+--- `zip.open(path, "w", options)`. Any existing file is truncated.
+---@param path string|integer Path to the ZIP file, or file descriptor
+---@param options? zip.OpenOptions Optional settings
+---@return zip.Writer? writer ZIP writer object on success
+---@return string? error Error message on failure
+---@nodiscard
+function zip.create(path, options) end
+
+--- Opens an existing ZIP archive for appending. This is equivalent to
+--- `zip.open(path, "a", options)`. Unlike `zip.open` and `zip.create`,
+--- a file descriptor is not accepted; the archive must be given as a
+--- path.
+---@param path string Path to the ZIP file
+---@param options? zip.OpenOptions Optional settings
+---@return zip.Appender? appender ZIP appender object on success
+---@return string? error Error message on failure
+---@nodiscard
+function zip.append(path, options) end
+
+--- Validates a ZIP entry name without adding it to an archive, applying
+--- the same rules that `add` enforces (relative path, no `..` segments,
+--- no control characters, etc.).
+---@param name string The entry name to validate
+---@return boolean? ok `true` if the name is acceptable
+---@return string? error Error message describing why the name is invalid
+---@nodiscard
+function zip.validate_name(name) end
 
 ---@class zip.Stat
 --- File metadata within a ZIP archive.
@@ -4428,8 +3695,1226 @@ zip.Appender = {}
 ---@return string? error Error message on failure
 function zip.Appender:add(name, content, options) end
 
+--- Removes entries by name from the archive.
+---
+--- If `name` ends with `/`, all entries whose names start with that
+--- directory prefix are removed; otherwise the single entry whose name
+--- matches exactly is removed. Both entries already present in the
+--- archive and entries added via `add` but not yet flushed are matched.
+--- The local file data of removed existing entries remains as dead space
+--- in the archive; only the central directory reference is removed.
+--- Fails with an error if no entry matched or the appender is closed.
+---@param name string Entry name, or directory prefix ending in `/`
+---@return boolean? success `true` on success
+---@return string? error Error message on failure
+function zip.Appender:remove(name) end
+
 --- Closes the ZIP archive and writes the updated central directory.
 function zip.Appender:close() end
+
+--- The repl module provides programmatic access to the same interactive
+--- read-eval-print-loop that the lua binary runs in interactive mode.
+repl = {}
+
+--- Starts an interactive read-eval-print-loop (REPL) on standard input
+--- and output, with line editing, history, and tab completion. Each
+--- input line is evaluated as an expression (printing its results) or
+--- as a statement. The loop runs until end of input (Ctrl-D). Takes no
+--- arguments and returns nothing.
+function repl.start() end
+
+
+--- The cosmo module is the top-level table returned by
+--- `require("cosmo")` in the cosmopolitan lua binary. It exposes the
+--- general-purpose functions that redbean historically provided as
+--- globals: hashing, encoding, compression, URL and HTTP parsing, an
+--- HTTP client, and various system introspection helpers. Submodules
+--- (`cosmo.unix`, `cosmo.path`, `cosmo.re`, `cosmo.argon2`,
+--- `cosmo.lsqlite3`, `cosmo.getopt`, `cosmo.zip`, `cosmo.repl`) are
+--- registered in `package.loaded` and may be required directly, e.g.
+--- `require("cosmo.unix")`.
+cosmo = {}
+
+--- Writes all data to file the easy way.
+---
+--- This function writes to the local file system.
+---
+---@param filename string
+---@param data string
+---@param mode integer? defaults to 0644. This parameter is ignored when flags doesn't have `unix.O_CREAT`.
+---
+---@param flags integer? defaults to `unix.O_TRUNC | unix.O_CREAT`.
+---
+---@param offset integer? is 1-indexed and may be used to overwrite arbitrary slices within a file when used in conjunction with `flags=0`.
+--- For example:
+---
+---     assert(Barf('x.txt', 'abc123'))
+---     assert(Barf('x.txt', 'XX', 0, 0, 3))
+---     assert(assert(Slurp('x.txt', 1, 6)) == 'abXX23')
+---
+---@return true
+---@overload fun(filename: string, data: string, mode?: integer, flags?: integer, offset?: integer): nil, error: unix.Errno
+function cosmo.Barf(filename, data, mode, flags, offset) end
+
+--- Formats string as binary integer literal string. If the provided value is zero,
+--- the result will be `"0"`. Otherwise the resulting value will be the
+--- "0b"-prefixed binary str. The result is currently modulo 2^64. Negative numbers
+--- are converted to unsigned.
+---@param int integer
+---@return string
+---@nodiscard
+function cosmo.bin(int) end
+
+---@param x integer
+---@return integer # position of first bit set.
+--- Passing `0` will raise an error. Same as the Intel x86 instruction BSF.
+---@nodiscard
+function cosmo.Bsf(x) end
+
+---@param x integer
+---@return integer # binary logarithm of `x`
+--- Passing `0` will raise an error. Same as the Intel x86 instruction BSR.
+---@nodiscard
+function cosmo.Bsr(x) end
+
+---@param ip uint32
+---@return string # a string describing the IP address. This is currently Class A granular. It can tell you if traffic originated from private networks, ARIN, APNIC, DOD, etc.
+---@nodiscard
+function cosmo.CategorizeIp(ip) end
+
+--- Compresses data using zlib DEFLATE with a small framing header.
+---
+--- By default the result starts with a header that stores the
+--- uncompressed byte length (as a ULEB64 varint) followed by a `Crc32`
+--- checksum, so `Uncompress` can decode it without being told the
+--- original size. If `raw` is truthy then only the raw zlib stream is
+--- returned, in which case `Uncompress` requires the uncompressed size
+--- as its second argument.
+---
+--- This function raises an error if the level is invalid or the system
+--- runs out of memory.
+---@param uncompressed string
+---@param level integer? zlib compression level 0..9; defaults to zlib's default level (currently 6)
+---@param raw boolean? omit the length/checksum header (default `false`)
+---@return string compressed
+---@nodiscard
+function cosmo.Compress(uncompressed, level, raw) end
+
+--- Computes Phil Katz CRC-32 used by zip/zlib/gzip/etc.
+---@param initial integer
+---@param data string
+---@return integer
+---@nodiscard
+function cosmo.Crc32(initial, data) end
+
+--- Computes 32-bit Castagnoli Cyclic Redundancy Check.
+---@param initial integer
+---@param data string
+---@return integer
+---@nodiscard
+function cosmo.Crc32c(initial, data) end
+
+--- Computes the Curve25519 elliptic-curve scalar multiplication used
+--- for Diffie-Hellman key agreement.
+---
+--- The second argument can be either a public key or a basepoint. Use
+--- the magic basepoint `"\9"` to derive a public key from a 32-byte
+--- secret, then multiply your secret against the other party's public
+--- key to derive a shared key, e.g.
+---
+---     >: secret1 = GetRandomBytes(32)
+---     >: public1 = Curve25519(secret1, "\9")
+---     >: secret2 = GetRandomBytes(32)
+---     >: public2 = Curve25519(secret2, "\9")
+---     >: Curve25519(secret1, public2) == Curve25519(secret2, public1)
+---     true
+---
+--- Arguments are zero-padded or truncated to 32 bytes.
+---@param secret string 32 bytes of cryptographic random data
+---@param public_or_basepoint string
+---@return string shared 32-byte shared key
+---@nodiscard
+function cosmo.Curve25519(secret, public_or_basepoint) end
+
+--- Shrinks byte buffer in half using John Costella's magic kernel. This downscales
+--- data 2x using an eight-tap convolution, e.g.
+---
+---     >: Decimate('\xff\xff\x00\x00\xff\xff\x00\x00\xff\xff\x00\x00')
+---     "\xff\x00\xff\x00\xff\x00"
+---
+--- This is very fast if SSSE3 is available (Intel 2004+ / AMD 2011+).
+---@param data string
+---@return string
+---@nodiscard
+function cosmo.Decimate(data) end
+
+--- Turns ASCII into binary using the provided alphabet. The default
+--- decoding uses Crockford's base32 alphabet in a permissive way that
+--- ignores whitespace and dash (`-`) and stops at the first character
+--- outside of the alphabet. Any alphabet that has a power of 2 length
+--- (up to 128) may be supplied, which allows alternative base32
+--- encodings to be decoded. Raises an error if the alphabet length is
+--- not a power of 2 in the range 2..128.
+---@param ascii string
+---@param alphabet string? defaults to Crockford's base32 alphabet
+---@return string binary
+---@nodiscard
+function cosmo.DecodeBase32(ascii, alphabet) end
+
+--- Decodes binary data encoded as base64.
+---
+--- This turns ASCII into binary, in a permissive way that ignores
+--- characters outside the base64 alphabet, such as whitespace. See
+--- `decodebase64.c`.
+---
+---@param ascii string
+---@return string binary
+---@nodiscard
+function cosmo.DecodeBase64(ascii) end
+
+--- Turns ASCII base-16 hexadecimal byte string into binary string,
+--- case-insensitively. Non-hex characters may not appear in string.
+---@param ascii string
+---@return string binary
+function cosmo.DecodeHex(ascii) end
+
+--- Turns JSON string into a Lua data structure.
+---
+--- This is a generally permissive parser, in the sense that like
+--- v8, it permits scalars as top-level values. Therefore we must
+--- note that this API can be thought of as special, in the sense
+---
+---     val = assert(DecodeJson(str))
+---
+--- will usually do the right thing, except in cases where `false`
+--- or `null` are the top-level value. In those cases, it's needed
+--- to check the second value too in order to discern from error
+---
+---     val, err = DecodeJson(str)
+---     if not val then
+---        if err then
+---           print('bad json', err)
+---        elseif val == nil then
+---           print('val is null')
+---        elseif val == false then
+---           print('val is false')
+---        end
+---     end
+---
+--- This parser supports 64-bit signed integers. If an overflow
+--- happens, then the integer is silently coerced to double, as
+--- consistent with v8. If a double overflows into `Infinity`, we
+--- coerce it to `null` since that's what v8 does, and the same
+--- goes for underflows which, like v8, are coerced to `0.0`.
+---
+--- When objects are parsed, your Lua object can't preserve the
+--- original ordering of fields. As such, they'll be sorted by
+--- `EncodeJson()` and may not round-trip with original intent.
+---
+--- This parser has perfect conformance with JSONTestSuite.
+---
+--- This parser validates utf-8 and utf-16.
+---@param input string
+---@return JsonValue
+---@nodiscard
+---@overload fun(input: string): nil, error: string
+function cosmo.DecodeJson(input) end
+
+--- Turns ISO-8859-1 string into UTF-8.
+---@param iso_8859_1 string
+---@return string UTF8
+---@nodiscard
+function cosmo.DecodeLatin1(iso_8859_1) end
+
+--- Compresses data.
+---
+---     >: Deflate("hello")
+---     "\xcbH\xcd\xc9\xc9\x07\x00"
+---     >: Inflate("\xcbH\xcd\xc9\xc9\x07\x00", 5)
+---     "hello"
+---
+--- The output format is raw DEFLATE that's suitable for embedding into formats
+--- like a ZIP file. It's recommended that, like ZIP, you also store separately a
+--- `Crc32()` checksum in addition to the original uncompressed size.
+---
+---@param uncompressed string
+---@param level integer? the compression level, which defaults to `7`. The max is `9`.
+--- Lower numbers go faster (4 for instance is a sweet spot) and higher numbers go
+--- slower but have better compression.
+---@return string compressed
+---@nodiscard
+---@overload fun(uncompressed: string, level?: integer): nil, error: string
+function cosmo.Deflate(uncompressed, level) end
+
+--- Turns binary into ASCII using the provided alphabet (Crockford's
+--- base32 alphabet by default). Any alphabet that has a power of 2
+--- length (up to 128) may be supplied for encoding and decoding, which
+--- allows alternative base32 encodings to be produced. Raises an error
+--- if the alphabet length is not a power of 2 in the range 2..128.
+---@param binary string
+---@param alphabet string? defaults to Crockford's base32 alphabet
+---@return string ascii
+---@nodiscard
+function cosmo.EncodeBase32(binary, alphabet) end
+
+--- Turns binary into ASCII. This can be used to create HTML data:
+--- URIs that do things like embed a PNG file in a web page. See
+--- encodebase64.c.
+---@param binary string
+---@return string ascii
+---@nodiscard
+function cosmo.EncodeBase64(binary) end
+
+--- Turns binary into ASCII base-16 hexadecimal lowercase string.
+---@param binary string
+---@return string ascii
+function cosmo.EncodeHex(binary) end
+
+--- Turns Lua data structure into JSON string.
+---
+--- Since Lua uses tables are both hashmaps and arrays, we use a
+--- simple fast algorithm for telling the two apart. Tables with
+--- non-zero length (as reported by `#`) are encoded as arrays,
+--- and any non-array elements are ignored. For example:
+---
+---     >: EncodeJson({2})
+---     "[2]"
+---     >: EncodeJson({[1]=2, ["hi"]=1})
+---     "[2]"
+---
+--- If there are holes in your array, then the serialized array
+--- will exclude everything after the first hole. If the beginning
+--- of your array is a hole, then an error is returned.
+---
+---     >: EncodeJson({[1]=1, [3]=3})
+---     "[1]"
+---     >: EncodeJson({[2]=1, [3]=3})
+---     "[]"
+---     >: EncodeJson({[2]=1, [3]=3})
+---     nil     "json objects must only use string keys"
+---
+--- If the raw length of a table is reported as zero, then we
+--- check for the magic element `[0]=false`. If it's present, then
+--- your table will be serialized as empty array `[]`. An entry is
+--- inserted by `DecodeJson()` automatically, only when encountering
+--- empty arrays, and it's necessary in order to make empty arrays
+--- round-trip. If raw length is zero and `[0]=false` is absent,
+--- then your table will be serialized as an iterated object.
+---
+---     >: EncodeJson({})
+---     "{}"
+---     >: EncodeJson({[0]=false})
+---     "[]"
+---     >: EncodeJson({["hi"]=1})
+---     "{\"hi\":1}"
+---     >: EncodeJson({["hi"]=1, [0]=false})
+---     "[]"
+---     >: EncodeJson({["hi"]=1, [7]=false})
+---     nil     "json objects must only use string keys"
+---
+--- The following options may be used:
+---
+--- - `useoutput`: `(bool=false)` encodes the result directly to the output buffer
+---   and returns nil value. This option is ignored if used outside of request
+---   handling code.
+--- - `sorted`: `(bool=true)` Lua uses hash tables so the order of object keys is
+---   lost in a Lua table. So, by default, we use strcmp to impose a deterministic
+---   output order. If you don't care about ordering then setting `sorted=false`
+---   should yield a performance boost in serialization.
+--- - `pretty`: `(bool=false)` Setting this option to true will cause tables with
+---   more than one entry to be formatted across multiple lines for readability.
+--- - `indent`: `(str=" ")` This option controls the indentation of pretty
+---    formatting. This field is ignored if pretty isn't `true`.
+--- - `maxdepth`: `(int=64)` This option controls the maximum amount of recursion
+---   the serializer is allowed to perform. The max is 32767. You might not be able
+---   to set it that high if there isn't enough C stack memory. Your serializer
+---   checks for this and will return an error rather than crashing.
+---
+--- If the raw length of a table is reported as zero, then we
+--- check for the magic element `[0]=false`. If it's present, then
+--- your table will be serialized as empty array `[]`. An entry is
+--- inserted by `DecodeJson()` automatically, only when encountering
+--- empty arrays, and it's necessary in order to make empty arrays
+--- round-trip. If raw length is zero and `[0]=false` is absent,
+--- then your table will be serialized as an iterated object.
+---
+--- This function will return an error if:
+---
+--- - value is cyclic
+--- - value has depth greater than 64
+--- - value contains functions, user data, or threads
+--- - value is table that blends string / non-string keys
+--- - Your serializer runs out of C heap memory (setrlimit)
+---
+--- We assume strings in value contain UTF-8. This serializer currently does not
+--- produce UTF-8 output. The output format is right now ASCII. Your UTF-8 data
+--- will be safely transcoded to `\uXXXX` sequences which are UTF-16. Overlong
+--- encodings in your input strings will be canonicalized rather than validated.
+---
+--- NaNs are serialized as `null` and Infinities are `null` which is consistent
+--- with the v8 behavior.
+---@param value JsonValue
+---@param options { useoutput: false?, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }?
+---@return string
+---@nodiscard
+---@overload fun(value: JsonValue, options: { useoutput: true, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }): true
+---@overload fun(value: JsonValue, options: { useoutput: boolean?, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }? ): nil, error: string
+function cosmo.EncodeJson(value, options) end
+
+--- Turns UTF-8 into ISO-8859-1 string.
+---@param utf8 string
+---@param flags integer?
+---@return string iso_8859_1
+---@nodiscard
+function cosmo.EncodeLatin1(utf8, flags) end
+
+--- Turns Lua data structure into Lua code string.
+---
+--- Since Lua uses tables as both hashmaps and arrays, tables will only be
+--- serialized as an array with determinate order, if it's an array in the
+--- strictest possible sense.
+---
+--- 1. for all 𝑘=𝑣 in table, 𝑘 is an integer ≥1
+--- 2. no holes exist between MIN(𝑘) and MAX(𝑘)
+--- 3. if non-empty, MIN(𝑘) is 1
+---
+--- In all other cases, your table will be serialized as an object which is
+--- iterated and displayed as a list of (possibly) sorted entries that have
+--- equal signs.
+---
+---     >: EncodeLua({3, 2})
+---     "{3, 2}"
+---     >: EncodeLua({[1]=3, [2]=3})
+---     "{3, 2}"
+---     >: EncodeLua({[1]=3, [3]=3})
+---     "{[1]=3, [3]=3}"
+---     >: EncodeLua({["hi"]=1, [1]=2})
+---     "{[1]=2, hi=1}"
+---
+--- The following options may be used:
+---
+--- - `useoutput`: `(bool=false)` encodes the result directly to the output buffer
+---   and returns nil value. This option is ignored if used outside of request
+---   handling code.
+--- - `sorted`: `(bool=true)` Lua uses hash tables so the order of object keys is
+---   lost in a Lua table. So, by default, we use strcmp to impose a deterministic
+---   output order. If you don't care about ordering then setting `sorted=false`
+---   should yield a performance boost in serialization.
+--- - `pretty`: `(bool=false)` Setting this option to true will cause tables with
+---   more than one entry to be formatted across multiple lines for readability.
+--- - `indent`: `(str=" ")` This option controls the indentation of pretty
+---    formatting. This field is ignored if pretty isn't `true`.
+--- - `maxdepth`: `(int=64)` This option controls the maximum amount of recursion
+---   the serializer is allowed to perform. The max is 32767. You might not be able
+---   to set it that high if there isn't enough C stack memory. Your serializer
+---   checks for this and will return an error rather than crashing.
+---
+--- If a user data object has a `__repr` or `__tostring` meta method, then that'll
+--- be used to encode the Lua code.
+---
+--- This serializer is designed primarily to describe data. For example, it's used
+--- by the REPL where we need to be able to ignore errors when displaying data
+--- structures, since showing most things imperfectly is better than crashing.
+--- Therefore this isn't the kind of serializer you'd want to use to persist data
+--- in prod. Try using the JSON serializer for that purpose.
+---
+--- Non-encodable value types (e.g. threads, functions) will be represented as a
+--- string literal with the type name and pointer address. The string description
+--- is of an unspecified format that could most likely change. This encoder detects
+--- cyclic tables; however instead of failing, it embeds a string of unspecified
+--- layout describing the cycle.
+---
+--- Integer literals are encoded as decimal. However if the int64 number is ≥256
+--- and has a population count of 1 then we switch to representating the number in
+--- hexadecimal, for readability. Hex numbers have leading zeroes added in order
+--- to visualize whether the number fits in a uint16, uint32, or int64. Also some
+--- numbers can only be encoded expressionally. For example, `NaN`s are serialized
+--- as `0/0`, and `Infinity` is `math.huge`.
+---
+---     >: 7000
+---     7000
+---     >: 0x100
+---     0x0100
+---     >: 0x10000
+---     0x00010000
+---     >: 0x100000000
+---     0x0000000100000000
+---     >: 0/0
+---     0/0
+---     >: 1.5e+9999
+---     math.huge
+---     >: -9223372036854775807 - 1
+---     -9223372036854775807 - 1
+---
+--- The only failure return condition currently implemented is when C runs out of heap memory.
+---@param options { useoutput: false?, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }?
+---@return string
+---@nodiscard
+---@overload fun(value, options: { useoutput: true, sorted: boolean?, pretty: boolean?, indent: string?, maxdepth: integer? }): true
+---@overload fun(value, options: cosmo.EncoderOptions? ): nil, error: string
+function cosmo.EncodeLua(value, options) end
+
+--- This function is the inverse of ParseUrl. The output will always be correctly
+--- formatted. The exception is if illegal characters are supplied in the scheme
+--- field, since there's no way of escaping those. Opaque parts are escaped as
+--- though they were paths, since many URI parsers won't understand things like
+--- an unescaped question mark in path.
+---@param url cosmo.Url
+---@return string url
+---@nodiscard
+function cosmo.EncodeUrl(url) end
+
+--- Escapes URL #fragment. The allowed characters are `-/?.~_@:!$&'()*+,;=0-9A-Za-z`
+--- and everything else gets `%XX` encoded. Please note that `'&` can still break
+--- HTML and that `'()` can still break CSS URLs. This function is charset agnostic
+--- and will not canonicalize overlong encodings. It is assumed that a UTF-8 string
+--- will be supplied. See `kescapefragment.S`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeFragment(str) end
+
+--- Escapes URL host. See `kescapeauthority.S`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeHost(str) end
+
+--- Escapes HTML entities: The set of entities is `&><"'` which become `&amp;&gt;&lt;&quot;&#39;`. This function is charset agnostic and will not canonicalize overlong encodings. It is assumed that a UTF-8 string will be supplied. See `escapehtml.c`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeHtml(str) end
+
+--- Escapes URL IP-literal. This is the same as `EscapeHost` except
+--- colon is permitted, so bracketed IPv6 literals stay intact. See
+--- `escapeip.c`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeIp(str) end
+
+--- Escapes JavaScript or JSON string literal content. The caller is responsible
+--- for adding the surrounding quotation marks. This implementation \uxxxx sequences
+--- for all non-ASCII sequences. HTML entities are also encoded, so the output
+--- doesn't need `EscapeHtml`. This function assumes UTF-8 input. Overlong
+--- encodings are canonicalized. Invalid input sequences are assumed to
+--- be ISO-8859-1. The output is UTF-16 since that's what JavaScript uses. For
+--- example, some individual codepoints such as emoji characters will encode as
+--- multiple `\uxxxx` sequences. Ints that are impossible to encode as UTF-16 are
+--- substituted with the `\xFFFD` replacement character.
+--- See `escapejsstringliteral.c`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeLiteral(str) end
+
+--- Escapes URL parameter name or value. The allowed characters are `-.*_0-9A-Za-z`
+--- and everything else gets `%XX` encoded. This function is charset agnostic and
+--- will not canonicalize overlong encodings. It is assumed that a UTF-8 string
+--- will be supplied. See `kescapeparam.S`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeParam(str) end
+
+--- Escapes URL password. See `kescapeauthority.S`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapePass(str) end
+
+--- Escapes URL path. This is the same as EscapeSegment except slash is allowed.
+--- The allowed characters are `-.~_@:!$&'()*+,;=0-9A-Za-z/` and everything else
+--- gets `%XX` encoded. Please note that `'&` can still break HTML, so the output
+--- may need EscapeHtml too. Also note that `'()` can still break CSS URLs. This
+--- function is charset agnostic and will not canonicalize overlong encodings.
+--- It is assumed that a UTF-8 string will be supplied. See `kescapepath.S`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapePath(str) end
+
+--- Escapes URL path segment. This is the same as EscapePath except slash isn't
+--- allowed. The allowed characters are `-.~_@:!$&'()*+,;=0-9A-Za-z` and everything
+--- else gets `%XX` encoded. Please note that `'&` can still break HTML, so the
+--- output may need EscapeHtml too. Also note that `'()` can still break CSS URLs.
+--- This function is charset agnostic and will not canonicalize overlong encodings.
+--- It is assumed that a UTF-8 string will be supplied. See `kescapesegment.S`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeSegment(str) end
+
+--- Escapes URL username. See `kescapeauthority.S`.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.EscapeUser(str) end
+
+--- Sends an HTTP/HTTPS request to the specified URL. If only the URL is provided,
+--- then a GET request is sent. If both URL and body parameters are specified, then
+--- a POST request is sent. If any other method needs to be specified (for example,
+--- PUT or DELETE), then passing a table as the second value allows setting method
+--- and body values as well other options:
+---
+--- - `method` (default: `"GET"`): sets the method to be used for the request.
+---   The specified method is converted to uppercase.
+--- - `body` (default: `""`): sets the body value to be sent.
+--- - `followredirect` (default: `true`): forces temporary and permanent redirects
+---    to be followed. This behavior can be disabled by passing `false`.
+--- - `maxredirects` (default: `5`): sets the number of allowed redirects to
+---   minimize looping due to misconfigured servers. When the number is exceeded,
+---   the result of the last redirect is returned.
+--- - `keepalive` (default = `false`): configures each request to keep the
+---   connection open (unless closed by the server) and reuse for the
+---   next request to the same host. This option is disabled when SSL
+---   connection is used.
+---   The mapping of hosts and their sockets is stored in a table
+---   assigned to the `keepalive` field itself, so it can be passed to
+---   the next call.
+---   If the table includes the `close` field set to a true value,
+---   then the connection is closed after the request is made and the
+---   host is removed from the mapping table.
+--- - `proxy` (string): HTTP proxy URL, e.g. `"http://proxy:8080"`.
+---   Supports Basic authentication: `"http://user:pass@proxy:8080"`.
+--- - `maxresponse` (default: `104857600`): maximum response size in bytes.
+---   Protects against memory exhaustion from large responses.  Must be >= 0;
+---   negative values are rejected.
+--- - `timeout` (number, seconds): per-operation socket timeout (read/write/
+---   connect).  A value of `0` or absent keeps the 60-second default.  There
+---   is no "infinite" option — use a large positive value if needed.  The
+---   timeout also bounds the TLS handshake.
+--- - `resettls` (default: `true`): reset TLS state after fork.
+---   Ensures child processes get fresh DRBG entropy.
+---
+--- Environment variables:
+---
+--- - `http_proxy` / `HTTP_PROXY`: default proxy URL when `proxy` option
+---   is not specified. Supports same format as the option.
+--- - `SSL_CERT_FILE`: path to CA certificate bundle file for TLS verification.
+---   Overrides default system CA locations.
+--- - `SSL_NO_SYSTEM_CERTS`: if set, skip loading system CA certificates.
+---   Only embedded certificates will be used.
+---
+--- When the redirect is being followed, the same method and body values are being
+--- sent in all cases except when 303 status is returned. In that case the method
+--- is set to GET and the body is removed before the redirect is followed. Note
+--- that if these (method/body) values are provided as table fields, they will be
+--- modified in place.
+---@param url string
+---@param body? string|{ headers: table<string,string>, method: string, body: string, maxredirects: integer?, keepalive: boolean?, proxy: string?, maxresponse: integer?, resettls: boolean? }
+---@return integer status, table<string,string> headers, string body
+---@nodiscard
+---@overload fun(url:string, body?: string|{ headers: table<string,string>, method: string, body: string, maxredirects?: integer, keepalive: boolean?, proxy: string?, maxresponse: integer?, resettls: boolean? }): nil, error: string
+function cosmo.Fetch(url, body) end
+
+--- Sends an HTTP/HTTPS request and returns a streaming reader for the response body.
+--- Useful for Server-Sent Events (SSE), large downloads, or processing data incrementally.
+---
+--- Accepts the same options table as `Fetch()`, including `timeout`, `maxresponse`,
+--- `headers`, `method`, `body`, `proxy`, `followredirect`, and `maxredirects`.
+--- Note: `timeout=0` (or absent) retains the 60-second default; there is no
+--- "infinite" option.  `maxresponse` limits per-read buffer growth; negative
+--- values are rejected.
+---@param url string The URL to fetch
+---@param options? { headers: table<string,string>, method: string, body: string, maxredirects?: integer, followredirect?: boolean, proxy: string?, timeout?: number, maxresponse?: integer } Request options
+---@return integer status, table<string,string> headers, cosmo.StreamReader reader
+---@nodiscard
+---@overload fun(url:string, options?: table): nil, error: string
+function cosmo.FetchStream(url, options) end
+
+--- Converts UNIX timestamp to an RFC1123 string that looks like this:
+--- `Mon, 29 Mar 2021 15:37:13 GMT`. See `formathttpdatetime.c`.
+---@param seconds integer
+---@return string
+---@nodiscard rfc1123
+function cosmo.FormatHttpDateTime(seconds) end
+
+--- Turns integer like `0x01020304` into a string like `"1.2.3.4"`. See also
+--- `ParseIp` for the inverse operation.
+---@param uint32 integer
+---@return string
+---@nodiscard
+function cosmo.FormatIp(uint32) end
+
+---@return integer # 0-indexed CPU core on which process is currently scheduled.
+---@nodiscard
+function cosmo.GetCpuCore() end
+
+---@return integer cpucount CPU core count or `0` if it couldn't be determined.
+---@nodiscard
+function cosmo.GetCpuCount() end
+
+---@return integer # 0-indexed NUMA node on which process is currently scheduled.
+---@nodiscard
+function cosmo.GetCpuNode() end
+
+---@param name "MD5"|"SHA1"|"SHA224"|"SHA256"|"SHA384"|"SHA512"|"BLAKE2B256"
+---@param payload string
+---@param key string? If the key is provided, then HMAC value of the same function is returned.
+---@return string # value of the specified cryptographic hash function.
+---@nodiscard
+function cosmo.GetCryptoHash(name, payload, key) end
+
+--- Returns string describing host instruction set architecture.
+---
+--- This can return:
+---
+--- - `"X86_64"` for Intel and AMD systems
+--- - `"AARCH64"` for ARM64, M1, and Raspberry Pi systems
+--- - `"POWERPC64"` for OpenPOWER Raptor Computing Systems
+---@return "X86_64"|"AARCH64"|"POWERPC64"
+---@nodiscard
+function cosmo.GetHostIsa() end
+
+---@return "LINUX"|"METAL"|"WINDOWS"|"XNU"|"NETBSD"|"FREEBSD"|"OPENBSD" osname string that describes the host OS.
+---@nodiscard
+function cosmo.GetHostOs() end
+
+---@param code integer
+---@return string reason string describing the HTTP reason phrase. See `gethttpreason.c`.
+---@nodiscard
+function cosmo.GetHttpReason(code) end
+
+---@param str string|integer monospace display width of string.
+--- This is useful for fixed-width formatting. For example, CJK characters
+--- typically take up two cells. This function takes into consideration combining
+--- characters, which are discounted, as well as control codes and ANSI escape
+--- sequences.
+---@return integer
+---@nodiscard
+function cosmo.GetMonospaceWidth(str) end
+
+---@param length integer?
+---@return string # with the specified number of random bytes (1..256). If no length is specified, then a string of length 16 is returned.
+---@nodiscard
+function cosmo.GetRandomBytes(length) end
+
+---@return number seconds current time as a UNIX timestamp with 0.0001s precision.
+---@nodiscard
+function cosmo.GetTime() end
+
+--- Returns `true` if the string contains forbidden control codes.
+---
+--- `flags` selects which characters are considered forbidden and may be
+--- any combination of:
+---
+--- - `1` (kControlWs): forbid the whitespace controls tab, carriage
+---   return, line feed, and vertical tab
+--- - `2` (kControlC0): forbid the C0 control codes (0x00..0x1F and
+---   0x7F), except the whitespace controls above
+--- - `4` (kControlC1): forbid the C1 control codes (0x80..0x9F), which
+---   are decoded from UTF-8 before being checked
+---
+--- If `flags` is zero (the default) then no characters are forbidden
+--- and this function returns `false`. Raises an error if `flags` has
+--- bits outside the values above.
+---@param str string
+---@param flags integer?
+---@return boolean
+---@nodiscard
+function cosmo.HasControlCodes(str, flags) end
+
+--- Formats string as hexadecimal integer literal string. If the provided value is
+--- zero, the result will be `"0"`. Otherwise the resulting value will be the
+--- "0x"-prefixed hex string. The result is currently modulo 2^64. Negative numbers
+--- are converted to unsigned.
+---@param int integer
+---@return string
+---@nodiscard
+function cosmo.hex(int) end
+
+--- Computes 64-bit Google HighwayHash of a string.
+---
+--- HighwayHash is a fast keyed pseudorandom function. The four optional
+--- 64-bit key words default to zero. A zero key isn't a secret key;
+--- pass four random 64-bit integers if keyed hashing is desired.
+---@param str string
+---@param k1 integer? first 64-bit key word (default 0)
+---@param k2 integer? second 64-bit key word (default 0)
+---@param k3 integer? third 64-bit key word (default 0)
+---@param k4 integer? fourth 64-bit key word (default 0)
+---@return integer hash
+---@nodiscard
+function cosmo.HighwayHash64(str, k1, k2, k3, k4) end
+
+--- Adds spaces to beginnings of multiline string. If the int parameter is not
+--- supplied then 1 space will be added.
+---@param str string
+---@param int integer?
+---@return string
+---@nodiscard
+function cosmo.IndentLines(str, int) end
+
+--- Decompresses data.
+---
+--- This function performs the inverse of Deflate(). It's recommended that you
+--- perform a `Crc32()` check on the output string after this function succeeds.
+---
+---@param compressed string
+---@param maxoutsize integer the uncompressed size, which should be known.
+--- However, it is permissable (although not advised) to specify some large number
+--- in which case (on success) the byte length of the output string may be less
+--- than `maxoutsize`.
+---@return string uncompressed
+---@nodiscard
+---@overload fun(compressed: string, maxoutsize: integer): nil, error: string
+function cosmo.Inflate(compressed, maxoutsize) end
+
+--- Check if the calling script is being run directly (not require'd).
+---
+--- This function provides a Python-like `if __name__ == "__main__"` idiom
+--- for Lua scripts. It returns true when the script is executed directly
+--- from the command line, and false when the script is loaded via require().
+---
+--- Example usage:
+---
+---     local M = {}
+---
+---     function M.main(args)
+---       print("Hello, " .. (args[1] or "world"))
+---     end
+---
+---     if is_main() then
+---       M.main(arg)
+---     end
+---
+---     return M
+---
+---@return boolean # `true` if the script is run directly, `false` if it was require'd
+---@nodiscard
+function cosmo.is_main() end
+
+--- Returns `true` if hostname seems legit.
+---
+--- This validates the host component of a URL, permitting things like
+--- `""`, `1.2.3.4`, `localservice`, `hello.example`, and
+--- `hi-there.example`, while rejecting things like `::1`, `1.2.3`,
+--- `1.2.3.4.5`, `.hi.example`, and `hi..example`. Fully numerical names
+--- must be valid IPv4 addresses. There's currently no support for IPv6
+--- literals. See `isacceptablehost.c`.
+---@param str string
+---@return boolean
+---@nodiscard
+function cosmo.IsAcceptableHost(str) end
+
+---@param str string
+---@return boolean # `true` if path doesn't contain ".", ".." or "//" segments See `isacceptablepath.c`
+---@nodiscard
+function cosmo.IsAcceptablePath(str) end
+
+--- Returns `true` if port string seems legit, i.e. it's either empty or
+--- a string of digits that fits in the range 0..65535, e.g. `""`,
+--- `"0"`, `"65535"`. Named services like `"https"`, negative values,
+--- and numbers greater than 65535 are rejected. See
+--- `isacceptableport.c`.
+---@param str string
+---@return boolean
+---@nodiscard
+function cosmo.IsAcceptablePort(str) end
+
+--- Returns `true` if the given HTTP header name is a standard header
+--- that the RFCs define as storing comma-separated values and may
+--- therefore appear multiple times in a message, e.g.
+--- `Accept-Encoding`. Returns `false` for non-repeatable and
+--- unrecognized headers. See `khttprepeatable.c`.
+---@param name string
+---@return boolean
+---@nodiscard
+function cosmo.IsHeaderRepeatable(name) end
+
+---@param uint32 integer
+---@return boolean # true if IP address is part of the localhost network (127.0.0.0/8).
+---@nodiscard
+function cosmo.IsLoopbackIp(uint32) end
+
+---@param uint32 integer
+---@return boolean # `true` if IP address is part of a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).
+---@nodiscard
+function cosmo.IsPrivateIp(uint32) end
+
+---@param uint32 integer
+---@return boolean # `true` if IP address is not a private network (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) and is not localhost (`127.0.0.0/8`).
+--- Note: we intentionally regard TEST-NET IPs as public.
+---@nodiscard
+function cosmo.IsPublicIp(uint32) end
+
+---@param str string
+---@return boolean # `true` if path doesn't contain "." or ".." segments See `isreasonablepath.c`
+---@nodiscard
+function cosmo.IsReasonablePath(str) end
+
+--- Returns `true` if the string is a valid HTTP token, i.e. a nonempty
+--- ASCII string without separators or control codes, as defined by
+--- RFC7230. Tokens are used for things like HTTP methods and header
+--- names. See `isvalidhttptoken.c`.
+---@param str string
+---@return boolean
+---@nodiscard
+function cosmo.IsValidHttpToken(str) end
+
+---@return integer # fastest pseudorandom non-cryptographic random number.
+--- This linear congruential generator passes practrand and bigcrush.
+---@nodiscard
+function cosmo.Lemur64() end
+
+--- Compresses data using LZ4.
+---
+--- LZ4 is an extremely fast compression algorithm, trading compression ratio
+--- for speed. It's particularly well-suited for real-time compression scenarios.
+--- The compressed output is not compatible with other compression formats (use
+--- Deflate/Inflate for standard zlib compatibility).
+---
+---@param data string the data to compress
+---@param acceleration integer? acceleration factor (default 1). Higher values
+--- produce faster compression but with worse compression ratio. Range is 1-65537.
+---@return string compressed
+---@nodiscard
+---@overload fun(data: string, acceleration?: integer): nil, error: string
+function cosmo.Lz4Compress(data, acceleration) end
+
+--- Decompresses LZ4-compressed data.
+---
+--- You must know the maximum size of the decompressed output beforehand.
+--- This is a limitation of the LZ4 format which doesn't store the original size.
+---
+---@param compressed string the LZ4-compressed data
+---@param maxoutsize integer the maximum size of the decompressed output
+---@return string decompressed
+---@nodiscard
+---@overload fun(compressed: string, maxoutsize: integer): nil, error: string
+function cosmo.Lz4Decompress(compressed, maxoutsize) end
+
+--- Computes MD5 checksum, returning 16 bytes of binary.
+---@param str string
+---@return string checksum
+---@nodiscard
+function cosmo.Md5(str) end
+
+---@param data string
+---@return number # Shannon entropy of `data`.
+--- This gives you an idea of the density of information. Cryptographic random
+--- should be in the ballpark of `7.9` whereas plaintext will be more like `4.5`.
+---@nodiscard
+function cosmo.MeasureEntropy(data) end
+
+--- Formats string as octal integer literal string. If the provided value is zero,
+--- the result will be `"0"`. Otherwise the resulting value will be the
+--- zero-prefixed octal string. The result is currently modulo 2^64. Negative
+--- numbers are converted to unsigned.
+---@param int integer
+---@return string
+---@nodiscard
+function cosmo.oct(int) end
+
+--- Parses a `host[:port]` string, e.g. `"example.com:8080"`.
+---
+--- Please note a longstanding quirk inherited from redbean: only the
+--- port component is currently returned. This function yields the port
+--- string (e.g. `"8080"`), or `nil` if no port is present; the host
+--- component is parsed but not returned. This function is
+--- nil-propagating: passing `nil` returns `nil`. Raises an error if the
+--- system runs out of memory.
+---@param str string
+---@return string? port
+---@nodiscard
+function cosmo.ParseHost(str) end
+
+--- Converts RFC1123 string that looks like this: Mon, 29 Mar 2021 15:37:13 GMT to
+--- a UNIX timestamp. See `parsehttpdatetime.c`.
+---@param rfc1123 string
+---@return integer seconds
+---@nodiscard
+function cosmo.ParseHttpDateTime(rfc1123) end
+
+--- Converts IPv4 address string to integer, e.g. "1.2.3.4" → 0x01020304, or
+--- returns -1 for invalid inputs. See also `FormatIp` for the inverse operation.
+---@param ip string
+---@return integer ip
+---@nodiscard
+function cosmo.ParseIp(ip) end
+
+--- Parses `application/x-www-form-urlencoded` key/value parameters,
+--- e.g. `"a=b&c"` becomes `{{"a", "b"}, {"c"}}`. This returns the same
+--- data structure as the `params` field of the `Url` object returned by
+--- `ParseUrl`. Keys and values are percent-decoded. This function is
+--- nil-propagating: passing `nil` returns `nil`. Raises an error if the
+--- system runs out of memory.
+---@param paramstring string
+---@return { [1]: string, [2]: string? }[] params
+---@nodiscard
+function cosmo.ParseParams(paramstring) end
+
+--- Parses URL.
+---
+---@return cosmo.Url url An object containing the following fields is returned:
+---
+--- - `scheme` is a string, e.g. `"http"`
+--- - `user` is the username string, or nil if absent
+--- - `pass` is the password string, or nil if absent
+--- - `host` is the hostname string, or nil if `url` was a path
+--- - `port` is the port string, or nil if absent
+--- - `path` is the path string, or nil if absent
+--- - `params` is the URL paramaters, e.g. `/?a=b&c` would be
+---   represented as the data structure `{{"a", "b"}, {"c"}, ...}`
+--- - `fragment` is the stuff after the `#` character
+---
+---@param url string
+---@param flags integer? may have:
+---
+--- - `kUrlPlus` to turn `+` into space
+--- - `kUrlLatin1` to transcode ISO-8859-1 input into UTF-8
+---
+--- This parser is charset agnostic. Percent encoded bytes are
+--- decoded for all fields. Returned values might contain things
+--- like NUL characters, spaces, control codes, and non-canonical
+--- encodings. Absent can be discerned from empty by checking if
+--- the pointer is set.
+---
+--- There's no failure condition for this routine. This is a
+--- permissive parser. This doesn't normalize path segments like
+--- `.` or `..` so use IsAcceptablePath() to check for those. No
+--- restrictions are imposed beyond that which is strictly
+--- necessary for parsing. All the data that is provided will be
+--- consumed to the one of the fields. Strict conformance is
+--- enforced on some fields more than others, like scheme, since
+--- it's the most non-deterministically defined field of them all.
+---
+--- Please note this is a URL parser, not a URI parser. Which
+--- means we support everything the URI spec says we should do
+--- except for the things we won't do, like tokenizing path
+--- segments into an array and then nesting another array beneath
+--- each of those for storing semicolon parameters. So this parser
+--- won't make SIP easy. What it can do is parse HTTP URLs and most
+--- URIs like data:opaque, better in fact than most things which
+--- claim to be URI parsers.
+---
+---@nodiscard
+function cosmo.ParseUrl(url, flags) end
+
+--- Returns number of bits set in integer.
+---@param x integer
+---@return integer
+---@nodiscard
+function cosmo.Popcnt(x) end
+
+---@return integer # nondeterministic pseudorandom non-cryptographic number.
+--- This linear congruential generator passes practrand and bigcrush. This
+--- generator is safe across `fork()`, threads, and signal handlers.
+---@nodiscard
+function cosmo.Rand64() end
+
+---@return integer # 64-bit CSPRNG integer (arc4random64).  Despite the name, this does NOT
+--- read raw hardware RDRAND; it returns output from the OS CSPRNG (arc4random64), which is
+--- seeded from hardware entropy but is safer (no RNG fault exposure).
+---@nodiscard
+function cosmo.Rdrand() end
+
+---@return integer # 64-bit CSPRNG integer (arc4random64).  Despite the name, this does NOT
+--- read raw hardware RDSEED; it returns output from the OS CSPRNG (arc4random64), which is
+--- seeded from hardware entropy but is safer (no RNG fault exposure).
+---@nodiscard
+function cosmo.Rdseed() end
+
+--- Gets IP address associated with hostname.
+---
+--- This function first checks if hostname is already an IP address, in which case
+--- it returns the result of `ParseIp`. Otherwise, it checks HOSTS.TXT on the local
+--- system and returns the first IPv4 address associated with hostname. If no such
+--- entry is found, a DNS lookup is performed using the system configured (e.g.
+--- `/etc/resolv.conf`) DNS resolution service. If the service returns multiple IN
+--- A records then only the first one is returned.
+---
+--- The returned address is word-encoded in host endian order. For example,
+--- 1.2.3.4 is encoded as 0x01020304. The `FormatIp` function may be used to turn
+--- this value back into a string.
+---
+--- If no IP address could be found, then `nil` is returned alongside a string of
+--- unspecified format describing the error. Calls to this function may be wrapped
+--- in `assert()` if an exception is desired.
+---@param hostname string
+---@return uint32 ip uint32
+---@nodiscard
+---@overload fun(hostname: string): nil, error: string
+function cosmo.ResolveIp(hostname) end
+
+--- Computes SHA1 checksum, returning 20 bytes of binary.
+---@param str string
+---@return string checksum
+---@nodiscard
+function cosmo.Sha1(str) end
+
+--- Computes SHA224 checksum, returning 28 bytes of binary.
+---@param str string
+---@return string checksum
+---@nodiscard
+function cosmo.Sha224(str) end
+
+--- Computes SHA256 checksum, returning 32 bytes of binary.
+---@param str string
+---@return string checksum
+---@nodiscard
+function cosmo.Sha256(str) end
+
+--- Computes SHA384 checksum, returning 48 bytes of binary.
+---@param str string
+---@return string checksum
+---@nodiscard
+function cosmo.Sha384(str) end
+
+--- Computes SHA512 checksum, returning 64 bytes of binary.
+---@param str string
+---@return string checksum
+---@nodiscard
+function cosmo.Sha512(str) end
+
+--- Sleeps the specified number of seconds (can be fractional).
+--- The smallest interval is a microsecond.
+---@param seconds number
+function cosmo.Sleep(seconds) end
+
+--- Reads all data from file the easy way.
+---
+--- This function reads file data from local file system. Zip file assets can be
+--- accessed using the `/zip/...` prefix.
+---
+--- `i` and `j` may be used to slice a substring in filename. These parameters are
+--- 1-indexed and behave consistently with Lua's `string.sub()` API. For example:
+---
+---     assert(Barf('x.txt', 'abc123'))
+---     assert(assert(Slurp('x.txt', 2, 3)) == 'bc')
+---
+--- This function is uninterruptible so `unix.EINTR` errors will be ignored. This
+--- should only be a concern if you've installed signal handlers. Use the UNIX API
+--- if you need to react to it.
+---
+---@param filename string
+---@param i integer?
+---@param j integer?
+---@return string data
+---@nodiscard
+---@overload fun(filename: string, i?: integer, j?: integer): nil, unix.Errno
+function cosmo.Slurp(filename, i, j) end
+
+--- Formats a timestamp using strftime(3) format specifiers.
+---
+--- Common format specifiers:
+--- - `%Y` four-digit year
+--- - `%m` two-digit month (01-12)
+--- - `%d` two-digit day (01-31)
+--- - `%H` two-digit hour (00-23)
+--- - `%M` two-digit minute (00-59)
+--- - `%S` two-digit second (00-59)
+--- - `%F` equivalent to `%Y-%m-%d`
+--- - `%T` equivalent to `%H:%M:%S`
+--- - `%a` abbreviated weekday name
+--- - `%b` abbreviated month name
+---
+--- Example:
+---
+---     Strftime("%Y-%m-%d %H:%M:%S")           -- "2024-12-29 15:30:00"
+---     Strftime("%F %T", os.time())            -- "2024-12-29 15:30:00"
+---     Strftime("%a, %d %b %Y", 0)             -- "Thu, 01 Jan 1970"
+---     Strftime("%F %T", os.time(), true)      -- local time instead of UTC
+---
+---@param format string strftime format string
+---@param timestamp? integer UNIX timestamp (defaults to current time)
+---@param localtime? boolean use local time instead of UTC (default false)
+---@return string? formatted datetime string, or nil if buffer too small
+---@nodiscard
+function cosmo.Strftime(format, timestamp, localtime) end
+
+--- Parses a datetime string using strptime(3) format specifiers.
+---
+--- Returns a table with parsed components and any unparsed remainder.
+--- Uses the same format specifiers as `Strftime`.
+---
+--- Example:
+---
+---     local t = Strptime("2024-12-29", "%Y-%m-%d")
+---     -- t = {year=2024, month=12, day=29, hour=0, min=0, sec=0, ...}
+---
+---     local t = Strptime("2024-12-29 15:30", "%Y-%m-%d %H:%M")
+---     -- t.rest = "" (nothing unparsed)
+---
+---     local t = Strptime("2024-12-29 extra", "%Y-%m-%d")
+---     -- t.rest = " extra"
+---
+---@param str string datetime string to parse
+---@param format string strptime format string
+---@return table? result {year, month, day, hour, min, sec, wday, yday, isdst, rest}
+---@return string? error error message if parsing failed
+---@nodiscard
+function cosmo.Strptime(str, format) end
+
+--- Decompresses data produced by `Compress`.
+---
+--- If `maxoutsize` is absent, the input is expected to begin with the
+--- header that `Compress` writes by default; the embedded length and
+--- `Crc32` checksum are verified. If `maxoutsize` is given, the input
+--- must be a raw zlib stream that decompresses to exactly `maxoutsize`
+--- bytes.
+---
+--- This function raises an error if the input is truncated or corrupt.
+---@param compressed string
+---@param maxoutsize integer? the exact uncompressed size, for raw streams
+---@return string uncompressed
+---@nodiscard
+function cosmo.Uncompress(compressed, maxoutsize) end
+
+--- Canonicalizes overlong encodings.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.Underlong(str) end
+
+--- Unescapes URL parameter name or value. Decodes `%XX` hex sequences and
+--- converts `+` to space (common in application/x-www-form-urlencoded).
+--- This is the inverse of EscapeParam.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.UnescapeParam(str) end
+
+--- Generate a uuid_v4
+---@return string
+function cosmo.UuidV4() end
+
+--- Generate a uuid_v7
+---@return string
+function cosmo.UuidV7() end
+
+--- Replaces C0 control codes and trojan source characters with descriptive
+--- UNICODE pictorial representation. This function also canonicalizes overlong
+--- encodings. C1 control codes are replaced with a JavaScript-like escape sequence.
+---@param str string
+---@return string
+---@nodiscard
+function cosmo.VisualizeControlCodes(str) end
+
+---@class cosmo.StreamReader: userdata
+--- Streaming reader for an HTTP response body, returned by
+--- `cosmo.FetchStream`. The reader owns the underlying connection. It is
+--- closed automatically on garbage collection, but calling `close`
+--- promptly is recommended.
+
+--- Reads the next chunk of the response body.
+---
+--- Returns a string chunk on success. An empty string may be returned
+--- for chunked transfer encodings when framing data arrived without any
+--- payload; callers should skip empty chunks rather than treating them
+--- as EOF. Returns `nil` when the stream ends. Returns `nil` plus an
+--- error message string if the reader is closed, the connection failed,
+--- or the response was truncated.
+---@return string? chunk next chunk of data, or nil on EOF
+---@return string? error error message on failure
+function cosmo.StreamReader:read() end
+
+--- Closes the reader and releases the connection, buffer, and TLS
+--- state. Idempotent: closing an already-closed reader is a no-op.
+--- Returns nothing.
+function cosmo.StreamReader:close() end
 
 --- This module exposes the low-level System Five system call interface.
 --- This module works on all supported platforms, including Windows NT.
@@ -4456,8 +4941,6 @@ unix = {
     --- Most other systems define this limit much higher.
     ARG_MAX = nil,
 
-    --- @type integer
-    AT_EACCES = nil,
     --- @type integer
     AT_EACCESS = nil,
     --- @type integer
@@ -4962,8 +5445,6 @@ unix = {
     --- @type integer
     MSG_DONTWAIT = nil,
     --- @type integer
-    MSG_MORE = nil,
-    --- @type integer
     MSG_NOSIGNAL = nil,
     --- @type integer
     MSG_OOB = nil,
@@ -5011,8 +5492,6 @@ unix = {
     O_DIRECT = nil,
     --- @type integer useful for stat'ing (hint on UNIX but required on NT)
     O_DIRECTORY = nil,
-    --- @type integer try to make temp more secure (Linux and Windows only)
-    O_TMPFILE = nil,
     --- @type integer fail if it's a symlink (zero on Windows)
     O_NOFOLLOW = nil,
     --- @type integer automatically delete file upon close()
@@ -5023,8 +5502,6 @@ unix = {
     O_PATH = nil,
     --- @type integer it's complicated (zero on non-Linux/Apple)
     O_DSYNC = nil,
-    --- @type integer it's complicated (zero on non-Linux/Apple)
-    O_RSYNC = nil,
     --- @type integer synchronize i/o operations appropriately
     O_SYNC = nil,
     --- @type integer don't record access time (zero on non-Linux)
@@ -5032,8 +5509,6 @@ unix = {
 
     --- @type integer
     O_ACCMODE = nil,
-    --- @type integer
-    O_EXEC = nil,
     --- @type integer
     O_NOCTTY = nil,
     --- @type integer
@@ -5428,38 +5903,24 @@ unix = {
     SIGCHLD = nil,
     --- @type integer Child process resumed from profiling/debugging.
     SIGCONT = nil,
-    --- @type integer
-    SIGEMT = nil,
     --- @type integer Illegal math.
     SIGFPE = nil,
     --- @type integer Terminal hangup or daemon reload; auto-broadcasted to process group.
     SIGHUP = nil,
     --- @type integer Illegal instruction.
     SIGILL = nil,
-    --- @type integer
-    SIGINFO = nil,
     --- @type integer Terminal CTRL-C keystroke.
     SIGINT = nil,
-    --- @type integer
-    SIGIO = nil,
     --- @type integer Terminate with extreme prejudice.
     SIGKILL = nil,
     --- @type integer Write to closed file descriptor.
     SIGPIPE = nil,
     --- @type integer Profiling timer expired.
     SIGPROF = nil,
-    --- @type integer Not implemented in most community editions of system five.
-    SIGPWR = nil,
     --- @type integer Terminal CTRL-\ keystroke.
     SIGQUIT = nil,
-    --- @type integer
-    SIGRTMAX = nil,
-    --- @type integer
-    SIGRTMIN = nil,
     --- @type integer Invalid memory access.
     SIGSEGV = nil,
-    --- @type integer
-    SIGSTKFLT = nil,
     --- @type integer Child process stopped due to profiling/debugging.
     SIGSTOP = nil,
     --- @type integer
@@ -9304,30 +9765,6 @@ kUrlPlus = nil
 
 ---@type integer to transcode ISO-8859-1 input into UTF-8. See `ParseUrl`.
 kUrlLatin1 = nil
-
---- Check if the calling script is being run directly (not require'd).
----
---- This function provides a Python-like `if __name__ == "__main__"` idiom
---- for Lua scripts. It returns true when the script is executed directly
---- from the command line, and false when the script is loaded via require().
----
---- Example usage:
----
----     local M = {}
----
----     function M.main(args)
----       print("Hello, " .. (args[1] or "world"))
----     end
----
----     if is_main() then
----       M.main(arg)
----     end
----
----     return M
----
----@return boolean is_main true if script is run directly, false if require'd
----@nodiscard
-function is_main() end
 
 --[[
 ────────────────────────────────────────────────────────────────────────────────
