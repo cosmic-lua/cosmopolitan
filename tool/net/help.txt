@@ -4827,7 +4827,7 @@ UNIX MODULE
         Write('</ul>\r\n')
 
   unix.fdopendir(fd:int)
-      ├─→ next:function, state:unix.Dir
+      ├─→ state:unix.Dir
       └─→ nil, unix.Errno
 
     Opens directory for listing its contents, via an fd.

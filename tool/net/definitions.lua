@@ -8729,7 +8729,7 @@ function unix.opendir(path) end
 --- The returned `unix.Dir` takes ownership of the file descriptor
 --- and will close it automatically when garbage collected.
 ---
----@return function next, unix.Dir state
+---@return unix.Dir state
 ---@nodiscard
 ---@overload fun(fd: integer): nil, error: unix.Errno
 function unix.fdopendir(fd) end
