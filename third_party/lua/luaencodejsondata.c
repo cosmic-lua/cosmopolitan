@@ -22,12 +22,12 @@
 #include "libc/intrin/likely.h"
 #include "libc/log/log.h"
 #include "libc/log/rop.internal.h"
+#include "libc/mem/alg.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/stack.h"
 #include "libc/stdio/append.h"
-#include "libc/stdio/strlist.internal.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/auxv.h"
 #include "net/http/escape.h"
@@ -130,39 +130,69 @@ OnError:
   return -1;
 }
 
+static int CompareJsonEntries(const void *p1, const void *p2) {
+  const char *a = *(const char **)p1;
+  const char *b = *(const char **)p2;
+  for (; *a == *b; a++, b++) {
+    if (!*a)
+      break;
+  }
+  return (*a & 0xff) - (*b & 0xff);
+}
+
 static int SerializeSorted(lua_State *L, char **buf, struct Serializer *z,
                            int depth, bool multi) {
-  int i;
-  struct StrList sl = {0};
+  // Serialize each `"key":value` entry into one contiguous buffer,
+  // NUL-separated, then sort pointers into it. This produces byte-for-byte
+  // the same output as sorting a StrList of individually-allocated entries,
+  // but replaces the per-key malloc/free churn with a single growable buffer
+  // plus one pointer array.
+  int i, n = 0;
+  char *s;
+  char *ent = 0;
+  char **ptrs = 0;
   lua_pushnil(L);
   while (lua_next(L, -2)) {
     if (lua_type(L, -2) == LUA_TSTRING) {
-      RETURN_ON_ERROR(i = AppendStrList(&sl));
-      RETURN_ON_ERROR(SerializeString(L, sl.p + i, -2, z));
-      RETURN_ON_ERROR(appendw(sl.p + i, z->conf.pretty ? READ16LE(": ") : ':'));
-      RETURN_ON_ERROR(Serialize(L, sl.p + i, -1, z, depth + 1));
+      RETURN_ON_ERROR(SerializeString(L, &ent, -2, z));
+      RETURN_ON_ERROR(appendw(&ent, z->conf.pretty ? READ16LE(": ") : ':'));
+      RETURN_ON_ERROR(Serialize(L, &ent, -1, z, depth + 1));
+      RETURN_ON_ERROR(appendw(&ent, 0));  // NUL separator between entries
+      ++n;
       lua_pop(L, 1);
     } else {
       z->reason = "json objects must only use string keys";
       goto OnError;
     }
   }
-  SortStrList(&sl);
+  if (n) {
+    if (!(ptrs = malloc(n * sizeof(*ptrs)))) {
+      z->reason = "out of memory";
+      goto OnError;
+    }
+    for (i = 0, s = ent; i < n; ++i) {
+      ptrs[i] = s;
+      s += strlen(s) + 1;
+    }
+    qsort(ptrs, n, sizeof(*ptrs), CompareJsonEntries);
+  }
   RETURN_ON_ERROR(SerializeObjectStart(buf, z, depth, multi));
-  for (i = 0; i < sl.i; ++i) {
+  for (i = 0; i < n; ++i) {
     if (i) {
       RETURN_ON_ERROR(appendw(buf, ','));
       if (multi) {
         RETURN_ON_ERROR(SerializeObjectIndent(buf, z, depth + 1));
       }
     }
-    RETURN_ON_ERROR(appends(buf, sl.p[i]));
+    RETURN_ON_ERROR(appends(buf, ptrs[i]));
   }
   RETURN_ON_ERROR(SerializeObjectEnd(buf, z, depth, multi));
-  FreeStrList(&sl);
+  free(ptrs);
+  free(ent);
   return 0;
 OnError:
-  FreeStrList(&sl);
+  free(ptrs);
+  free(ent);
   return -1;
 }
 
