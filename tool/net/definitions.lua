@@ -9173,6 +9173,13 @@ function unix.Memory:fetch_xor(word_index, value) end
 --- since the kernel can only control the ordering of wait / wake calls
 --- across processes.
 ---
+--- Futex words are 32-bit. Although words are stored as 64-bit integers,
+--- wait / wake only ever inspect the low 32 bits, so `expect` must fit in
+--- an int32 and the word you wait on must hold only int32 values. If the
+--- word at `word_index` has any of its high 32 bits set when you call
+--- wait, this method raises an error rather than silently comparing a
+--- truncated value (e.g. a stored 2^32+1 must not masquerade as 1).
+---
 --- The default behavior is to wait until the heat death of the universe
 --- if necessary. You may alternatively specify an absolute deadline. If
 --- it's less than or equal to the value returned by clock_gettime, then

@@ -3547,7 +3547,9 @@ struct Memory {
 // unix.Memory:read([offset:int[, bytes:int]])
 //     └─→ str
 static int LuaUnixMemoryRead(lua_State *L) {
+  char *p;
   size_t i, n;
+  luaL_Buffer buf;
   struct Memory *m;
   m = luaL_checkudata(L, 1, "unix.Memory");
   i = luaL_optinteger(L, 2, 0);
@@ -3563,14 +3565,23 @@ static int LuaUnixMemoryRead(lua_State *L) {
     // unix.Memory:read(offset:int, bytes:int)
     // read binary data with boundary checking
     n = luaL_checkinteger(L, 3);
-    if (i > m->size || n >= m->size || i + n > m->size) {
+    if (i > m->size || n > m->size || i + n > m->size) {
       luaL_error(L, "out of range");
       __builtin_unreachable();
     }
   }
+  // Snapshot the bytes under the lock into a Lua-managed scratch buffer,
+  // then build the string AFTER releasing the lock. lua_pushlstring /
+  // luaL_pushresultsize can raise an out-of-memory error (longjmp); doing
+  // that while holding this process-shared mutex would strand the lock
+  // across every process mapping the region. luaL_buffinitsize (the only
+  // step that can fail here) runs before we take the lock, and its buffer
+  // is GC-owned so nothing leaks even if the final push longjmps.
+  p = luaL_buffinitsize(L, &buf, n);
   pthread_mutex_lock(m->lock);
-  lua_pushlstring(L, m->u.bytes + i, n);
+  memcpy(p, m->u.bytes + i, n);
   pthread_mutex_unlock(m->lock);
+  luaL_pushresultsize(&buf, n);
   return 1;
 }
 
@@ -3705,13 +3716,28 @@ static int LuaUnixMemoryXor(lua_State *L) {
 //     ├─→ nil, unix.Errno(unix.EAGAIN)
 //     └─→ nil, unix.Errno(unix.ETIMEDOUT)
 static int LuaUnixMemoryWait(lua_State *L) {
+  atomic_long *word;
   lua_Integer expect;
   int rc, olderr = errno;
   struct timespec ts, *deadline;
+  word = GetWord(L);
   expect = luaL_checkinteger(L, 3);
   if (!(INT32_MIN <= expect && expect <= INT32_MAX)) {
     luaL_argerror(L, 3, "must be an int32_t");
     __builtin_unreachable();
+  }
+  // Words are stored 64-bit (atomic_long) but the futex only ever inspects
+  // the low 32 bits (it casts to atomic_int). A word whose high 32 bits are
+  // set therefore can't be compared honestly against `expect`: e.g. a stored
+  // value of 2^32+1 would make wait(idx, 1) block as if the word held 1. Rather
+  // than silently misbehave, refuse the wait -- futex words are 32-bit.
+  {
+    long cur = atomic_load_explicit(word, memory_order_relaxed);
+    if ((uint64_t)cur >> 32) {
+      luaL_error(L, "futex word has nonzero high 32 bits (futex words are "
+                    "32-bit; store only int32 values in words you wait on)");
+      __builtin_unreachable();
+    }
   }
   if (lua_isnoneornil(L, 4)) {
     deadline = 0;  // wait forever
@@ -3721,7 +3747,7 @@ static int LuaUnixMemoryWait(lua_State *L) {
     deadline = &ts;
   }
   BEGIN_CANCELATION_POINT;
-  rc = cosmo_futex_wait((atomic_int *)GetWord(L), expect,
+  rc = cosmo_futex_wait((atomic_int *)word, expect,
                          PTHREAD_PROCESS_SHARED, CLOCK_REALTIME, deadline);
   END_CANCELATION_POINT;
   if (rc < 0) errno = -rc, rc = -1;
