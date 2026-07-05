@@ -52,8 +52,9 @@ noise-aware. The loop is documented in cosmic at
 locally built `lua` from THIS checkout into a measurable cosmic binary
 via `bin/make perf-bin`, and the guardrails) in
 `lib/perf/optimize/cosmopolitan.md`. Open, evidence-backed hypotheses
-targeting this repo are tracked there too:
-`grep -l "layer: cosmopolitan" lib/perf/backlog/*.md`.
+targeting this repo are tracked as GitHub issues labeled `perf` in
+whilp/cosmopolitan:
+`gh issue list --repo whilp/cosmopolitan --label perf --state open`.
 
 Short version, run from a cosmic checkout:
 
