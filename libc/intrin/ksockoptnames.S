@@ -41,6 +41,7 @@ kSockOptnames:
 	.e	SO_RCVTIMEO,"RCVTIMEO"			// timeval
 	.e	SO_SNDTIMEO,"SNDTIMEO"			// timeval
 	.e	SO_LINGER,"LINGER"			// linger
+	.e	SO_NOSIGPIPE,"NOSIGPIPE"		// bool32
 	.e	SO_TYPE,"TYPE"				// int
 	.e	SO_SNDBUF,"SNDBUF"			// int
 	.e	SO_RCVBUF,"RCVBUF"			// int

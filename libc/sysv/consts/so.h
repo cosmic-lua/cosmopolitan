@@ -14,6 +14,7 @@ extern const int SO_DONTROUTE;
 extern const int SO_BROADCAST;
 extern const int SO_USELOOPBACK;
 extern const int SO_LINGER;
+extern const int SO_NOSIGPIPE;
 extern const int SO_OOBINLINE;
 extern const int SO_SNDBUF;
 extern const int SO_RCVBUF;
@@ -31,6 +32,7 @@ extern const int SO_SNDLOWAT;
 #define SO_BROADCAST   SO_BROADCAST
 #define SO_USELOOPBACK SO_USELOOPBACK
 #define SO_LINGER      SO_LINGER
+#define SO_NOSIGPIPE   SO_NOSIGPIPE
 #define SO_OOBINLINE   SO_OOBINLINE
 #define SO_SNDBUF      SO_SNDBUF
 #define SO_RCVBUF      SO_RCVBUF

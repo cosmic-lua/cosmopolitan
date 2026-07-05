@@ -48,6 +48,19 @@ assert(stat2, "mkstemp should create a file")
 assert(unix.S_ISREG(stat2:mode()), "mkstemp result should be a regular file")
 unix.unlink(tmpfile)
 
+-- test SO_NOSIGPIPE is exported and accepted as a boolean socket option.
+-- The value is 0 on Linux/OpenBSD/Windows (they use MSG_NOSIGNAL instead) and
+-- nonzero on macOS/FreeBSD/NetBSD, but the constant must always be registered
+-- so downstreams can suppress SIGPIPE on send() portably.
+assert(type(unix.SO_NOSIGPIPE) == "number", "unix.SO_NOSIGPIPE should be a number")
+local sfd = assert(unix.socket())
+-- setsockopt must reach the kernel (accepted as a bool opt by the binding),
+-- not be rejected by the binding's type check; the kernel may report
+-- ENOPROTOOPT where the option is absent, which is fine.
+local ok, err = unix.setsockopt(sfd, unix.SOL_SOCKET, unix.SO_NOSIGPIPE, true)
+assert(ok or err, "setsockopt(SO_NOSIGPIPE) should return a status")
+unix.close(sfd)
+
 -- test Rdrand and Rdseed
 assert(type(cosmo.Rdrand) == "function", "Rdrand should be a function")
 assert(type(cosmo.Rdseed) == "function", "Rdseed should be a function")

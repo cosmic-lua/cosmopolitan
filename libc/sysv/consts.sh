@@ -332,6 +332,7 @@ syscon	so	SO_DONTROUTE				5			5			16			16			16			16			16			16			# bsd consensus
 syscon	so	SO_BROADCAST				6			6			32			32			32			32			32			32			# socket is configured for broadcast messages; bsd consensus
 syscon	so	SO_USELOOPBACK				0			0			64			64			64			64			64			64			# bsd consensus
 syscon	so	SO_LINGER				13			13			4224			4224			128			128			128			128			# takes struct linger; causes close() return value to actually mean something; SO_LINGER_SEC on XNU; bsd consensus
+syscon	so	SO_NOSIGPIPE				0			0			0x1022			0x1022			0x800			0			0x800			0			# don't SIGPIPE on send to a closed peer; macOS 0x1022, freebsd/netbsd 0x800; linux/openbsd/windows use MSG_NOSIGNAL instead
 syscon	so	SO_OOBINLINE				10			10			256			256			256			256			256			256			# bsd consensus
 syscon	so	SO_SNDBUF				7			7			0x1001			0x1001			0x1001			0x1001			0x1001			0x1001			# bsd consensus
 syscon	so	SO_RCVBUF				8			8			0x1002			0x1002			0x1002			0x1002			0x1002			0x1002			# bsd consensus
