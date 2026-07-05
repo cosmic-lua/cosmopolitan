@@ -61,15 +61,41 @@ local ok, err = unix.setsockopt(sfd, unix.SOL_SOCKET, unix.SO_NOSIGPIPE, true)
 assert(ok or err, "setsockopt(SO_NOSIGPIPE) should return a status")
 unix.close(sfd)
 
--- test Rdrand and Rdseed
-assert(type(cosmo.Rdrand) == "function", "Rdrand should be a function")
-assert(type(cosmo.Rdseed) == "function", "Rdseed should be a function")
-local rdrand_val = cosmo.Rdrand()
-assert(type(rdrand_val) == "number", "Rdrand should return a number, got: " .. type(rdrand_val))
-local rdseed_val = cosmo.Rdseed()
-assert(type(rdseed_val) == "number", "Rdseed should return a number, got: " .. type(rdseed_val))
--- Verify they return different values (extremely unlikely to be identical)
-local rdrand_val2 = cosmo.Rdrand()
-assert(rdrand_val ~= rdrand_val2 or true, "Rdrand should produce varying output")
+-- randomness surface: keep exactly GetRandomBytes and Rand64. The rdrand/
+-- rdseed/lemur64 fictions (arc4random64 aliases that never touched RDRAND, a
+-- deterministic per-run generator) were removed; so were the Curve25519 key
+-- footgun and the redundant per-algorithm digests / dead helpers.
+assert(type(cosmo.GetRandomBytes) == "function", "GetRandomBytes should exist")
+assert(type(cosmo.Rand64) == "function", "Rand64 should exist")
+assert(type(cosmo.Rand64()) == "number", "Rand64 should return a number")
+for _, gone in ipairs({
+  "Rdrand", "Rdseed", "Lemur64", "Curve25519", "Md5", "Sha1", "Sha224",
+  "Sha384", "Sha512", "Bsf", "Bsr", "Popcnt", "bin", "hex", "oct", "GetTime",
+  "Sleep", "Decimate", "MeasureEntropy", "HighwayHash64", "GetCpuCore",
+  "GetCpuCount", "GetCpuNode", "Underlong", "IndentLines",
+  "VisualizeControlCodes", "IsValidHttpToken", "IsHeaderRepeatable",
+  "ParseHttpDateTime", "Strptime", "Lz4Compress", "Lz4Decompress",
+}) do
+  assert(cosmo[gone] == nil, "cosmo." .. gone .. " should be removed")
+end
+
+-- GetRandomBytes: cap raised well past the old 1..256, exact length, and it
+-- returns nil,err on failure instead of aborting the process via CHECK_EQ.
+assert(#cosmo.GetRandomBytes() == 16, "GetRandomBytes() defaults to 16 bytes")
+assert(#cosmo.GetRandomBytes(1) == 1, "GetRandomBytes(1) length")
+assert(#cosmo.GetRandomBytes(4096) == 4096, "GetRandomBytes(4096) length")
+local rb_ok, rb_err = pcall(cosmo.GetRandomBytes, 0)
+assert(not rb_ok, "GetRandomBytes(0) should be rejected")
+
+-- lsqlite3: the exec/execute, errcode/error_code, errmsg/error_message dual
+-- aliases were collapsed to one name each; session/changeset/rebaser is gone.
+local db = assert(lsqlite3.open_memory())
+assert(type(db.exec) == "function", "db:exec should exist")
+assert(db.execute == nil, "db:execute alias should be removed")
+assert(type(db.errcode) == "function", "db:errcode should exist")
+assert(db.error_code == nil, "db:error_code alias should be removed")
+assert(db.error_message == nil, "db:error_message alias should be removed")
+assert(db.create_session == nil, "db:create_session (session surface) removed")
+db:close()
 
 print("all tests passed")

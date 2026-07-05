@@ -138,7 +138,12 @@ local C_unix = slurp("third_party/lua/lunix.c")
 local C_path = slurp("tool/net/lpath.c")
 local C_re = slurp("tool/net/lre.c")
 local C_argon2 = slurp("tool/net/largon2.c")
-local C_sqlite = slurp("tool/net/lsqlite3.c")
+-- Session/changeset/rebaser support is compiled out (tool/net/BUILD.mk no
+-- longer defines SQLITE_ENABLE_SESSION), so strip those #ifdef blocks before
+-- scanning: the seslib/reblib/itrlib tables, the dblib session methods, and
+-- the CHANGESET_* constants they guard are not part of the shipped surface.
+local C_sqlite = (slurp("tool/net/lsqlite3.c")
+  :gsub("#ifdef SQLITE_ENABLE_SESSION.-\n#endif\n", ""))
 local C_getopt = slurp("tool/net/lgetopt.c")
 local C_zip = slurp("tool/net/lzip.c")
 local C_repl = slurp("third_party/lua/lreplmod.c")
@@ -169,8 +174,9 @@ for name in C_re:gmatch('{"([%u][%w_]*)"%s*,%s*REG_') do
 end
 
 -- lsqlite3 constants: SC(NAME) rows in sqlite_constants[]. The session rows
--- are guarded by #ifdef SQLITE_ENABLE_SESSION, which this build defines (see
--- tool/net/BUILD.mk), so they're all treated as registered.
+-- (CHANGESET_*/CHANGESETSTART_*/CHANGESETAPPLY_*) are guarded by
+-- #ifdef SQLITE_ENABLE_SESSION, which this build no longer defines and which
+-- was stripped from C_sqlite above, so they're absent here.
 local sqlite_consts = {}
 for name in C_sqlite:gmatch("SC%(%s*([%u][%w_]*)%s*%)") do
   sqlite_consts[name] = true
@@ -232,9 +238,6 @@ local MODULES = {
       { class = "Statement", reg = reg_table(C_sqlite, "vmlib") },
       { class = "VM", reg = reg_table(C_sqlite, "vmlib") },
       { class = "Context", reg = reg_table(C_sqlite, "ctxlib") },
-      { class = "Session", reg = reg_table(C_sqlite, "seslib") },
-      { class = "Rebaser", reg = reg_table(C_sqlite, "reblib") },
-      { class = "Iterator", reg = reg_table(C_sqlite, "itrlib") },
     },
   },
   {
@@ -387,14 +390,15 @@ do
   end
 end
 
--- 6) class-name lint. Modules exposed by the fork's lua binary; classes of
--- redbean-only modules (maxmind, finger) are permitted but not ratcheted.
+-- 6) class-name lint. Every dotted ---@class must belong to a module exposed
+-- by the fork's lua binary. The redbean-only modules (maxmind, finger) were
+-- purged from definitions.lua; there is no whitelist for them, so a stray
+-- `---@class maxmind.Db` reappearing now fails this lint.
 local KNOWN_MODULES = set({
   "cosmo", "unix", "path", "re", "argon2", "lsqlite3", "getopt", "zip", "repl",
 })
-local REDBEAN_MODULES = set({ "maxmind", "finger" })
--- Redbean-only global helper classes that intentionally have no module
--- prefix. `string` extends the builtin string type.
+-- Global helper classes that intentionally have no module prefix.
+-- `string` extends the builtin string type.
 local ALLOW_UNQUALIFIED_CLASSES = set({ "string" })
 
 local class_names = {}  -- bare class name -> declared module (for check 7)
@@ -408,11 +412,10 @@ do
       if mod then
         if KNOWN_MODULES[mod] then
           class_names[name] = mod
-        elseif not REDBEAN_MODULES[mod] then
+        else
           fail("line " .. lineno .. ": ---@class " .. cls ..
             " has unknown module prefix `" .. mod ..
-            "` (known: cosmo unix path re argon2 lsqlite3 getopt zip repl" ..
-            " + redbean-only maxmind finger)")
+            "` (known: cosmo unix path re argon2 lsqlite3 getopt zip repl)")
         end
       elseif not cls:find("%.") then
         if not ALLOW_UNQUALIFIED_CLASSES[cls] then
@@ -443,12 +446,205 @@ do
   end
 end
 
+-- ===== annotation quality ratchet (shrink-only allowlists) =====
+--
+-- The checks above enforce that every binding is annotated at all. These four
+-- raise the floor on annotation QUALITY, so cosmic's generated Teal keeps
+-- improving with zero generator changes as entries are burned down:
+--   Q1: every declared parameter of a module function/method has a matching
+--       `---@param` (an undocumented param gentype-defaults to `any`).
+--   Q2: every function/method has a `---@return` or a `---@overload` (which
+--       carries its own return types), otherwise it renders as returning
+--       nothing -- allowlist the ones that genuinely do (or aren't annotated
+--       yet) in QALLOW_NORETURN.
+--   Q3: no inline `{ field: type }` table types in `---@param`/`---@return`/
+--       `---@overload` -- name the shape as a `---@class` (e.g.
+--       cosmo.EncoderOptions, cosmo.FetchOptions) so it type-checks.
+--   Q4: no bare `any`/`table` parameter or return types.
+-- Each QALLOW_* is a RATCHET seeded at today's counts: an entry may only be
+-- removed (by improving the annotation), never added. A newly-violating
+-- binding, or a stale entry that no longer violates, fails this test.
+
+local QALLOW_PARAM = set({
+  "cosmo.EncodeLua",
+  "lsqlite3.Context:result_error",
+  "lsqlite3.Context:set_aggregate_data",
+  "lsqlite3.Statement:get_name",
+  "lsqlite3.Statement:get_type",
+})
+
+local QALLOW_NORETURN = set({
+  "cosmo.StreamReader:close",
+  "lsqlite3.Context:result",
+  "lsqlite3.Context:result_blob",
+  "lsqlite3.Context:result_double",
+  "lsqlite3.Context:result_error",
+  "lsqlite3.Context:result_int",
+  "lsqlite3.Context:result_null",
+  "lsqlite3.Context:result_number",
+  "lsqlite3.Context:result_text",
+  "lsqlite3.Context:set_aggregate_data",
+  "lsqlite3.Database:busy_handler",
+  "lsqlite3.Database:busy_timeout",
+  "lsqlite3.Database:close_vm",
+  "lsqlite3.Database:commit_hook",
+  "lsqlite3.Database:create_collation",
+  "lsqlite3.Database:deserialize",
+  "lsqlite3.Database:exec",
+  "lsqlite3.Database:interrupt",
+  "lsqlite3.Database:rollback_hook",
+  "lsqlite3.Database:update_hook",
+  "lsqlite3.Database:wal_hook",
+  "lsqlite3.Statement:reset",
+  "repl.start",
+  "unix.Dir:rewind",
+  "unix.Memory:store",
+  "unix.Memory:write",
+  "unix.Sigset:add",
+  "unix.Sigset:clear",
+  "unix.Sigset:fill",
+  "unix.Sigset:remove",
+  "unix.exit",
+  "unix.sched_yield",
+  "unix.sync",
+  "unix.syslog",
+  "unix.verynice",
+  "zip.Appender:close",
+  "zip.Reader:close",
+  "zip.Writer:close",
+})
+
+local QALLOW_INLINE = set({
+  "cosmo.ParseParams",
+  "lsqlite3.VM:nrows",
+  "unix.poll",
+  "unix.siocgifconf",
+  "unix.uname",
+})
+
+local QALLOW_BARE = set({
+  "lsqlite3.Context:get_aggregate_data",
+  "lsqlite3.Context:user_data",
+  "lsqlite3.Database:create_aggregate",
+  "lsqlite3.Database:create_function",
+  "lsqlite3.Statement:bind_names",
+  "lsqlite3.Statement:bind_parameter_count",
+  "lsqlite3.Statement:data",
+  "lsqlite3.Statement:get_name",
+  "lsqlite3.Statement:get_named_types",
+  "lsqlite3.Statement:get_named_values",
+  "lsqlite3.Statement:get_type",
+  "lsqlite3.Statement:get_types",
+  "lsqlite3.Statement:get_unames",
+  "lsqlite3.Statement:get_utypes",
+  "lsqlite3.Statement:get_uvalues",
+  "lsqlite3.Statement:get_value",
+  "lsqlite3.Statement:get_values",
+  "lsqlite3.Statement:idata",
+  "lsqlite3.Statement:itypes",
+  "lsqlite3.Statement:last_insert_rowid",
+  "lsqlite3.Statement:type",
+  "lsqlite3.config",
+  "unix.fcntl",
+})
+
+-- Collect module function/method declarations paired with the contiguous run
+-- of `---` annotation lines that immediately precedes each.
+local qdecls = {}
+do
+  local block = {}
+  for line in (D .. "\n"):gmatch("([^\n]*)\n") do
+    if line:match("^%s*%-%-%-") then
+      block[#block + 1] = line
+    else
+      local mod, cls, meth = line:match("^function ([%w_]+)%.([%w_]+):([%w_]+)%s*%(")
+      local params
+      if mod then
+        params = line:match("^function [%w_]+%.[%w_]+:[%w_]+%s*%((.-)%)")
+      else
+        local m2, nm = line:match("^function ([%w_]+)%.([%w_]+)%s*%(")
+        if m2 then
+          mod, meth, cls = m2, nm, nil
+          params = line:match("^function [%w_]+%.[%w_]+%s*%((.-)%)")
+        end
+      end
+      if mod and KNOWN_MODULES[mod] then
+        qdecls[#qdecls + 1] = {
+          disp = cls and (mod .. "." .. cls .. ":" .. meth) or (mod .. "." .. meth),
+          params = params or "",
+          block = table.concat(block, "\n"),
+          blocklines = block,
+        }
+      end
+      block = {}
+    end
+  end
+end
+
+-- A type region is a "bare" any/table if it starts with the bare word `any`
+-- or `table` (but not the parameterized `table<...>`/`table[...]`).
+local function qbare(t)
+  t = t:gsub("^%s+", "")
+  if t:match("^any%f[%W]") then return true end
+  if t:match("^table%f[%W]") and not t:match("^table[<%[]") then return true end
+  return false
+end
+
+local qvio = { param = {}, noreturn = {}, inline = {}, bare = {} }
+for _, d in ipairs(qdecls) do
+  for p in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
+    p = p:gsub("%s", "")
+    if p ~= "" and p ~= "self" and p ~= "..." then
+      if not d.block:find("%-%-%-@param%s+" .. p .. "%f[%W]") then
+        qvio.param[d.disp] = true
+      end
+    end
+  end
+  if not (d.block:find("%-%-%-@return") or d.block:find("%-%-%-@overload")) then
+    qvio.noreturn[d.disp] = true
+  end
+  for _, l in ipairs(d.blocklines) do
+    if l:match("%-%-%-@param") or l:match("%-%-%-@return") or
+       l:match("%-%-%-@overload") then
+      local br = l:match("(%b{})")
+      if br and br:find(":") then qvio.inline[d.disp] = true end
+    end
+    local pt = l:match("%-%-%-@param%s+[%w_]+%??%s+(.+)")
+    if pt and qbare(pt) then qvio.bare[d.disp] = true end
+    local rt = l:match("%-%-%-@return%s+(.+)")
+    if rt and qbare(rt) then qvio.bare[d.disp] = true end
+  end
+end
+
+local function ratchet(viol, allow, label)
+  for _, disp in ipairs(sorted_keys(viol)) do
+    if not allow[disp] then
+      fail("annotation quality [" .. label .. "]: " .. disp ..
+        " (fix the annotation, or seed the QALLOW list)")
+    end
+  end
+  for _, disp in ipairs(sorted_keys(allow)) do
+    if not viol[disp] then
+      fail("stale quality allowlist entry [" .. label ..
+        "] (now clean, remove it): " .. disp)
+    end
+  end
+end
+ratchet(qvio.param, QALLOW_PARAM, "declared param without @param")
+ratchet(qvio.noreturn, QALLOW_NORETURN, "no @return/@overload")
+ratchet(qvio.inline, QALLOW_INLINE, "inline { } table type")
+ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
+
 assert(#failures == 0,
   "definitions.lua coverage failures (annotate the binding or fix the " ..
   "annotation; only shrink the allowlist):\n  " ..
   table.concat(failures, "\n  "))
 
+local qallowed = count(QALLOW_PARAM) + count(QALLOW_NORETURN) +
+  count(QALLOW_INLINE) + count(QALLOW_BARE)
 print("definitions coverage: " .. nfns .. " functions, " .. nmethods ..
   " methods, " .. nconsts .. " constants checked across " ..
   #MODULES .. " modules; " .. count(ALLOW) .. " allowlisted")
+print("annotation quality: " .. #qdecls .. " declarations checked; " ..
+  qallowed .. " quality-allowlisted (shrink-only)")
 print("test_definitions_coverage: PASS")

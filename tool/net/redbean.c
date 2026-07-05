@@ -131,7 +131,6 @@
 #include "third_party/musl/netdb.h"
 #include "third_party/zlib/zlib.h"
 #include "tool/build/lib/case.h"
-#include "tool/net/lfinger.h"
 #include "tool/net/lfuncs.h"
 #include "tool/net/ljson.h"
 #include "tool/net/lpath.h"
@@ -5032,15 +5031,10 @@ static const char *const kDontAutoComplete[] = {
 
 static const luaL_Reg kLuaFuncs[] = {
     {"Barf", LuaBarf},                                          //
-    {"Benchmark", LuaBenchmark},                                //
-    {"Bsf", LuaBsf},                                            //
-    {"Bsr", LuaBsr},                                            //
     {"CategorizeIp", LuaCategorizeIp},                          //
     {"Compress", LuaCompress},                                  //
     {"Crc32", LuaCrc32},                                        //
     {"Crc32c", LuaCrc32c},                                      //
-    {"Curve25519", LuaCurve25519},                              //
-    {"Decimate", LuaDecimate},                                  //
     {"DecodeBase32", LuaDecodeBase32},                          //
     {"DecodeBase64", LuaDecodeBase64},                          //
     {"DecodeHex", LuaDecodeHex},                                //
@@ -5075,9 +5069,6 @@ static const luaL_Reg kLuaFuncs[] = {
     {"GetClientAddr", LuaGetClientAddr},                        //
     {"GetClientFd", LuaGetClientFd},                            //
     {"GetCookie", LuaGetCookie},                                //
-    {"GetCpuCore", LuaGetCpuCore},                              //
-    {"GetCpuCount", LuaGetCpuCount},                            //
-    {"GetCpuNode", LuaGetCpuNode},                              //
     {"GetCryptoHash", LuaGetCryptoHash},                        //
     {"GetDate", LuaGetDate},                                    //
     {"GetEffectivePath", LuaGetEffectivePath},                  //
@@ -5089,7 +5080,6 @@ static const luaL_Reg kLuaFuncs[] = {
     {"GetHostOs", LuaGetHostOs},                                //
     {"GetHttpReason", LuaGetHttpReason},                        //
     {"GetHttpVersion", LuaGetHttpVersion},                      //
-    {"GetLogLevel", LuaGetLogLevel},                            //
     {"GetMethod", LuaGetMethod},                                //
     {"GetMonospaceWidth", LuaGetMonospaceWidth},                //
     {"GetParam", LuaGetParam},                                  //
@@ -5104,15 +5094,12 @@ static const luaL_Reg kLuaFuncs[] = {
     {"GetScheme", LuaGetScheme},                                //
     {"GetServerAddr", LuaGetServerAddr},                        //
     {"GetStatus", LuaGetStatus},                                //
-    {"GetTime", LuaGetTime},                                    //
     {"GetUrl", LuaGetUrl},                                      //
     {"GetUser", LuaGetUser},                                    //
     {"GetZipPaths", LuaGetZipPaths},                            //
     {"HasControlCodes", LuaHasControlCodes},                    //
     {"HasParam", LuaHasParam},                                  //
     {"HidePath", LuaHidePath},                                  //
-    {"HighwayHash64", LuaHighwayHash64},                        //
-    {"IndentLines", LuaIndentLines},                            //
     {"Inflate", LuaInflate},                                    //
     {"IsAcceptableHost", LuaIsAcceptableHost},                  //
     {"IsAcceptablePath", LuaIsAcceptablePath},                  //
@@ -5120,26 +5107,19 @@ static const luaL_Reg kLuaFuncs[] = {
     {"IsAssetCompressed", LuaIsAssetCompressed},                //
     {"IsClientUsingSsl", LuaIsClientUsingSsl},                  //
     {"IsDaemon", LuaIsDaemon},                                  //
-    {"IsHeaderRepeatable", LuaIsHeaderRepeatable},              //
     {"IsHiddenPath", LuaIsHiddenPath},                          //
     {"IsLoopbackIp", LuaIsLoopbackIp},                          //
     {"IsPrivateIp", LuaIsPrivateIp},                            //
     {"IsPublicIp", LuaIsPublicIp},                              //
     {"IsReasonablePath", LuaIsReasonablePath},                  //
     {"IsTrustedIp", LuaIsTrusted},                              // undocumented
-    {"IsValidHttpToken", LuaIsValidHttpToken},                  //
     {"LaunchBrowser", LuaLaunchBrowser},                        //
-    {"Lemur64", LuaLemur64},                                    //
     {"LoadAsset", LuaLoadAsset},                                //
     {"Log", LuaLog},                                            //
-    {"Md5", LuaMd5},                                            //
-    {"MeasureEntropy", LuaMeasureEntropy},                      //
     {"ParseHost", LuaParseHost},                                //
-    {"ParseHttpDateTime", LuaParseHttpDateTime},                //
     {"ParseIp", LuaParseIp},                                    //
     {"ParseParams", LuaParseParams},                            //
     {"ParseUrl", LuaParseUrl},                                  //
-    {"Popcnt", LuaPopcnt},                                      //
     {"ProgramAddr", LuaProgramAddr},                            //
     {"ProgramBrand", LuaProgramBrand},                          //
     {"ProgramCache", LuaProgramCache},                          //
@@ -5161,9 +5141,6 @@ static const luaL_Reg kLuaFuncs[] = {
     {"ProgramUid", LuaProgramUid},                              //
     {"ProgramUniprocess", LuaProgramUniprocess},                //
     {"Rand64", LuaRand64},                                      //
-    {"Rdrand", LuaRdrand},                                      //
-    {"Rdseed", LuaRdseed},                                      //
-    {"Rdtsc", LuaRdtsc},                                        //
     {"ResolveIp", LuaResolveIp},                                //
     {"Route", LuaRoute},                                        //
     {"RouteHost", LuaRouteHost},                                //
@@ -5176,25 +5153,14 @@ static const luaL_Reg kLuaFuncs[] = {
     {"ServeStatusz", LuaServeStatusz},                          //
     {"SetCookie", LuaSetCookie},                                //
     {"SetHeader", LuaSetHeader},                                //
-    {"SetLogLevel", LuaSetLogLevel},                            //
     {"SetStatus", LuaSetStatus},                                //
-    {"Sha1", LuaSha1},                                          //
-    {"Sha224", LuaSha224},                                      //
     {"Sha256", LuaSha256},                                      //
-    {"Sha384", LuaSha384},                                      //
-    {"Sha512", LuaSha512},                                      //
-    {"Sleep", LuaSleep},                                        //
     {"Slurp", LuaSlurp},                                        //
     {"StoreAsset", LuaStoreAsset},                              //
     {"Uncompress", LuaUncompress},                              //
-    {"Underlong", LuaUnderlong},                                //
     {"UuidV4", LuaUuidV4},                                      //
     {"UuidV7", LuaUuidV7},                                      //
-    {"VisualizeControlCodes", LuaVisualizeControlCodes},        //
     {"Write", LuaWrite},                                        //
-    {"bin", LuaBin},                                            //
-    {"hex", LuaHex},                                            //
-    {"oct", LuaOct},                                            //
 #ifndef UNSECURE
     {"AcquireToken", LuaAcquireToken},                          //
     {"Blackhole", LuaBlackhole},                                // undocumented
@@ -5223,8 +5189,6 @@ static const luaL_Reg kLuaFuncs[] = {
 static const luaL_Reg kLuaLibs[] = {
     {"argon2", luaopen_argon2},      //
     {"lsqlite3", luaopen_lsqlite3},  //
-    {"maxmind", LuaMaxmind},         //
-    {"finger", LuaFinger},           //
     {"path", LuaPath},               //
     {"re", LuaRe},                   //
     {"unix", LuaUnix},               //

@@ -70,88 +70,9 @@
 #include "third_party/mbedtls/md.h"
 #include "third_party/mbedtls/md5.h"
 #include "third_party/mbedtls/platform.h"
-#include "third_party/mbedtls/sha1.h"
 #include "third_party/mbedtls/sha256.h"
-#include "third_party/mbedtls/sha512.h"
 #include "third_party/musl/netdb.h"
 #include "third_party/zlib/zlib.h"
-#include "third_party/lz4cli/lz4.h"
-
-static int Rdpid(void) {
-#ifdef __x86_64__
-  return rdpid();
-#else
-  return -1;
-#endif
-}
-
-int LuaHex(lua_State *L) {
-  char b[19];
-  uint64_t x;
-  x = luaL_checkinteger(L, 1);
-  FormatHex64(b, x, true);
-  lua_pushstring(L, b);
-  return 1;
-}
-
-int LuaOct(lua_State *L) {
-  char b[24];
-  uint64_t x;
-  x = luaL_checkinteger(L, 1);
-  FormatOctal64(b, x, true);
-  lua_pushstring(L, b);
-  return 1;
-}
-
-int LuaBin(lua_State *L) {
-  char b[67];
-  uint64_t x;
-  x = luaL_checkinteger(L, 1);
-  FormatBinary64(b, x, 2);
-  lua_pushstring(L, b);
-  return 1;
-}
-
-int LuaGetTime(lua_State *L) {
-  struct timespec now = timespec_real();
-  lua_pushnumber(L, now.tv_sec + now.tv_nsec * 1e-9);
-  return 1;
-}
-
-int LuaSleep(lua_State *L) {
-  usleep(1e6 * luaL_checknumber(L, 1));
-  return 0;
-}
-
-int LuaRdtsc(lua_State *L) {
-  lua_pushinteger(L, rdtsc());
-  return 1;
-}
-
-int LuaGetCpuNode(lua_State *L) {
-  lua_pushinteger(L, TSC_AUX_NODE(Rdpid()));
-  return 1;
-}
-
-int LuaGetCpuCore(lua_State *L) {
-  lua_pushinteger(L, TSC_AUX_CORE(Rdpid()));
-  return 1;
-}
-
-int LuaGetCpuCount(lua_State *L) {
-  lua_pushinteger(L, cosmo_cpu_count());
-  return 1;
-}
-
-int LuaGetLogLevel(lua_State *L) {
-  lua_pushinteger(L, __log_level);
-  return 1;
-}
-
-int LuaSetLogLevel(lua_State *L) {
-  __log_level = luaL_checkinteger(L, 1);
-  return 0;
-}
 
 static int LuaRand(lua_State *L, uint64_t impl(void)) {
   lua_pushinteger(L, impl());
@@ -164,44 +85,8 @@ static uint64_t arc4random64(void) {
   return val;
 }
 
-int LuaLemur64(lua_State *L) {
-  return LuaRand(L, lemur64);
-}
-
 int LuaRand64(lua_State *L) {
   return LuaRand(L, _rand64);
-}
-
-int LuaRdrand(lua_State *L) {
-  return LuaRand(L, arc4random64);
-}
-
-int LuaRdseed(lua_State *L) {
-  return LuaRand(L, arc4random64);
-}
-
-int LuaDecimate(lua_State *L) {
-  char *p;
-  size_t n, m;
-  const char *s;
-  luaL_Buffer buf;
-  s = luaL_checklstring(L, 1, &n);
-  m = ROUNDUP(n, 16);
-  p = luaL_buffinitsize(L, &buf, m);
-  memcpy(p, s, n);
-  bzero(p + n, m - n);
-  cDecimate2xUint8x8(m, (unsigned char *)p,
-                     (signed char[8]){-1, -3, 3, 17, 17, 3, -3, -1});
-  luaL_pushresultsize(&buf, (n + 1) >> 1);
-  return 1;
-}
-
-int LuaMeasureEntropy(lua_State *L) {
-  size_t n;
-  const char *s;
-  s = luaL_checklstring(L, 1, &n);
-  lua_pushnumber(L, cosmo_entropy(s, n));
-  return 1;
 }
 
 int LuaGetHostOs(lua_State *L) {
@@ -291,14 +176,6 @@ int LuaFormatHttpDateTime(lua_State *L) {
   return 1;
 }
 
-int LuaParseHttpDateTime(lua_State *L) {
-  size_t n;
-  const char *s;
-  s = luaL_checklstring(L, 1, &n);
-  lua_pushinteger(L, ParseHttpDateTime(s, n));
-  return 1;
-}
-
 int LuaStrftime(lua_State *L) {
   char buf[256];
   size_t len;
@@ -319,44 +196,6 @@ int LuaStrftime(lua_State *L) {
     lua_pushnil(L);
   }
   return 1;
-}
-
-int LuaStrptime(lua_State *L) {
-  struct tm tm;
-  const char *s, *fmt, *rest;
-  s = luaL_checkstring(L, 1);
-  fmt = luaL_checkstring(L, 2);
-  bzero(&tm, sizeof(tm));
-  tm.tm_mday = 1;  // default to 1st of month
-  rest = strptime(s, fmt, &tm);
-  if (rest) {
-    lua_newtable(L);
-    lua_pushinteger(L, tm.tm_sec);
-    lua_setfield(L, -2, "sec");
-    lua_pushinteger(L, tm.tm_min);
-    lua_setfield(L, -2, "min");
-    lua_pushinteger(L, tm.tm_hour);
-    lua_setfield(L, -2, "hour");
-    lua_pushinteger(L, tm.tm_mday);
-    lua_setfield(L, -2, "day");
-    lua_pushinteger(L, tm.tm_mon + 1);
-    lua_setfield(L, -2, "month");
-    lua_pushinteger(L, tm.tm_year + 1900);
-    lua_setfield(L, -2, "year");
-    lua_pushinteger(L, tm.tm_wday);
-    lua_setfield(L, -2, "wday");
-    lua_pushinteger(L, tm.tm_yday);
-    lua_setfield(L, -2, "yday");
-    lua_pushinteger(L, tm.tm_isdst);
-    lua_setfield(L, -2, "isdst");
-    lua_pushstring(L, rest);
-    lua_setfield(L, -2, "rest");
-    return 1;
-  } else {
-    lua_pushnil(L);
-    lua_pushstring(L, "parse failed");
-    return 2;
-  }
 }
 
 int LuaParseParams(lua_State *L) {
@@ -404,46 +243,6 @@ int LuaParseHost(lua_State *L) {
   }
 }
 
-int LuaPopcnt(lua_State *L) {
-  lua_pushinteger(L, popcnt(luaL_checkinteger(L, 1)));
-  return 1;
-}
-
-int LuaBsr(lua_State *L) {
-  long x;
-  if ((x = luaL_checkinteger(L, 1))) {
-    lua_pushinteger(L, bsrl(x));
-    return 1;
-  } else {
-    luaL_argerror(L, 1, "zero");
-    __builtin_unreachable();
-  }
-}
-
-int LuaBsf(lua_State *L) {
-  long x;
-  if ((x = luaL_checkinteger(L, 1))) {
-    lua_pushinteger(L, bsfl(x));
-    return 1;
-  } else {
-    luaL_argerror(L, 1, "zero");
-    __builtin_unreachable();
-  }
-}
-
-int LuaHighwayHash64(lua_State *L) {
-  size_t n;
-  uint64_t k[4];
-  const char *p;
-  p = luaL_checklstring(L, 1, &n);
-  k[0] = luaL_optinteger(L, 2, 0);
-  k[1] = luaL_optinteger(L, 3, 0);
-  k[2] = luaL_optinteger(L, 4, 0);
-  k[3] = luaL_optinteger(L, 5, 0);
-  lua_pushinteger(L, HighwayHash64(p, n, k));
-  return 1;
-}
-
 static int LuaHash(lua_State *L, uint32_t H(uint32_t, const void *, size_t)) {
   long i;
   size_t n;
@@ -460,25 +259,6 @@ int LuaCrc32(lua_State *L) {
 
 int LuaCrc32c(lua_State *L) {
   return LuaHash(L, crc32c);
-}
-
-int LuaIndentLines(lua_State *L) {
-  size_t n, j;
-  const void *p;
-  if (!lua_isnoneornil(L, 1)) {
-    p = luaL_checklstring(L, 1, &n);
-    j = luaL_optinteger(L, 2, 1);
-    if (!(0 <= j && j <= 65535)) {
-      luaL_argerror(L, 2, "not in range 0..65535");
-      __builtin_unreachable();
-    }
-    char *q = IndentLines(p, n, &n, j);
-    lua_pushlstring(L, q, n);
-    free(q);
-    return 1;
-  } else {
-    return lua_gettop(L);
-  }
 }
 
 int LuaGetMonospaceWidth(lua_State *L) {
@@ -739,15 +519,36 @@ int LuaDecodeHex(lua_State *L) {
   return 1;
 }
 
+// GetRandomBytes([n:int])
+//     ├─→ bytes:str
+//     └─→ nil, error:str
 int LuaGetRandomBytes(lua_State *L) {
-  size_t n;
+  ssize_t rc;
+  size_t n, got;
+  char *p;
+  int olderr;
   luaL_Buffer buf;
   n = luaL_optinteger(L, 1, 16);
-  if (!(n > 0 && n <= 256)) {
-    luaL_argerror(L, 1, "not in range 1..256");
+  if (!(n > 0 && n <= 4194304)) {
+    luaL_argerror(L, 1, "not in range 1..4194304");
     __builtin_unreachable();
   }
-  CHECK_EQ(n, getrandom(luaL_buffinitsize(L, &buf, n), n, 0));
+  olderr = errno;
+  p = luaL_buffinitsize(L, &buf, n);
+  for (got = 0; got < n; got += rc) {
+    rc = getrandom(p + got, n - got, 0);
+    if (rc == -1) {
+      if (errno == EINTR) {
+        errno = olderr;
+        rc = 0;
+        continue;
+      }
+      lua_pushnil(L);
+      lua_pushfstring(L, "getrandom() failed: %s", strerror(errno));
+      errno = olderr;
+      return 2;
+    }
+  }
   luaL_pushresultsize(&buf, n);
   return 1;
 }
@@ -785,10 +586,6 @@ static dontinline int LuaIsValid(lua_State *L, bool32 V(const char *, size_t)) {
   data = luaL_checklstring(L, 1, &size);
   lua_pushboolean(L, V(data, size));
   return 1;
-}
-
-int LuaIsValidHttpToken(lua_State *L) {
-  return LuaIsValid(L, IsValidHttpToken);
 }
 
 int LuaIsAcceptablePath(lua_State *L) {
@@ -830,10 +627,6 @@ static dontinline int LuaCoderImpl(lua_State *L,
 static dontinline int LuaCoder(lua_State *L,
                                char *C(const char *, size_t, size_t *)) {
   return LuaCoderImpl(L, C);
-}
-
-int LuaUnderlong(lua_State *L) {
-  return LuaCoder(L, Underlong);
 }
 
 int LuaEncodeBase64(lua_State *L) {
@@ -901,10 +694,6 @@ int LuaEscapeLiteral(lua_State *L) {
     luaL_error(L, "out of memory");
     __builtin_unreachable();
   }
-}
-
-int LuaVisualizeControlCodes(lua_State *L) {
-  return LuaCoder(L, VisualizeControlCodes);
 }
 
 int LuaUuidV4(lua_State *L) {
@@ -1030,43 +819,8 @@ static dontinline int LuaHasher(lua_State *L, size_t k,
   return LuaHasherImpl(L, k, H);
 }
 
-int LuaMd5(lua_State *L) {
-  return LuaHasher(L, 16, mbedtls_md5_ret);
-}
-
-int LuaSha1(lua_State *L) {
-  return LuaHasher(L, 20, mbedtls_sha1_ret);
-}
-
-int LuaSha224(lua_State *L) {
-  return LuaHasher(L, 28, mbedtls_sha256_ret_224);
-}
-
 int LuaSha256(lua_State *L) {
   return LuaHasher(L, 32, mbedtls_sha256_ret_256);
-}
-
-int LuaSha384(lua_State *L) {
-  return LuaHasher(L, 48, mbedtls_sha512_ret_384);
-}
-
-int LuaSha512(lua_State *L) {
-  return LuaHasher(L, 64, mbedtls_sha512_ret_512);
-}
-
-int LuaIsHeaderRepeatable(lua_State *L) {
-  int h;
-  bool r;
-  size_t n;
-  const char *s;
-  s = luaL_checklstring(L, 1, &n);
-  if ((h = GetHttpHeader(s, n)) != -1) {
-    r = kHttpRepeatable[h];
-  } else {
-    r = false;
-  }
-  lua_pushboolean(L, r);
-  return 1;
 }
 
 void LuaPushUrlView(lua_State *L, struct UrlView *v) {
@@ -1075,81 +829,6 @@ void LuaPushUrlView(lua_State *L, struct UrlView *v) {
   } else {
     lua_pushnil(L);
   }
-}
-
-static int64_t GetInterrupts(void) {
-  struct rusage ru;
-  if (!getrusage(RUSAGE_SELF, &ru)) {
-    return ru.ru_nivcsw;
-  } else {
-    return 0;
-  }
-}
-
-static int DoNothing(lua_State *L) {
-  return 0;
-}
-
-int LuaBenchmark(lua_State *L) {
-  uint64_t t1, t2;
-  int64_t interrupts;
-  double avgticks, overhead;
-  int core, iter, count, attempts, maxattempts;
-  luaL_checktype(L, 1, LUA_TFUNCTION);
-  count = luaL_optinteger(L, 2, 100);
-  maxattempts = luaL_optinteger(L, 3, 10);
-  lua_gc(L, LUA_GCSTOP);
-
-  for (attempts = 0;;) {
-    lua_gc(L, LUA_GCCOLLECT);
-    pthread_yield();
-    core = TSC_AUX_CORE(Rdpid());
-    interrupts = GetInterrupts();
-    for (avgticks = iter = 1; iter < count; ++iter) {
-      lua_pushcfunction(L, DoNothing);
-      t1 = __startbench_m();
-      lua_call(L, 0, 0);
-      t2 = __endbench_m();
-      avgticks += 1. / iter * ((int)(t2 - t1) - avgticks);
-    }
-    ++attempts;
-    if (TSC_AUX_CORE(Rdpid()) == core && GetInterrupts() == interrupts) {
-      break;
-    } else if (attempts >= maxattempts) {
-      luaL_error(L, "system is under too much load to run benchmark");
-      __builtin_unreachable();
-    }
-  }
-  overhead = avgticks;
-
-  for (attempts = 0;;) {
-    lua_gc(L, LUA_GCCOLLECT);
-    pthread_yield();
-    core = TSC_AUX_CORE(Rdpid());
-    interrupts = GetInterrupts();
-    for (avgticks = iter = 1; iter < count; ++iter) {
-      lua_pushvalue(L, 1);
-      t1 = __startbench_m();
-      lua_call(L, 0, 0);
-      t2 = __endbench_m();
-      avgticks += 1. / iter * ((int)(t2 - t1) - avgticks);
-    }
-    ++attempts;
-    if (TSC_AUX_CORE(Rdpid()) == core && GetInterrupts() == interrupts) {
-      break;
-    } else if (attempts >= maxattempts) {
-      luaL_error(L, "system is under too much load to run benchmark");
-      __builtin_unreachable();
-    }
-  }
-  avgticks = MAX(avgticks - overhead, 0);
-
-  lua_gc(L, LUA_GCRESTART);
-  lua_pushinteger(L, avgticks / 3);
-  lua_pushinteger(L, round(avgticks));
-  lua_pushinteger(L, round(overhead));
-  lua_pushinteger(L, attempts);
-  return 4;
 }
 
 static void LuaCompress2(lua_State *L, void *dest, size_t *destLen,
@@ -1317,109 +996,3 @@ int LuaInflate(lua_State *L) {
   return 1;
 }
 
-// Lz4Compress(data:str[, level:int])
-//     ├─→ compressed:str
-//     └─→ nil, error:str
-int LuaLz4Compress(lua_State *L) {
-  size_t srcsize;
-  int dstcap, compsize, accel;
-  const char *src;
-  char *dst;
-  luaL_Buffer buf;
-  src = luaL_checklstring(L, 1, &srcsize);
-  accel = luaL_optinteger(L, 2, 1);  // 1 = default, higher = faster but less compression
-  if (srcsize > LZ4_MAX_INPUT_SIZE) {
-    lua_pushnil(L);
-    lua_pushstring(L, "input too large for LZ4");
-    return 2;
-  }
-  dstcap = LZ4_compressBound(srcsize);
-  dst = luaL_buffinitsize(L, &buf, dstcap);
-  compsize = LZ4_compress_fast(src, dst, srcsize, dstcap, accel);
-  if (compsize <= 0) {
-    lua_pushnil(L);
-    lua_pushstring(L, "LZ4 compression failed");
-    return 2;
-  }
-  luaL_pushresultsize(&buf, compsize);
-  return 1;
-}
-
-// Lz4Decompress(data:str, maxoutsize:int)
-//     ├─→ decompressed:str
-//     └─→ nil, error:str
-int LuaLz4Decompress(lua_State *L) {
-  size_t srcsize;
-  int dstcap, decompsize;
-  const char *src;
-  char *dst;
-  luaL_Buffer buf;
-  src = luaL_checklstring(L, 1, &srcsize);
-  dstcap = luaL_checkinteger(L, 2);
-  if (dstcap <= 0) {
-    lua_pushnil(L);
-    lua_pushstring(L, "maxoutsize must be positive");
-    return 2;
-  }
-  dst = luaL_buffinitsize(L, &buf, dstcap);
-  decompsize = LZ4_decompress_safe(src, dst, srcsize, dstcap);
-  if (decompsize < 0) {
-    lua_pushnil(L);
-    lua_pushstring(L, "LZ4 decompression failed");
-    return 2;
-  }
-  luaL_pushresultsize(&buf, decompsize);
-  return 1;
-}
-
-static void GetCurve25519Arg(lua_State *L, int arg, uint8_t buf[static 32]) {
-  size_t len;
-  const char *val;
-  val = luaL_checklstring(L, arg, &len);
-  bzero(buf, 32);
-  if (len) {
-    if (len > 32) {
-      len = 32;
-    }
-    memcpy(buf, val, len);
-  }
-}
-
-/*
- * Computes elliptic curve no. 25519
- *
- * Let's say Alice and Bob want to have a private conversation. They
- * would start by randomly generating secret keys (better than this)
- *
- *     >: alice_secret = "\1"
- *     >: bob_secret = "\2"
- *
- * They would multiply them against the magic basepoint "\9" to derive
- * public keys they can share with each other:
- *
- *     >: alice_public = Curve25519(alice_secret, "\9")
- *     >: bob_public = Curve25519(bob_secret, "\9")
- *
- * When Alice gets Bob's public key, she multiplies it against her own
- * private key, to derive a "shared private key" that can be used for a
- * symmetric cipher like chacha20, which is what would actually encrypt
- * the conversation text.
- *
- *     >: Curve25519(alice_secret, bob_public)
- *     "\x93\xfe\xa2\xa7\xc1\xae\xb6,\xfddR\xff...
- *
- * Notice how Bob derives the exact same symmetric cipher key when he
- * multiplies the private key for his exchange against Alice's public.
- *
- *     >: Curve25519(bob_secret, alice_public)
- *     "\x93\xfe\xa2\xa7\xc1\xae\xb6,\xfddR\xff...
- *
- */
-int LuaCurve25519(lua_State *L) {
-  uint8_t mypublic[32], secret[32], basepoint[32];
-  GetCurve25519Arg(L, 1, secret);
-  GetCurve25519Arg(L, 2, basepoint);
-  curve25519(mypublic, secret, basepoint);
-  lua_pushlstring(L, (const char *)mypublic, 32);
-  return 1;
-}

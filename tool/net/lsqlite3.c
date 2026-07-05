@@ -2625,9 +2625,7 @@ static const luaL_Reg dblib[] = {
     {"changes",             db_changes              },
     {"total_changes",       db_total_changes        },
     {"errcode",             db_errcode              },
-    {"error_code",          db_errcode              },
     {"errmsg",              db_errmsg               },
-    {"error_message",       db_errmsg               },
     {"interrupt",           db_interrupt            },
     {"db_filename",         db_db_filename          },
     {"wal_checkpoint",      db_wal_checkpoint       },
@@ -2649,7 +2647,6 @@ static const luaL_Reg dblib[] = {
     {"nrows",               db_nrows                },
 
     {"exec",                db_exec                 },
-    {"execute",             db_exec                 },
     {"close",               db_close                },
     {"close_vm",            db_close_vm             },
 
