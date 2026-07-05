@@ -240,7 +240,10 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
       case '[':  // Array
         if (context & (COLON | COMMA | KEY))
           goto OnColonCommaKey;
-        lua_newtable(L);  // +1
+        // Pre-size the array part so small/medium arrays skip the
+        // rehash-on-grow cycles lua_rawseti would otherwise pay; 8 covers
+        // the common short array without meaningful waste on tiny ones.
+        lua_createtable(L, 8, 0);  // +1
         for (context = ARRAY, i = 0;;) {
           r = Parse(L, p, e, context, depth - 1, bsp);  // +2
           if (UNLIKELY(r.rc == -1)) {
@@ -278,7 +281,9 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
       case '{':  // Object
         if (context & (COLON | COMMA | KEY))
           goto OnColonCommaKey;
-        lua_newtable(L);  // +1
+        // Pre-size the hash part so objects up to 8 keys populate without
+        // a hash-part rehash; larger objects still amortize from there.
+        lua_createtable(L, 0, 8);  // +1
         context = KEY | OBJECT;
         for (;;) {
           r = Parse(L, p, e, context, depth - 1, bsp);  // +2
