@@ -6000,6 +6000,8 @@ unix = {
     --- @type integer
     SO_LINGER = nil,
     --- @type integer
+    SO_NOSIGPIPE = nil,
+    --- @type integer
     SO_OOBINLINE = nil,
     --- @type integer
     SO_RCVBUF = nil,

@@ -1803,6 +1803,7 @@ static bool IsSockoptBool(int l, int x) {
            x == SO_BROADCAST ||   //
            x == SO_REUSEADDR ||   //
            x == SO_REUSEPORT ||   //
+           x == SO_NOSIGPIPE ||   //
            x == SO_KEEPALIVE ||   //
            x == SO_ACCEPTCONN ||  //
            x == SO_DONTROUTE;     //
