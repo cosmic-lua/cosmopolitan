@@ -15,7 +15,7 @@
 --   * re         tool/net/lre.c               kLuaRe[] + constants + methods
 --   * argon2     tool/net/largon2.c           largon2[]
 --   * lsqlite3   tool/net/lsqlite3.c          sqlitelib[] + constants + methods
---   * getopt     tool/net/lgetopt.c           kLuaGetopt[] + parser methods
+--   * getopt     tool/net/lgetopt.c           kLuaGetopt[]
 --   * zip        tool/net/lzip.c              kLuaZip[] + Reader/Writer/Appender
 --   * repl       third_party/lua/lreplmod.c   kReplFuncs[]
 --
@@ -240,9 +240,6 @@ local MODULES = {
   {
     name = "getopt",
     fns = reg_table(C_getopt, "kLuaGetopt"),
-    methods = {
-      { class = "parser", reg = reg_table(C_getopt, "kLuaGetoptParserMethods") },
-    },
   },
   {
     name = "zip",

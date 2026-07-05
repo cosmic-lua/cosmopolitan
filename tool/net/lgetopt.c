@@ -17,28 +17,22 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "tool/net/lgetopt.h"
-#include "libc/mem/mem.h"
 #include "libc/str/str.h"
 #include "third_party/getopt/long1.h"
 #include "third_party/getopt/long2.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
 
-#define MAX_ARGC    10000
-#define MAX_LONGOPTS 1000
-#define PARSER_MT "getopt.parser"
+#define MAX_ARGC     10000
+#define MAX_LONGOPTS  1000
 
-typedef struct {
-  char **argv;
-  struct option *longopts;
-  int argc;
-  int nlong;
-  int refs_idx;        // Lua registry index for string references
-  int unknown_idx;     // Lua registry index for unknown options table
-  int unknown_count;   // Count of unknown options
-  const char *optstring;
-  int done;            // Flag indicating parsing is complete
-} GetoptParser;
+// Push `nil, <message>` and return 2 from the calling C function.
+#define FAIL(...)                     \
+  do {                                \
+    lua_pushnil(L);                   \
+    lua_pushfstring(L, __VA_ARGS__);  \
+    return 2;                         \
+  } while (0)
 
 static int ParseHasArg(const char *s) {
   if (!strcmp(s, "none"))
@@ -50,306 +44,218 @@ static int ParseHasArg(const char *s) {
   return -1;
 }
 
-// getopt.new(args, optstring, longopts) -> parser
+// getopt.parse(args, optstring[, longopts])
+//     ├─→ {opts={{opt,arg?}...}, args={...}, unknown={...}, missing={...}}
+//     └─→ nil, err
 //
-// Creates a new getopt parser that can be iterated to parse options.
-// NOTE: Uses global getopt state and is NOT thread-safe.
-static int LuaGetoptNew(lua_State *L) {
+// Single-shot, re-entrant command-line parser. Unlike the old stateful
+// Parser userdata, all state is local to this one call: the underlying
+// getopt globals (optind/opterr/optopt/optarg) are reset on entry and the
+// whole argv is consumed before returning, so two parse() calls can never
+// corrupt one another. The optstring is normalized to getopt's leading-`:`
+// protocol so a missing required argument ('missing') is reported
+// distinctly from an unrecognized option ('unknown'). 'unknown' entries
+// always carry their dashes; 'missing' entries name the bare option.
+static int LuaGetoptParse(lua_State *L) {
+  size_t olen;
+  const char *ostr;
   lua_Integer argc_raw, nlong_raw;
-  int argc, nlong, has_arg;
-  const char *optstring;
-  char **argv = NULL;
-  struct option *longopts = NULL;
-  GetoptParser *parser;
+  int argc, nlong, c, longidx = 0;
+  int n_opts = 0, n_args = 0, n_unknown = 0, n_missing = 0;
+  int T_opts, T_args, T_unknown, T_missing;
+  char **argv;
+  struct option *longopts;
+  char *opts;
 
-  luaL_checktype(L, 1, LUA_TTABLE);
-  optstring = luaL_checkstring(L, 2);
-  if (!lua_isnoneornil(L, 3))
-    luaL_checktype(L, 3, LUA_TTABLE);
+  if (!lua_istable(L, 1))
+    FAIL("args must be a table");
+  if (lua_type(L, 2) != LUA_TSTRING)
+    FAIL("optstring must be a string");
+  if (!lua_isnoneornil(L, 3) && !lua_istable(L, 3))
+    FAIL("longopts must be a table");
+  ostr = lua_tolstring(L, 2, &olen);
 
-  // Get sizes with bounds checking
+  // Bounds-check the tables before touching C memory.
   argc_raw = luaL_len(L, 1);
   if (argc_raw < 0 || argc_raw > MAX_ARGC)
-    return luaL_error(L, "args table too large (max %d)", MAX_ARGC);
+    FAIL("args table too large (max %d)", MAX_ARGC);
   argc = (int)argc_raw;
 
   nlong_raw = lua_isnoneornil(L, 3) ? 0 : luaL_len(L, 3);
   if (nlong_raw < 0 || nlong_raw > MAX_LONGOPTS)
-    return luaL_error(L, "longopts table too large (max %d)", MAX_LONGOPTS);
+    FAIL("longopts table too large (max %d)", MAX_LONGOPTS);
   nlong = (int)nlong_raw;
 
-  // Validate all longopts entries BEFORE allocating C memory
+  // Validate every longopt entry up front.
   for (int i = 0; i < nlong; i++) {
     lua_rawgeti(L, 3, i + 1);
-    if (!lua_istable(L, -1)) {
-      return luaL_error(L, "longopt[%d] must be a table", i + 1);
-    }
-    // Check name is string
+    if (!lua_istable(L, -1))
+      FAIL("longopt[%d] must be a table", i + 1);
     lua_rawgeti(L, -1, 1);
-    if (!lua_isstring(L, -1)) {
-      return luaL_error(L, "longopt[%d][1] (name) must be a string", i + 1);
-    }
+    if (lua_type(L, -1) != LUA_TSTRING)
+      FAIL("longopt[%d][1] (name) must be a string", i + 1);
     lua_pop(L, 1);
-    // Check has_arg is valid
     lua_rawgeti(L, -1, 2);
-    if (!lua_isstring(L, -1)) {
-      return luaL_error(L, "longopt[%d][2] (has_arg) must be a string", i + 1);
-    }
-    has_arg = ParseHasArg(lua_tostring(L, -1));
-    if (has_arg == -1) {
-      return luaL_error(L,
-          "longopt[%d][2] must be 'none', 'required', or 'optional'", i + 1);
-    }
+    if (lua_type(L, -1) != LUA_TSTRING)
+      FAIL("longopt[%d][2] (has_arg) must be a string", i + 1);
+    if (ParseHasArg(lua_tostring(L, -1)) == -1)
+      FAIL("longopt[%d][2] must be 'none', 'required', or 'optional'", i + 1);
     lua_pop(L, 1);
-    // Check short is string if present
     lua_rawgeti(L, -1, 3);
-    if (!lua_isnoneornil(L, -1) && !lua_isstring(L, -1)) {
-      return luaL_error(L, "longopt[%d][3] (short) must be a string or nil",
-                        i + 1);
-    }
+    if (!lua_isnoneornil(L, -1) && lua_type(L, -1) != LUA_TSTRING)
+      FAIL("longopt[%d][3] (short) must be a string or nil", i + 1);
     lua_pop(L, 1);
-    lua_pop(L, 1);  // pop longopt entry
+    lua_pop(L, 1);  // pop entry
   }
 
-  // Validate all args entries are strings
+  // Validate that every arg is a string.
   for (int i = 1; i <= argc; i++) {
     lua_rawgeti(L, 1, i);
-    if (!lua_isstring(L, -1)) {
-      return luaL_error(L, "args[%d] must be a string", i);
-    }
+    if (lua_type(L, -1) != LUA_TSTRING)
+      FAIL("args[%d] must be a string", i);
     lua_pop(L, 1);
   }
 
-  // Create parser userdata FIRST so __gc owns everything from this point on.
-  // Fields are zeroed / set to LUA_NOREF so __gc is safe if it fires before
-  // the C allocations succeed (lua_newuserdata / luaL_ref can raise OOM).
-  parser = lua_newuserdata(L, sizeof(GetoptParser));
-  parser->argv = NULL;
-  parser->longopts = NULL;
-  parser->argc = argc + 1;
-  parser->nlong = nlong;
-  parser->optstring = optstring;
-  parser->done = 0;
-  parser->unknown_count = 0;
-  parser->refs_idx = LUA_NOREF;
-  parser->unknown_idx = LUA_NOREF;
-  luaL_setmetatable(L, PARSER_MT);
+  // Scratch buffers are GC-managed userdata rather than malloc, so nothing
+  // leaks even if a later lua_push raises out-of-memory. The pointers they
+  // hold reference strings owned by the args (index 1) and longopts
+  // (index 3) tables, which stay on the stack for the whole call and so
+  // keep those strings rooted and valid for the parse.
+  argv = lua_newuserdatauv(L, (size_t)(argc + 2) * sizeof(*argv), 0);
+  longopts = lua_newuserdatauv(L, (size_t)(nlong + 1) * sizeof(*longopts), 0);
+  opts = lua_newuserdatauv(L, olen + 2, 0);
 
-  // Allocate C memory and assign into the userdata so __gc can free them.
-  argv = calloc(argc + 2, sizeof(char *));
-  if (!argv)
-    return luaL_error(L, "out of memory");
-  parser->argv = argv;
-
-  longopts = calloc(nlong + 1, sizeof(struct option));
-  if (!longopts)
-    return luaL_error(L, "out of memory");
-  parser->longopts = longopts;
-
-  // Create a table to hold references to all Lua strings
-  lua_newtable(L);
-  parser->refs_idx = luaL_ref(L, LUA_REGISTRYINDEX);
-
-  // Create unknown options table
-  lua_newtable(L);
-  parser->unknown_idx = luaL_ref(L, LUA_REGISTRYINDEX);
-
-  int ref_count = 0;
-
-  // Extract argv strings, keeping them rooted in refs table
-  lua_rawgeti(L, LUA_REGISTRYINDEX, parser->refs_idx);
-  int refs_stack = lua_gettop(L);
-
-  argv[0] = "lua";
+  argv[0] = "getopt";
   for (int i = 1; i <= argc; i++) {
     lua_rawgeti(L, 1, i);
     argv[i] = (char *)lua_tostring(L, -1);
-    lua_rawseti(L, refs_stack, ++ref_count);
+    lua_pop(L, 1);
   }
   argv[argc + 1] = NULL;
 
-  lua_pop(L, 1);  // pop refs table
-
-  // Extract longopts, keeping strings rooted
-  if (nlong > 0) {
-    lua_rawgeti(L, LUA_REGISTRYINDEX, parser->refs_idx);
-    refs_stack = lua_gettop(L);
-
-    for (int i = 0; i < nlong; i++) {
-      lua_rawgeti(L, 3, i + 1);
-
-      lua_rawgeti(L, -1, 1);
-      longopts[i].name = lua_tostring(L, -1);
-      lua_rawseti(L, refs_stack, ++ref_count);
-
-      lua_rawgeti(L, -1, 2);
-      longopts[i].has_arg = ParseHasArg(lua_tostring(L, -1));
-      lua_pop(L, 1);
-
-      lua_rawgeti(L, -1, 3);
-      if (lua_isstring(L, -1)) {
-        const char *s = lua_tostring(L, -1);
-        longopts[i].val = s[0];
-      } else {
-        longopts[i].val = 0;
-      }
-      lua_pop(L, 1);
-
-      longopts[i].flag = NULL;
-      lua_pop(L, 1);  // pop longopt entry
-    }
-
-    lua_pop(L, 1);  // pop refs table
-  }
-
-  // Reset getopt state
-  optind = 1;
-  opterr = 0;
-
-  // Return parser (already on stack)
-  return 1;
-}
-
-// parser:next() -> opt, arg
-//
-// Returns the next option and its argument (if any).
-// Returns nil when no more options.
-static int LuaGetoptNext(lua_State *L) {
-  GetoptParser *parser = luaL_checkudata(L, 1, PARSER_MT);
-
-  if (parser->done) {
-    lua_pushnil(L);
-    return 1;
-  }
-
-  int opt, longidx;
-  char shortopt[2];
-  shortopt[1] = '\0';
-
-  opt = getopt_long(parser->argc, parser->argv, parser->optstring,
-                    parser->longopts, &longidx);
-
-  if (opt == -1) {
-    parser->done = 1;
-    lua_pushnil(L);
-    return 1;
-  }
-
-  if (opt == '?') {
-    // Unknown option - record it and return "?" with the option name
-    lua_rawgeti(L, LUA_REGISTRYINDEX, parser->unknown_idx);
-    if (optopt) {
-      shortopt[0] = optopt;
-      lua_pushstring(L, shortopt);
-    } else if (parser->argv[optind - 1]) {
-      lua_pushstring(L, parser->argv[optind - 1]);
+  for (int i = 0; i < nlong; i++) {
+    lua_rawgeti(L, 3, i + 1);
+    lua_rawgeti(L, -1, 1);
+    longopts[i].name = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    lua_rawgeti(L, -1, 2);
+    longopts[i].has_arg = ParseHasArg(lua_tostring(L, -1));
+    lua_pop(L, 1);
+    lua_rawgeti(L, -1, 3);
+    if (lua_type(L, -1) == LUA_TSTRING) {
+      const char *s = lua_tostring(L, -1);
+      longopts[i].val = (unsigned char)s[0];
     } else {
-      lua_pop(L, 1);  // pop unknown table
-      // Skip this unknown option and try next
-      return LuaGetoptNext(L);
+      longopts[i].val = 0;
     }
-    lua_rawseti(L, -2, ++parser->unknown_count);
-    lua_pop(L, 1);  // pop unknown table
+    lua_pop(L, 1);
+    longopts[i].flag = NULL;
+    lua_pop(L, 1);  // pop entry
+  }
+  longopts[nlong].name = NULL;
+  longopts[nlong].has_arg = 0;
+  longopts[nlong].flag = NULL;
+  longopts[nlong].val = 0;
 
-    // Return "?" and the unknown option name
-    lua_pushstring(L, "?");
-    if (optopt) {
-      shortopt[0] = optopt;
-      lua_pushstring(L, shortopt);
-    } else if (parser->argv[optind - 1]) {
-      lua_pushstring(L, parser->argv[optind - 1]);
+  // Normalize to a leading-`:` optstring so getopt returns ':' for a missing
+  // required argument and '?' for an unknown option. A leading '+'/'-' mode
+  // modifier must stay first; an existing ':' is left as-is.
+  {
+    size_t k = 0, src = 0;
+    if (olen && (ostr[0] == '+' || ostr[0] == '-'))
+      opts[k++] = ostr[src++];
+    if (!(olen > src && ostr[src] == ':'))
+      opts[k++] = ':';
+    if (olen > src) {
+      memcpy(opts + k, ostr + src, olen - src);
+      k += olen - src;
     }
-    return 2;
+    opts[k] = '\0';
   }
-
-  if (opt == 0) {
-    // Long option with flag set
-    const char *longname = parser->longopts[longidx].name;
-    lua_pushstring(L, longname);
-    if (optarg) {
-      lua_pushstring(L, optarg);
-      return 2;
-    }
-    return 1;
-  }
-
-  // Short option (or long option returning val)
-  shortopt[0] = opt;
-  lua_pushstring(L, shortopt);
-  if (optarg) {
-    lua_pushstring(L, optarg);
-    return 2;
-  }
-  return 1;
-}
-
-// parser:remaining() -> table
-//
-// Returns a table of remaining non-option arguments.
-static int LuaGetoptRemaining(lua_State *L) {
-  GetoptParser *parser = luaL_checkudata(L, 1, PARSER_MT);
 
   lua_newtable(L);
-  int j = 1;
-  for (int i = optind; i < parser->argc; i++) {
-    lua_pushstring(L, parser->argv[i]);
-    lua_rawseti(L, -2, j++);
+  T_opts = lua_gettop(L);
+  lua_newtable(L);
+  T_args = lua_gettop(L);
+  lua_newtable(L);
+  T_unknown = lua_gettop(L);
+  lua_newtable(L);
+  T_missing = lua_gettop(L);
+
+  // Reset getopt's globals for a clean single-shot parse. optreset=1 forces
+  // the BSD scanner to re-initialize its internal cursor and permutation
+  // bookkeeping, which is what makes back-to-back parse() calls independent.
+  optind = 1;
+  optreset = 1;
+  opterr = 0;
+  optarg = NULL;
+  optopt = 0;
+
+  while ((c = getopt_long(argc + 1, argv, opts, longopts, &longidx)) != -1) {
+    if (c == '?') {
+      // Unknown option; record the offending token WITH its dashes.
+      if (optopt) {
+        char tok[3] = {'-', (char)optopt, '\0'};
+        lua_pushstring(L, tok);
+      } else {
+        lua_pushstring(L, argv[optind - 1]);  // full "--name"
+      }
+      lua_rawseti(L, T_unknown, ++n_unknown);
+    } else if (c == ':') {
+      // Missing required argument; record the bare option (no dashes).
+      if (optopt) {
+        char id[2] = {(char)optopt, '\0'};
+        lua_pushstring(L, id);
+      } else {
+        // long option with no short equivalent: recover its name
+        const char *t = argv[optind - 1];
+        while (*t == '-') t++;
+        lua_pushlstring(L, t, strcspn(t, "="));
+      }
+      lua_rawseti(L, T_missing, ++n_missing);
+    } else {
+      // Recognized option: {opt=<name>, arg=<value>?}.
+      lua_createtable(L, 0, 2);
+      if (c == 0) {
+        // long option with no short equivalent
+        lua_pushstring(L, longopts[longidx].name);
+      } else {
+        char s[2] = {(char)c, '\0'};
+        lua_pushstring(L, s);
+      }
+      lua_setfield(L, -2, "opt");
+      if (optarg) {
+        lua_pushstring(L, optarg);
+        lua_setfield(L, -2, "arg");
+      }
+      lua_rawseti(L, T_opts, ++n_opts);
+    }
   }
+
+  // Everything left over is a non-option argument.
+  for (int i = optind; i <= argc; i++) {
+    lua_pushstring(L, argv[i]);
+    lua_rawseti(L, T_args, ++n_args);
+  }
+
+  lua_createtable(L, 0, 4);
+  lua_pushvalue(L, T_opts);
+  lua_setfield(L, -2, "opts");
+  lua_pushvalue(L, T_args);
+  lua_setfield(L, -2, "args");
+  lua_pushvalue(L, T_unknown);
+  lua_setfield(L, -2, "unknown");
+  lua_pushvalue(L, T_missing);
+  lua_setfield(L, -2, "missing");
   return 1;
 }
-
-// parser:unknown() -> table
-//
-// Returns a table of unknown options encountered.
-static int LuaGetoptUnknown(lua_State *L) {
-  GetoptParser *parser = luaL_checkudata(L, 1, PARSER_MT);
-  lua_rawgeti(L, LUA_REGISTRYINDEX, parser->unknown_idx);
-  return 1;
-}
-
-// Garbage collection for parser
-static int LuaGetoptParserGC(lua_State *L) {
-  GetoptParser *parser = luaL_checkudata(L, 1, PARSER_MT);
-
-  if (parser->argv) {
-    free(parser->argv);
-    parser->argv = NULL;
-  }
-  if (parser->longopts) {
-    free(parser->longopts);
-    parser->longopts = NULL;
-  }
-
-  // Unref the tables
-  luaL_unref(L, LUA_REGISTRYINDEX, parser->refs_idx);
-  luaL_unref(L, LUA_REGISTRYINDEX, parser->unknown_idx);
-
-  return 0;
-}
-
-static const luaL_Reg kLuaGetoptParserMethods[] = {
-    {"next", LuaGetoptNext},
-    {"remaining", LuaGetoptRemaining},
-    {"unknown", LuaGetoptUnknown},
-    {0},
-};
 
 static const luaL_Reg kLuaGetopt[] = {
-    {"new", LuaGetoptNew},
+    {"parse", LuaGetoptParse},
     {0},
 };
 
 int LuaGetopt(lua_State *L) {
-  // Create parser metatable
-  luaL_newmetatable(L, PARSER_MT);
-  lua_pushvalue(L, -1);
-  lua_setfield(L, -2, "__index");
-  lua_pushcfunction(L, LuaGetoptParserGC);
-  lua_setfield(L, -2, "__gc");
-  luaL_setfuncs(L, kLuaGetoptParserMethods, 0);
-  lua_pop(L, 1);
-
-  // Create getopt module table
   luaL_newlib(L, kLuaGetopt);
   return 1;
 }

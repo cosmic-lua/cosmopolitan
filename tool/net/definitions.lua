@@ -3095,11 +3095,26 @@ function re.compile(regex, flags) end
 --- This wraps the standard GNU getopt_long(3) function for parsing command-line
 --- options with both short (-h) and long (--help) option support.
 ---
---- NOTE: This module uses global getopt state and is NOT thread-safe.
---- Do not call from multiple threads or coroutines concurrently.
+--- NOTE: This module uses process-global getopt state. `getopt.parse` consumes
+--- the whole argument vector in a single call, so back-to-back calls are
+--- independent, but do not call it concurrently from multiple threads.
 getopt = {}
 
---- Create a new getopt parser for iterating through command-line options.
+---@class getopt.Option
+--- A single recognized option and its argument (nil when the option takes
+--- none). For a long option that has a short equivalent, `opt` is that short
+--- letter; for a long-only option, `opt` is the long name.
+---@field opt string
+---@field arg string?
+
+---@class getopt.Result
+--- The outcome of a single `getopt.parse` call.
+---@field opts getopt.Option[] Recognized options, in the order encountered
+---@field args string[] Non-option (positional) arguments
+---@field unknown string[] Unrecognized options, each including its dashes
+---@field missing string[] Options that required an argument but got none
+
+--- Parse a command-line argument vector in one shot.
 ---
 --- The optstring uses standard getopt format:
 --- - A letter means that option takes no argument
@@ -3109,41 +3124,42 @@ getopt = {}
 --- The longopts table contains entries like {"name", "has_arg", "short"}:
 --- - name: the long option name (e.g., "help" for --help)
 --- - has_arg: "none", "required", or "optional"
---- - short: the equivalent short option character (e.g., "h")
+--- - short: the equivalent short option character (e.g., "h"), or nil
+---
+--- The result separates four outcomes. `opts` lists the recognized options in
+--- order, each as a {opt, arg} pair. `args` holds the leftover positional
+--- arguments. `unknown` holds unrecognized options (always spelled with their
+--- dashes, e.g. "-x" or "--nope"). `missing` holds the options that required an
+--- argument but were given none (named without dashes, e.g. "o"); this is kept
+--- distinct from `unknown` via getopt's leading-`:` protocol.
 ---
 --- Example - Basic usage:
 ---
----     local parser = getopt.new(arg, "hvo:", {
+---     local r = getopt.parse(arg, "hvo:", {
 ---       {"help",    "none",     "h"},
 ---       {"verbose", "none",     "v"},
 ---       {"output",  "required", "o"},
 ---     })
----
----     while true do
----       local opt, arg = parser:next()
----       if not opt then break end
----
----       if opt == "h" or opt == "help" then
+---     for _, o in ipairs(r.opts) do
+---       if o.opt == "h" then
 ---         print("Usage: ...")
----       elseif opt == "v" or opt == "verbose" then
+---       elseif o.opt == "v" then
 ---         verbose = true
----       elseif opt == "o" or opt == "output" then
----         output = arg
+---       elseif o.opt == "o" then
+---         output = o.arg
 ---       end
 ---     end
----
----     local remaining = parser:remaining()  -- non-option args
----     local unknown = parser:unknown()      -- unrecognized options
+---     -- r.args     -- non-option arguments
+---     -- r.unknown  -- unrecognized options, with dashes
+---     -- r.missing  -- options missing a required argument
 ---
 --- Example - Handling repeated options:
 ---
----     local parser = getopt.new(arg, "e:", {})
+---     local r = getopt.parse(arg, "e:")
 ---     local excludes = {}
----     while true do
----       local opt, arg = parser:next()
----       if not opt then break end
----       if opt == "e" then
----         table.insert(excludes, arg)
+---     for _, o in ipairs(r.opts) do
+---       if o.opt == "e" then
+---         table.insert(excludes, o.arg)
 ---       end
 ---     end
 ---     -- Now excludes contains all -e values: {"foo", "bar", "spam"}
@@ -3151,34 +3167,9 @@ getopt = {}
 ---@param args string[] Command-line arguments (typically `arg`)
 ---@param optstring string Short options string (e.g., "hvo:")
 ---@param longopts? table[] Long option definitions: {{name, has_arg, short}, ...}
----@return getopt.parser parser Parser object with next(), remaining(), and unknown() methods
-function getopt.new(args, optstring, longopts) end
-
----@class getopt.parser: userdata
---- A parser object returned by `getopt.new` for iterating through
---- command-line options.
-
---- Get the next option from the parser.
----
---- Returns the next option character or long name, along with its argument
---- if the option takes one. Returns nil when no more options remain.
----
---- If the option is unknown, returns "?" as the option name and the unknown
---- option string as the argument.
----
----@return string? opt Option character or long name, or "?" for unknown, or nil when done
----@return string? arg Option argument (for options that take arguments), or nil
-function getopt.parser:next() end
-
---- Get remaining non-option arguments after all options have been parsed.
----
----@return string[] remaining Non-option arguments
-function getopt.parser:remaining() end
-
---- Get any unknown options that were encountered during parsing.
----
----@return string[] unknown Unrecognized option strings
-function getopt.parser:unknown() end
+---@return getopt.Result result
+---@overload fun(args: string[], optstring: string, longopts?: table[]): nil, error: string
+function getopt.parse(args, optstring, longopts) end
 
 --- The path module may be used to manipulate unix paths.
 ---
