@@ -142,6 +142,10 @@ o/$(MODE)/tool/lua/test_signal.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sign
 	$< tool/lua/test_signal.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_shm.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_shm.lua
+	$< tool/lua/test_shm.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_isatty.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_isatty.lua
 	$< tool/lua/test_isatty.lua
 	@touch $@
@@ -165,6 +169,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_unix_proc.ok				\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_signal.ok				\
+	o/$(MODE)/tool/lua/test_shm.ok					\
 	o/$(MODE)/tool/lua/test_isatty.ok				\
 	o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok			\
 	o/$(MODE)/tool/lua/test_definitions_coverage.ok
