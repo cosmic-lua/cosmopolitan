@@ -911,11 +911,11 @@ int LuaUuidV4(lua_State *L) {
   static const char v[] = {'0', '1', '2', '3', '4', '5', '6', '7',
                            '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
   char uuid_str[37] = {0};
-  uint64_t r = _rand64();
+  uint64_t r = arc4random64();
   int j = 0;
   for (int i = 0; i < 36; ++i, ++j) {
     if (j == 16) {
-      r = _rand64();
+      r = arc4random64();
       j = 0;
     }
     uuid_str[i] = v[(r & (0xfull << (j * 4ull))) >> (j * 4ull)];
@@ -928,7 +928,7 @@ int LuaUuidV4(lua_State *L) {
   uuid_str[19] = v[8 | (r & (0x3ull << (j * 4ull))) >> (j * 4ull)];
   uuid_str[23] = '-';
   uuid_str[36] = '\0';
-  lua_pushfstring(L, uuid_str);
+  lua_pushlstring(L, uuid_str, 36);
   return 1;
 }
 
@@ -943,7 +943,7 @@ int LuaUuidV7(lua_State *L) {
                    1000000) *
           4096)
       << 4;
-  uint64_t rand_b = _rand64();
+  uint64_t rand_b = arc4random64();
   int rand_a = fractional_ms |
                (rand_b & 0x000000000000000f);  // use the last 4 bits of rand_b
 
@@ -1005,7 +1005,7 @@ int LuaUuidV7(lua_State *L) {
   uuid_str[35] = "0123456789abcdef"[(bin[15] & 0xf0) >> 4];
   uuid_str[36] = '\0';
 
-  lua_pushfstring(L, uuid_str);
+  lua_pushlstring(L, uuid_str, 36);
   return 1;
 }
 
