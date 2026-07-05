@@ -2367,22 +2367,65 @@ static int LuaUnixSigprocmask(lua_State *L) {
   }
 }
 
+// Registry key (its unique address) for the table mapping signal number to
+// Lua handler function. Held in the Lua registry rather than a user-visible
+// global so scripts can't corrupt the dispatch table out from under us.
+static const char kSignalHandlers;
+
+// Deferred signal dispatch state. A real signal handler must not run Lua: the
+// VM it interrupts may be mid-malloc or mid-GC, and Lua is not
+// async-signal-safe. So LuaUnixOnSignal only records the signal and arms a Lua
+// debug hook -- lua_sethook is the one Lua C API that's safe from signal
+// context -- and LuaUnixSignalHook runs the Lua handler at the next VM
+// instruction boundary, in normal context.
+static volatile sig_atomic_t g_sigpending[NSIG + 1];
+static lua_Hook g_basehook;
+static int g_basehookmask;
+static int g_basehookcount;
+static int g_basehooksaved;
+
+// Runs between VM instructions after one or more signals fired. Restores the
+// hook that was active before we intercepted, then invokes each pending Lua
+// handler. Because this is ordinary VM context (not signal context), calling
+// back into Lua here is safe.
+static void LuaUnixSignalHook(lua_State *L, lua_Debug *ar) {
+  (void)ar;
+  if (g_basehooksaved) {
+    lua_sethook(L, g_basehook, g_basehookmask, g_basehookcount);
+  } else {
+    lua_sethook(L, NULL, 0, 0);
+  }
+  lua_rawgetp(L, LUA_REGISTRYINDEX, &kSignalHandlers);
+  if (lua_type(L, -1) == LUA_TTABLE) {
+    for (int sig = 1; sig <= NSIG; ++sig) {
+      if (g_sigpending[sig]) {
+        g_sigpending[sig] = 0;
+        if (lua_rawgeti(L, -1, sig) == LUA_TFUNCTION) {
+          lua_pushinteger(L, sig);
+          if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+            ERRORF("(lua) %s failed: %s", strsignal(sig), lua_tostring(L, -1));
+            lua_pop(L, 1);  // pop error
+          }
+        } else {
+          lua_pop(L, 1);  // pop non-function
+        }
+      }
+    }
+  }
+  lua_pop(L, 1);  // pop handler table
+}
+
 static void LuaUnixOnSignal(int sig, siginfo_t *si, void *ctx) {
-  int type;
   lua_State *L = GL;
   STRACE("LuaUnixOnSignal(%G)", sig);
-  lua_getglobal(L, "__signal_handlers");
-  type = lua_rawgeti(L, -1, sig);
-  lua_remove(L, -2);  // pop __signal_handlers
-  if (type == LUA_TFUNCTION) {
-    lua_pushinteger(L, sig);
-    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
-      ERRORF("(lua) %s failed: %s", strsignal(sig), lua_tostring(L, -1));
-      lua_pop(L, 1);  // pop error
-    }
-  } else {
-    lua_pop(L, 1);  // pop handler
-  }
+  if (sig < 1 || sig > NSIG)
+    return;
+  g_sigpending[sig] = 1;
+  // Defer to LuaUnixSignalHook at the next VM boundary. lua_sethook only
+  // writes a handful of lua_State fields and is safe from signal context;
+  // actually running the Lua handler here is not.
+  lua_sethook(L, LuaUnixSignalHook,
+              LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE | LUA_MASKCOUNT, 1);
 }
 
 // unix.sigaction(sig:int[, handler:func|int[, flags:int[, mask:unix.Sigset]]])
@@ -2390,7 +2433,7 @@ static void LuaUnixOnSignal(int sig, siginfo_t *si, void *ctx) {
 //     └─→ nil, unix.Errno
 static int LuaUnixSigaction(lua_State *L) {
   sigset_t *mask;
-  int i, n, sig, olderr = errno;
+  int sig, olderr = errno;
   struct sigaction sa, oldsa, *saptr = &sa;
   sigemptyset(&sa.sa_mask);
   sig = luaL_checkinteger(L, 1);
@@ -2407,21 +2450,20 @@ static int LuaUnixSigaction(lua_State *L) {
     sa.sa_sigaction = (void *)luaL_checkinteger(L, 2);
   } else if (lua_isfunction(L, 2)) {
     sa.sa_sigaction = LuaUnixOnSignal;
-    // lua probably isn't async signal safe, so...
-    // let's mask all the lua handlers during handling
+    // The C handler only records the signal and arms a debug hook, so it no
+    // longer runs Lua in signal context; there's no need to mask every other
+    // Lua handler. Just avoid re-entering the handler for the same signal.
     sigaddset(&sa.sa_mask, sig);
-    lua_getglobal(L, "__signal_handlers");
-    luaL_checktype(L, -1, LUA_TTABLE);
-    lua_len(L, -1);
-    n = lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    for (i = 1; i <= MIN(n, NSIG); ++i) {
-      if (lua_geti(L, -1, i) == LUA_TFUNCTION) {
-        sigaddset(&sa.sa_mask, i);
-      }
-      lua_pop(L, 1);
+    // Remember the debug hook that was active before we start intercepting, so
+    // LuaUnixSignalHook can restore it. Captured once: this C call is itself a
+    // VM boundary, so any previously armed dispatch hook has already fired and
+    // lua_gethook returns the genuine base hook rather than our own.
+    if (!g_basehooksaved) {
+      g_basehook = lua_gethook(L);
+      g_basehookmask = lua_gethookmask(L);
+      g_basehookcount = lua_gethookcount(L);
+      g_basehooksaved = 1;
     }
-    lua_pop(L, 1);
   } else {
     luaL_argerror(L, 2, "sigaction handler not integer or function");
     __builtin_unreachable();
@@ -2438,8 +2480,8 @@ static int LuaUnixSigaction(lua_State *L) {
     lua_remove(L, 3);
   }
   if (!sigaction(sig, saptr, &oldsa)) {
-    lua_getglobal(L, "__signal_handlers");
-    // push the old handler result to stack. if the global lua handler
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &kSignalHandlers);
+    // push the old handler result to stack. if the registry handler
     // table has a real function, then we prefer to return that. if it's
     // absent or a raw integer value, then we're better off returning
     // what the kernel gave us in &oldsa.
@@ -2448,7 +2490,7 @@ static int LuaUnixSigaction(lua_State *L) {
       lua_pushinteger(L, (intptr_t)oldsa.sa_handler);
     }
     if (saptr) {
-      // update the global lua table
+      // update the registry lua table
       if (sa.sa_sigaction == LuaUnixOnSignal) {
         lua_pushvalue(L, -3);
       } else {
@@ -4274,7 +4316,7 @@ int LuaUnix(lua_State *L) {
   LuaUnixStatObj(L);
   LuaUnixDirObj(L);
   lua_newtable(L);
-  lua_setglobal(L, "__signal_handlers");
+  lua_rawsetp(L, LUA_REGISTRYINDEX, &kSignalHandlers);
 
   LoadMagnums(L, kIpOptnames, "IP_");
   LoadMagnums(L, kTcpOptnames, "TCP_");

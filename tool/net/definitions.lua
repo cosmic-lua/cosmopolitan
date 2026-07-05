@@ -8134,6 +8134,18 @@ function unix.sigprocmask(how, newmask) end
 ---     assert(gotsigusr1)
 ---     assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
 ---
+--- When `handler` is a Lua function, it is dispatched *deferred* rather than
+--- from the raw signal context: the real signal handler only records the
+--- signal and the Lua function is then invoked at the next Lua VM instruction
+--- boundary, in normal execution context. This is required because the Lua VM
+--- is not async-signal-safe -- running Lua from a true signal handler that
+--- interrupted the VM mid-allocation or mid-GC can corrupt the heap. A
+--- consequence is that a blocking syscall interrupted by the signal still
+--- returns `EINTR` immediately (so `sigsuspend`/poll wakeups are preserved),
+--- but the Lua handler body runs a moment later once the VM resumes. Integer
+--- handlers (e.g. `unix.SIG_IGN`, `unix.SIG_DFL`, or a raw function pointer)
+--- are installed directly and are not deferred.
+---
 --- It's a good idea to not do too much work in a signal handler.
 ---
 ---@param mask? unix.Sigset
