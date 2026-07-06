@@ -21,23 +21,21 @@
 #include "third_party/lua/lauxlib.h"
 #include "third_party/regex/regex.h"
 
-struct ReErrno {
-  int err;
-  char doc[64];
-};
-
 static void LuaSetIntField(lua_State *L, const char *k, lua_Integer v) {
   lua_pushinteger(L, v);
   lua_setfield(L, -2, k);
 }
 
+// Returns nil + a formatted regerror() string, per the fork's error
+// convention (nil, err:string). Reserved for real regex failures
+// (bad pattern at compile time, REG_ESPACE out-of-memory at search
+// time); an ordinary no-match is not an error and is reported as a
+// bare nil by LuaReSearchImpl.
 static int LuaReReturnError(lua_State *L, regex_t *r, int rc) {
-  struct ReErrno *e;
+  char doc[64];
+  regerror(rc, r, doc, sizeof(doc));
   lua_pushnil(L);
-  e = lua_newuserdatauv(L, sizeof(struct ReErrno), 0);
-  luaL_setmetatable(L, "re.Errno");
-  e->err = rc;
-  regerror(rc, r, e->doc, sizeof(e->doc));
+  lua_pushstring(L, doc);
   return 2;
 }
 
@@ -45,10 +43,14 @@ static regex_t *LuaReCompileImpl(lua_State *L, const char *p, int f) {
   int rc;
   regex_t *r;
   r = lua_newuserdatauv(L, sizeof(regex_t), 0);
-  luaL_setmetatable(L, "re.Regex");
   f &= REG_EXTENDED | REG_ICASE | REG_NEWLINE | REG_NOSUB;
   f ^= REG_EXTENDED;
   if ((rc = regcomp(r, p, f)) == REG_OK) {
+    // Only a successfully compiled regex gets the re.Regex metatable
+    // (and thus the regfree() __gc finalizer). On failure the userdata
+    // holds an unusable regex_t, so it must not be freed; leaving it
+    // metatable-less lets the collector reclaim the raw memory safely.
+    luaL_setmetatable(L, "re.Regex");
     return r;
   } else {
     LuaReReturnError(L, r, rc);
@@ -56,6 +58,11 @@ static regex_t *LuaReCompileImpl(lua_State *L, const char *p, int f) {
   }
 }
 
+// On a match, returns the whole matched substring plus a table of the
+// parenthesized capture groups (empty when the pattern has no groups).
+// A no-match is not an error: it returns a single bare nil so the
+// idiomatic `if match` works and `select("#", ...) == 1`. A genuine
+// regexec() failure (e.g. REG_ESPACE) returns nil, err:string.
 static int LuaReSearchImpl(lua_State *L, regex_t *r, const char *s, int f) {
   int rc, i, n;
   regmatch_t *m;
@@ -64,11 +71,22 @@ static int LuaReSearchImpl(lua_State *L, regex_t *r, const char *s, int f) {
   m = (regmatch_t *)luaL_buffinitsize(L, &tmp, n * sizeof(regmatch_t));
   m->rm_so = 0;
   m->rm_eo = 0;
-  if ((rc = regexec(r, s, n, m, f >> 8)) == REG_OK) {
-    for (i = 0; i < n; ++i) {
-      lua_pushlstring(L, s + m[i].rm_so, m[i].rm_eo - m[i].rm_so);
+  rc = regexec(r, s, n, m, f >> 8);
+  if (rc == REG_OK) {
+    lua_pushlstring(L, s + m[0].rm_so, m[0].rm_eo - m[0].rm_so);
+    lua_createtable(L, n - 1, 0);
+    for (i = 1; i < n; ++i) {
+      if (m[i].rm_so >= 0) {
+        lua_pushlstring(L, s + m[i].rm_so, m[i].rm_eo - m[i].rm_so);
+      } else {
+        lua_pushliteral(L, "");
+      }
+      lua_rawseti(L, -2, i);
     }
-    return n;
+    return 2;
+  } else if (rc == REG_NOMATCH) {
+    lua_pushnil(L);
+    return 1;
   } else {
     return LuaReReturnError(L, r, rc);
   }
@@ -163,47 +181,6 @@ static void LuaReRegexObj(lua_State *L) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// re.Errno
-
-static struct ReErrno *GetReErrno(lua_State *L) {
-  return luaL_checkudata(L, 1, "re.Errno");
-}
-
-// re.Errno:errno()
-//     └─→ errno:int
-static int LuaReErrnoErrno(lua_State *L) {
-  lua_pushinteger(L, GetReErrno(L)->err);
-  return 1;
-}
-
-// re.Errno:doc()
-//     └─→ description:str
-static int LuaReErrnoDoc(lua_State *L) {
-  lua_pushstring(L, GetReErrno(L)->doc);
-  return 1;
-}
-
-static const luaL_Reg kLuaReErrnoMeth[] = {
-    {"errno", LuaReErrnoErrno},  //
-    {"doc", LuaReErrnoDoc},      //
-    {0},                         //
-};
-
-static const luaL_Reg kLuaReErrnoMeta[] = {
-    {"__tostring", LuaReErrnoDoc},  //
-    {0},                            //
-};
-
-static void LuaReErrnoObj(lua_State *L) {
-  luaL_newmetatable(L, "re.Errno");
-  luaL_setfuncs(L, kLuaReErrnoMeta, 0);
-  luaL_newlibtable(L, kLuaReErrnoMeth);
-  luaL_setfuncs(L, kLuaReErrnoMeth, 0);
-  lua_setfield(L, -2, "__index");
-  lua_pop(L, 1);
-}
-
-////////////////////////////////////////////////////////////////////////////////
 
 _Alignas(1) static const struct thatispacked {
   const char s[8];
@@ -240,6 +217,5 @@ int LuaRe(lua_State *L) {
     LuaSetIntField(L, buf, kReMagnums[i].x);
   }
   LuaReRegexObj(L);
-  LuaReErrnoObj(L);
   return 1;
 }

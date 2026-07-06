@@ -1251,11 +1251,12 @@ function lsqlite3.VM:urows(sql) end
 --- validate input, search for substrings, extract pieces of strings, etc.
 --- Here's a usage example:
 ---
----     -- Example IPv4 Address Regular Expression (see also ParseIP)
----     p = assert(re.compile([[^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})---  $]]))
----     m,a,b,c,d = assert(p:search(𝑠))
+---     -- Example IPv4 Address Regular Expression (see also ParseIp)
+---     p = assert(re.compile([[^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$]]))
+---     local m, caps = p:search(s)
 ---     if m then
----       print("ok", tonumber(a), tonumber(b), tonumber(c), tonumber(d))
+---       print("ok", tonumber(caps[1]), tonumber(caps[2]),
+---             tonumber(caps[3]), tonumber(caps[4]))
 ---     else
 ---       print("not ok")
 ---     end
@@ -1318,44 +1319,18 @@ re = {
     NOTEOL = 0x0200,
 }
 
----@class re.Errno: userdata
-re.Errno = nil
-
----@return integer # one of the following
----@nodiscard
---- - `unix.NOMATCH` No match
---- - `unix.BADPAT` Invalid regex
---- - `unix.ECOLLATE` Unknown collating element
---- - `unix.ECTYPE` Unknown character class name
---- - `unix.EESCAPE` Trailing backslash
---- - `unix.ESUBREG` Invalid back reference
---- - `unix.EBRACK` Missing `]`
---- - `unix.EPAREN` Missing `)`
---- - `unix.EBRACE` Missing `}`
---- - `unix.BADBR` Invalid contents of `{}`
---- - `unix.ERANGE` Invalid character range.
---- - `unix.ESPACE` Out of memory
---- - `unix.BADRPT` Repetition not preceded by valid expression
-function re.Errno:errno() end
-
----@return string description the English string describing the error code.
----@nodiscard
-function re.Errno:doc() end
-
----Delegates to `re.Errno:doc()`.
----@return string
----@nodiscard
-function re.Errno:__tostring() end
-
 ---@class re.Regex: userdata
 re.Regex = {}
 
 --- Executes precompiled regular expression.
 ---
---- Returns nothing (`nil`) if the pattern doesn't match anything. Otherwise it
---- pushes the matched substring and any parenthesis-captured values too. Flags may
---- contain `re.NOTBOL` or `re.NOTEOL` to indicate whether or not text should be
---- considered at the start and/or end of a line.
+--- On a match, returns the whole matched substring plus a table of the
+--- parenthesized capture groups (an empty table when the pattern has no groups).
+--- A no-match is not an error: it returns a single bare `nil`, so the idiomatic
+--- `if match then` works. Only a genuine regex engine failure (e.g. running out
+--- of memory) returns `nil, err`. Flags may contain `re.NOTBOL` or `re.NOTEOL`
+--- to indicate whether or not text should be considered at the start and/or end
+--- of a line.
 ---
 ---@param str string
 ---@param flags? integer defaults to zero and may have any of:
@@ -1364,17 +1339,23 @@ re.Regex = {}
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return string match, string ... the match, followed by any captured groups
+---@return string match the whole matched substring
+---@return {string} captures the parenthesized capture groups, in order
 ---@nodiscard
----@overload fun(self: re.Regex, text: string, flags?: integer): nil, error: re.Errno
+---@overload fun(self: re.Regex, text: string, flags?: integer): nil
+---@overload fun(self: re.Regex, text: string, flags?: integer): nil, string
 function re.Regex:search(str, flags) end
 
 --- Searches for regular expression match in text.
 ---
 --- This is a shorthand notation roughly equivalent to:
 ---
----     preg = re.compile(regex)
----     patt = preg:search(re, text)
+---     local preg = assert(re.compile(regex))
+---     local match, captures = preg:search(text)
+---
+--- On a match, returns the whole matched substring plus a table of the
+--- parenthesized capture groups. A no-match returns a bare `nil`. A bad pattern
+--- (compile failure) or a regex engine failure returns `nil, err`.
 ---
 ---@param regex string
 ---@param text string
@@ -1390,9 +1371,11 @@ function re.Regex:search(str, flags) end
 --- This has exponential complexity. Please use `re.compile()` to compile your regular expressions once from `/.init.lua`. This API exists for convenience. This isn't recommended for prod.
 ---
 --- This uses POSIX extended syntax by default.
----@return string match, string ... the match, followed by any captured groups
+---@return string match the whole matched substring
+---@return {string} captures the parenthesized capture groups, in order
 ---@nodiscard
----@overload fun(regex: string, text: string, flags?: integer): nil, error: re.Errno
+---@overload fun(regex: string, text: string, flags?: integer): nil
+---@overload fun(regex: string, text: string, flags?: integer): nil, string
 function re.search(regex, text, flags) end
 
 --- Compiles regular expression.
@@ -1414,7 +1397,7 @@ function re.search(regex, text, flags) end
 --- This uses POSIX extended syntax by default.
 ---@return re.Regex
 ---@nodiscard
----@overload fun(regex: string, flags?: integer): nil, error: re.Errno
+---@overload fun(regex: string, flags?: integer): nil, string
 function re.compile(regex, flags) end
 
 --- The getopt module provides command-line argument parsing using getopt_long.
