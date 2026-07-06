@@ -732,9 +732,10 @@ FUNCTIONS
   EncodeHex(binary:str) → ascii:str
           Turns binary into ASCII base-16 hexadecimal lowercase string.
 
-  DecodeHex(ascii:str) → binary:str
+  DecodeHex(ascii:str) → binary:str | nil, error:str
           Turns ASCII base-16 hexadecimal byte string into binary string,
-          case-insensitively. Non-hex characters may not appear in string.
+          case-insensitively. Returns nil, err if the string has an odd
+          length or contains a non-hex character.
 
   DecodeBase32(ascii:str[, alphabet:str]) → binary:str
           Turns ASCII into binary using provided alphabet. The default

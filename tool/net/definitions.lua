@@ -1911,12 +1911,13 @@ function cosmo.Crc32c(initial, data) end
 --- ignores whitespace and dash (`-`) and stops at the first character
 --- outside of the alphabet. Any alphabet that has a power of 2 length
 --- (up to 128) may be supplied, which allows alternative base32
---- encodings to be decoded. Raises an error if the alphabet length is
+--- encodings to be decoded. Returns nil, err if the alphabet length is
 --- not a power of 2 in the range 2..128.
 ---@param ascii string
 ---@param alphabet string? defaults to Crockford's base32 alphabet
 ---@return string binary
 ---@nodiscard
+---@overload fun(ascii: string, alphabet?: string): nil, error: string
 function cosmo.DecodeBase32(ascii, alphabet) end
 
 --- Decodes binary data encoded as base64.
@@ -1931,9 +1932,11 @@ function cosmo.DecodeBase32(ascii, alphabet) end
 function cosmo.DecodeBase64(ascii) end
 
 --- Turns ASCII base-16 hexadecimal byte string into binary string,
---- case-insensitively. Non-hex characters may not appear in string.
+--- case-insensitively. Returns nil, err if the string has an odd length
+--- or contains a non-hex character.
 ---@param ascii string
 ---@return string binary
+---@overload fun(ascii: string): nil, error: string
 function cosmo.DecodeHex(ascii) end
 
 --- Turns JSON string into a Lua data structure.
@@ -2007,12 +2010,13 @@ function cosmo.Deflate(uncompressed, level) end
 --- Turns binary into ASCII using the provided alphabet (Crockford's
 --- base32 alphabet by default). Any alphabet that has a power of 2
 --- length (up to 128) may be supplied for encoding and decoding, which
---- allows alternative base32 encodings to be produced. Raises an error
+--- allows alternative base32 encodings to be produced. Returns nil, err
 --- if the alphabet length is not a power of 2 in the range 2..128.
 ---@param binary string
 ---@param alphabet string? defaults to Crockford's base32 alphabet
 ---@return string ascii
 ---@nodiscard
+---@overload fun(binary: string, alphabet?: string): nil, error: string
 function cosmo.EncodeBase32(binary, alphabet) end
 
 --- Turns binary into ASCII. This can be used to create HTML data:
@@ -2401,6 +2405,7 @@ function cosmo.FormatIp(uint32) end
 ---@param key string? If the key is provided, then HMAC value of the same function is returned.
 ---@return string # value of the specified cryptographic hash function.
 ---@nodiscard
+---@overload fun(name: string, payload: string, key?: string): nil, error: string
 function cosmo.GetCryptoHash(name, payload, key) end
 
 --- Returns string describing host instruction set architecture.
@@ -2717,11 +2722,12 @@ function cosmo.Strftime(format, timestamp, localtime) end
 --- must be a raw zlib stream that decompresses to exactly `maxoutsize`
 --- bytes.
 ---
---- This function raises an error if the input is truncated or corrupt.
+--- This function returns nil, err if the input is truncated or corrupt.
 ---@param compressed string
 ---@param maxoutsize integer? the exact uncompressed size, for raw streams
 ---@return string uncompressed
 ---@nodiscard
+---@overload fun(compressed: string, maxoutsize?: integer): nil, error: string
 function cosmo.Uncompress(compressed, maxoutsize) end
 
 --- Unescapes URL parameter name or value. Decodes `%XX` hex sequences and
