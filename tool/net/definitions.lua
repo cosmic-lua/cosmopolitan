@@ -2443,8 +2443,9 @@ function cosmo.GetHttpReason(code) end
 ---@nodiscard
 function cosmo.GetMonospaceWidth(str) end
 
----@param length integer?
----@return string # with the specified number of random bytes (1..256). If no length is specified, then a string of length 16 is returned.
+---@param length integer? number of random bytes to return (1..4194304), defaults to 16
+---@return string|nil bytes
+---@return string? error
 ---@nodiscard
 function cosmo.GetRandomBytes(length) end
 
@@ -4248,7 +4249,7 @@ function unix.commandv(prog) end
 ---@param prog string
 ---@param args string[]
 ---@param env string[]
----@return nil,|nil string, integer error
+---@return nil
 ---@return string? error
 ---@return integer? errno
 function unix.execve(prog, args, env) end
@@ -4264,7 +4265,7 @@ function unix.execve(prog, args, env) end
 ---
 ---@param prog string
 ---@param argv? string[]
----@return nil,|nil string, integer error
+---@return nil
 ---@return string? error
 ---@return integer? errno
 function unix.execvp(prog, argv) end
@@ -4282,7 +4283,7 @@ function unix.execvp(prog, argv) end
 ---@param prog string
 ---@param argv string[]
 ---@param envp? string[]
----@return nil,|nil string, integer error
+---@return nil
 ---@return string? error
 ---@return integer? errno
 function unix.execvpe(prog, argv, envp) end
@@ -4306,7 +4307,7 @@ function unix.execvpe(prog, argv, envp) end
 ---@param fd integer
 ---@param argv string[]
 ---@param envp? string[]
----@return nil,|nil string, integer error
+---@return nil
 ---@return string? error
 ---@return integer? errno
 function unix.fexecve(fd, argv, envp) end
@@ -6100,7 +6101,9 @@ function unix.sigaction(sig, handler, flags, mask) end
 ---
 --- The signal mask is temporarily replaced with `mask` during this system call.
 ---@param mask? unix.Sigset specifies which signals should be blocked.
----@return nil, string, integer error
+---@return nil
+---@return string? error
+---@return integer? errno
 function unix.sigsuspend(mask) end
 
 --- Returns the set of signals pending delivery to the calling process

@@ -467,6 +467,204 @@ do
   end
 end
 
+-- 9) type-expression syntax: the type region of every `---@param`,
+-- `---@return`, `---@field`, `---@overload`, and `---@type` line must parse
+-- under the LuaLS type grammar. A tag can be well-formed while its TYPE is
+-- syntactically dead -- the #151 dialect rewrite left `---@return nil,|nil
+-- string, integer error` on the exec family, which every check above passed
+-- and downstream generators turned into unparseable Teal. Parse the grammar
+-- here so a malformed type can never ship.
+--
+-- Grammar (recursive descent; each parse_* returns the text remaining after
+-- what it consumed, or nil on syntax error):
+--   union    := postfix ('|' postfix)*
+--   postfix  := atom ('?' | '[]')*
+--   atom     := 'fun' '(' ... ')' (':' labeled-typelist)?
+--             | '{' ... '}'                  -- balance-checked table shape
+--             | '(' union ')'
+--             | '"'str'"' | "'"str"'" | int  -- literal types
+--             | dotted-ident ('<' typelist '>')?
+do
+  local parse_union
+
+  local function parse_ident(s)
+    local id = s:match("^[%a_][%w_]*")
+    if not id then return nil end
+    s = s:sub(#id + 1)
+    while true do
+      local seg = s:match("^%.[%a_][%w_]*")
+      if not seg then break end
+      s = s:sub(#seg + 1)
+    end
+    return s
+  end
+
+  local function parse_typelist(s)
+    s = parse_union(s)
+    if not s then return nil end
+    while s:match("^%s*,") do
+      s = s:gsub("^%s*,%s*", "")
+      s = parse_union(s)
+      if not s then return nil end
+    end
+    return s
+  end
+
+  -- A fun(...) return-list entry may carry a `label:` prefix
+  -- (`fun(fd: integer): flags: integer`).
+  local function parse_labeled_union(s)
+    s = s:gsub("^%s+", "")
+    local label = s:match("^[%a_][%w_%.]*%s*:%s*")
+    if label then
+      local rest = parse_union(s:sub(#label + 1))
+      if rest then return rest end
+    end
+    return parse_union(s)
+  end
+
+  local function parse_labeled_typelist(s)
+    s = parse_labeled_union(s)
+    if not s then return nil end
+    while s:match("^%s*,") do
+      s = s:gsub("^%s*,%s*", "")
+      s = parse_labeled_union(s)
+      if not s then return nil end
+    end
+    return s
+  end
+
+  -- fun(...) with balanced parens (parameter internals are not typechecked
+  -- here); after the closing paren an optional `: <labeled typelist>` or
+  -- typed-vararg (`: ...: string`) return annotation.
+  local function parse_fun(s)
+    local depth = 0
+    for k = 4, #s do
+      local c = s:sub(k, k)
+      if c == "(" then
+        depth = depth + 1
+      elseif c == ")" then
+        depth = depth - 1
+        if depth == 0 then
+          local rest = s:sub(k + 1)
+          local colon = rest:match("^%??%s*:%s*")
+          if colon then
+            rest = rest:sub(#colon + 1)
+            if rest:match("^%.%.%.") then
+              rest = rest:sub(4)
+              local c2 = rest:match("^:%s*")
+              if c2 then return parse_union(rest:sub(#c2 + 1)) end
+              return rest
+            end
+            return parse_labeled_typelist(rest)
+          end
+          return rest
+        end
+      end
+    end
+    return nil -- unbalanced
+  end
+
+  local function parse_atom(s)
+    if s == "" then return nil end
+    if s:match("^fun%(") then return parse_fun(s) end
+    if s:match('^"') then
+      local lit = s:match('^"[^"]*"')
+      return lit and s:sub(#lit + 1) or nil
+    end
+    if s:match("^'") then
+      local lit = s:match("^'[^']*'")
+      return lit and s:sub(#lit + 1) or nil
+    end
+    if s:match("^%(") then
+      local rest = parse_union(s:sub(2))
+      if not rest then return nil end
+      rest = rest:gsub("^%s+", "")
+      if rest:sub(1, 1) ~= ")" then return nil end
+      return rest:sub(2)
+    end
+    if s:match("^{") then
+      -- table shape: {T}, {K: V} -- balance-checked only; the inline-shape
+      -- quality ratchet (Q3) separately bans `{ field: type }` records.
+      local depth = 0
+      for k = 1, #s do
+        local c = s:sub(k, k)
+        if c == "{" then
+          depth = depth + 1
+        elseif c == "}" then
+          depth = depth - 1
+          if depth == 0 then return s:sub(k + 1) end
+        end
+      end
+      return nil -- unbalanced
+    end
+    local lit = s:match("^%-?%d+")
+    if lit then return s:sub(#lit + 1) end
+    local rest = parse_ident(s)
+    if not rest then return nil end
+    if rest:match("^<") then -- generic application: table<K, V>
+      rest = parse_typelist(rest:sub(2))
+      if not rest then return nil end
+      rest = rest:gsub("^%s+", "")
+      if rest:sub(1, 1) ~= ">" then return nil end
+      rest = rest:sub(2)
+    end
+    return rest
+  end
+
+  local function parse_postfix(s)
+    s = parse_atom(s)
+    if not s then return nil end
+    while true do
+      if s:match("^%?") then
+        s = s:sub(2)
+      elseif s:match("^%[%]") then
+        s = s:sub(3)
+      else
+        break
+      end
+    end
+    return s
+  end
+
+  parse_union = function(s)
+    s = s:gsub("^%s+", "")
+    s = parse_postfix(s)
+    if not s then return nil end
+    while s:match("^%s*|%s*[^%s]") do
+      s = s:gsub("^%s*|%s*", "")
+      s = parse_postfix(s)
+      if not s then return nil end
+    end
+    return s
+  end
+
+  -- A type region is well-formed iff a full type expression parses off its
+  -- head and ends at a clean boundary: end of line, whitespace (a name or
+  -- description follows), or `#` (LuaLS description marker). A comma directly
+  -- after the first type (`nil, string, integer`) is NOT a clean boundary:
+  -- multi-value returns must be one `---@return` line per value.
+  local function type_ok(region)
+    if region:match("^%.%.%.") then return true end -- bare variadic
+    local rest = parse_union(region)
+    if not rest then return false end
+    return rest == "" or rest:match("^[%s#]") ~= nil
+  end
+
+  local lineno = 0
+  for line in (D .. "\n"):gmatch("([^\n]*)\n") do
+    lineno = lineno + 1
+    local region = line:match("^%-%-%-@param%s+[%w_%.]+%??%s+(.+)$") or
+      line:match("^%-%-%-@return%s+(.+)$") or
+      line:match("^%-%-%-@field%s+[%w_%.]+%??%s+(.+)$") or
+      line:match("^%-%-%-@overload%s+(.+)$") or
+      line:match("^%s*%-%-%-@type%s+(.+)$")
+    if region and not type_ok(region) then
+      fail("line " .. lineno .. ": unparseable type expression (one " ..
+        "`---@return` line per value; see the grammar in check 9): " .. line)
+    end
+  end
+end
+
 -- ===== annotation quality ratchet (shrink-only allowlists) =====
 --
 -- The checks above enforce that every binding is annotated at all. These four
