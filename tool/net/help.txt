@@ -1502,10 +1502,10 @@ FUNCTIONS
           many URI parsers won't understand things like an unescaped
           question mark in path.
 
-  ParseIp(str) → int
+  ParseIp(str) → int | nil, error:str
           Converts IPv4 address string to integer, e.g. "1.2.3.4" →
-          0x01020304, or returns -1 for invalid inputs. See also FormatIp
-          for the inverse operation.
+          0x01020304. Returns nil, err for invalid inputs. See also
+          FormatIp for the inverse operation.
 
   ProgramAddr(ip:int)
   ProgramAddr(host:str)
