@@ -2564,11 +2564,14 @@ function cosmo.IsReasonablePath(str) end
 ---@nodiscard
 function cosmo.ParseHost(str) end
 
---- Converts IPv4 address string to integer, e.g. "1.2.3.4" → 0x01020304, or
---- returns -1 for invalid inputs. See also `FormatIp` for the inverse operation.
+--- Converts IPv4 address string to integer, e.g. "1.2.3.4" → 0x01020304.
+--- Returns nil, err for invalid inputs (previously it returned the -1
+--- sentinel, which `FormatIp` rendered as the broadcast address). See also
+--- `FormatIp` for the inverse operation.
 ---@param ip string
 ---@return integer ip
 ---@nodiscard
+---@overload fun(ip: string): nil, error: string
 function cosmo.ParseIp(ip) end
 
 --- Parses `application/x-www-form-urlencoded` key/value parameters,
@@ -2710,8 +2713,9 @@ function cosmo.Slurp(filename, i, j) end
 ---@param format string strftime format string
 ---@param timestamp? integer UNIX timestamp (defaults to current time)
 ---@param localtime? boolean use local time instead of UTC (default false)
----@return string? formatted datetime string, or nil if buffer too small
+---@return string formatted the formatted datetime string
 ---@nodiscard
+---@overload fun(format: string, timestamp?: integer, localtime?: boolean): nil, error: string
 function cosmo.Strftime(format, timestamp, localtime) end
 
 --- Decompresses data produced by `Compress`.

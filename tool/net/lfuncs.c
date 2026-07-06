@@ -142,9 +142,18 @@ int LuaFormatIp(lua_State *L) {
 
 int LuaParseIp(lua_State *L) {
   size_t n;
+  int64_t ip;
   const char *s;
   s = luaL_checklstring(L, 1, &n);
-  lua_pushinteger(L, ParseIp(s, n));
+  // ParseIp returns -1 on a malformed address. Returning that sentinel
+  // to Lua is a footgun: fed back into FormatIp it renders as the
+  // broadcast address 255.255.255.255. Report it as nil, err instead.
+  if ((ip = ParseIp(s, n)) == -1) {
+    lua_pushnil(L);
+    lua_pushfstring(L, "invalid IP address: %s", s);
+    return 2;
+  }
+  lua_pushinteger(L, ip);
   return 1;
 }
 
@@ -177,8 +186,9 @@ int LuaFormatHttpDateTime(lua_State *L) {
 }
 
 int LuaStrftime(lua_State *L) {
-  char buf[256];
-  size_t len;
+  char stackbuf[256];
+  char *buf;
+  size_t len, size;
   struct tm tm;
   const char *fmt;
   int64_t t;
@@ -189,13 +199,43 @@ int LuaStrftime(lua_State *L) {
   } else {
     gmtime_r(&t, &tm);
   }
-  len = strftime(buf, sizeof(buf), fmt, &tm);
-  if (len > 0) {
-    lua_pushlstring(L, buf, len);
-  } else {
-    lua_pushnil(L);
+  // An empty format legitimately produces an empty string; report it as
+  // such rather than looping into the "no output" error below.
+  if (!*fmt) {
+    lua_pushliteral(L, "");
+    return 1;
   }
-  return 1;
+  // strftime returns 0 both when the result doesn't fit the buffer and
+  // when a (non-empty) format genuinely yields nothing, so grow the
+  // buffer and retry before treating a persistent 0 as an error. This
+  // fixes the old 256-byte cap silently truncating long formats to a
+  // bare, ambiguous nil.
+  buf = stackbuf;
+  size = sizeof(stackbuf);
+  for (;;) {
+    len = strftime(buf, size, fmt, &tm);
+    if (len > 0) {
+      lua_pushlstring(L, buf, len);
+      if (buf != stackbuf)
+        free(buf);
+      return 1;
+    }
+    if (buf != stackbuf)
+      free(buf);
+    if (size > 65536)
+      break;
+    size <<= 2;
+    if (!(buf = malloc(size))) {
+      lua_pushnil(L);
+      lua_pushliteral(L, "out of memory");
+      return 2;
+    }
+  }
+  lua_pushnil(L);
+  lua_pushfstring(L, "strftime: format \"%s\" produced no output or is too "
+                     "large to format",
+                  fmt);
+  return 2;
 }
 
 int LuaParseParams(lua_State *L) {
