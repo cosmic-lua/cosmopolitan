@@ -1584,41 +1584,28 @@ function path.islink(path) end
 --- taken in choosing parameters, since an HTTP endpoint that uses Argon2 can just
 --- as easily become a denial of service vector. For example, you may want to
 --- consider throttling your login endpoint.
-argon2 = {
-    --- Argon2 hashing variants. The fields are opaque read-only userdata
-    --- values that can be fed to `config.variant` or `argon2.variant`.
-    ---@type argon2.Variants
-    variants = nil,
-}
-
----@class argon2.Variant: userdata
---- An opaque handle identifying an Argon2 hashing variant. The available
---- variants live in the `argon2.variants` table.
-
----@class argon2.Variants
----@field argon2_id argon2.Variant blend of other two methods [default]
----@field argon2_i argon2.Variant maximize resistance to side-channel attacks
----@field argon2_d argon2.Variant maximize resistance to gpu cracking attacks
+argon2 = {}
 
 ---@class argon2.Config
 ---@field m_cost integer? the memory hardness in kibibytes, which defaults to 4096 (4 mibibytes). It's recommended that this be tuned upwards.
 ---@field t_cost integer? the number of iterations, which defaults to `3`.
 ---@field parallelism integer? the parallelism factor, which defaults to `1`.
 ---@field hash_len integer? the number of desired bytes in hash output, which defaults to 32.
----@field variant argon2.Variant? may be `argon2.variants.argon2_id` blend of other two methods [default], `argon2.variants.argon2_i` maximize resistance to side-channel attacks, or `argon2.variants.argon2_d` maximize resistance to gpu cracking attacks
+---@field variant string? the Argon2 variant: `"argon2id"` blend of other two methods [default], `"argon2i"` maximize resistance to side-channel attacks, or `"argon2d"` maximize resistance to gpu cracking attacks
 
 --- Hashes password.
 ---
 --- This is consistent with the README of the reference implementation:
 ---
 ---     >: assert(argon2.hash_encoded("password", "somesalt", {
----         variant = argon2.variants.argon2_i,
+---         variant = "argon2i",
 ---         hash_len = 24,
 ---         t_cost = 2,
 ---     }))
 ---
 ---
---- `salt` is a nonce value used to hash the string.
+--- `salt` is a nonce value used to hash the string. It is optional: when it is
+--- `nil` or omitted, 16 random bytes are generated with a CSPRNG.
 ---
 --- `config.m_cost` is the memory hardness in kibibytes, which defaults
 --- to 4096 (4 mibibytes). It's recommended that this be tuned upwards.
@@ -1632,66 +1619,33 @@ argon2 = {
 ---
 --- `config.variant` may be:
 ---
---- - `argon2.variants.argon2_id` blend of other two methods [default]
---- - `argon2.variants.argon2_i` maximize resistance to side-channel attacks
---- - `argon2.variants.argon2_d` maximize resistance to gpu cracking attacks
+--- - `"argon2id"` blend of other two methods [default]
+--- - `"argon2i"` maximize resistance to side-channel attacks
+--- - `"argon2d"` maximize resistance to gpu cracking attacks
 ---
 ---@param pass string
----@param salt string
----@param config argon2.Config
+---@param salt string? optional; a random 16-byte salt is generated when omitted
+---@param config argon2.Config?
 ---@return string ascii
 ---@nodiscard
----@overload fun(pass: string, salt: string, config?: argon2.Config): nil, error: string
+---@overload fun(pass: string, salt?: string, config?: argon2.Config): nil, string
 function argon2.hash_encoded(pass, salt, config) end
 
---- Verifies password, e.g.
+--- Verifies a password against an encoded hash, e.g.
 ---
----     >: argon2.verify(
----         "p=4$c29tZXNhbHQ$RdescudvJCsgt3ub+b+dWRWJTmaaJObG",
+---     >: argon2.verify(encoded, "password")
 ---     true
+---
+--- Returns `true` when the password matches. A plain mismatch returns
+--- `false` (with no error). A malformed `encoded` string returns
+--- `false, err`.
 ---
 ---@param encoded string
 ---@param pass string
 ---@return boolean ok
+---@return string? err set only when `encoded` is malformed
 ---@nodiscard
----@overload fun(encoded: string, pass: string): nil, error: string
 function argon2.verify(encoded, pass) end
-
---- Gets or sets the default memory hardness in kibibytes used by
---- `argon2.hash_encoded` when its config omits `m_cost`. Called with no
---- argument (or `nil`), it returns the current default (initially 4096).
----@param m_cost integer? new default memory hardness in kibibytes
----@return integer m_cost the current default
-function argon2.m_cost(m_cost) end
-
---- Gets or sets the default number of iterations used by
---- `argon2.hash_encoded` when its config omits `t_cost`. Called with no
---- argument (or `nil`), it returns the current default (initially 3).
----@param t_cost integer? new default number of iterations
----@return integer t_cost the current default
-function argon2.t_cost(t_cost) end
-
---- Gets or sets the default parallelism factor used by
---- `argon2.hash_encoded` when its config omits `parallelism`. Called with
---- no argument (or `nil`), it returns the current default (initially 1).
----@param parallelism integer? new default parallelism factor
----@return integer parallelism the current default
-function argon2.parallelism(parallelism) end
-
---- Gets or sets the default hash output length in bytes used by
---- `argon2.hash_encoded` when its config omits `hash_len`. Called with no
---- argument (or `nil`), it returns the current default (initially 32).
----@param hash_len integer? new default hash length in bytes
----@return integer hash_len the current default
-function argon2.hash_len(hash_len) end
-
---- Sets the default variant used by `argon2.hash_encoded` when its config
---- omits `variant`, e.g. `argon2.variant(argon2.variants.argon2_id)`.
---- Unlike the other configuration functions, the argument is required.
---- The default is `argon2.variants.argon2_id`.
----@param variant argon2.Variant one of the `argon2.variants` values
----@return argon2.Variant variant the variant that was set
-function argon2.variant(variant) end
 
 --- ### ZIP
 ---
