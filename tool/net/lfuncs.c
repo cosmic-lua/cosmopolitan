@@ -317,7 +317,7 @@ int LuaGetMonospaceWidth(lua_State *L) {
 
 // Slurp(path:str[, i:int[, j:int]])
 //     ├─→ data:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 int LuaSlurp(lua_State *L) {
   ssize_t rc;
   char tb[2048];
@@ -385,7 +385,7 @@ int LuaSlurp(lua_State *L) {
 
 // Barf(path:str, data:str[, mode:int[, flags:int[, offset:int]]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 int LuaBarf(lua_State *L) {
   ssize_t rc;
   const char *data;
