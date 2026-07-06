@@ -222,7 +222,6 @@ local MODULES = {
     consts = re_consts,
     methods = {
       { class = "Regex", reg = reg_table(C_re, "kLuaReRegexMeth") },
-      { class = "Errno", reg = reg_table(C_re, "kLuaReErrnoMeth") },
     },
   },
   {

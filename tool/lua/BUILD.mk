@@ -113,6 +113,10 @@ o/$(MODE)/tool/lua/test_getopt.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_geto
 	$< tool/lua/test_getopt.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_re.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_re.lua
+	$< tool/lua/test_re.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_zip.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip.lua
 	$< tool/lua/test_zip.lua
 	@touch $@
@@ -156,6 +160,7 @@ o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
+	o/$(MODE)/tool/lua/test_re.ok					\
 	o/$(MODE)/tool/lua/test_strftime.ok				\
 	o/$(MODE)/tool/lua/test_zip.ok					\
 	o/$(MODE)/tool/lua/test_zip_append.ok				\
