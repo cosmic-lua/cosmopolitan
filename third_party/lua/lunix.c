@@ -217,21 +217,24 @@ static dontinline int ReturnString(lua_State *L, const char *x) {
 }
 
 int LuaUnixSysretErrno(lua_State *L, const char *call, int olderr) {
-  int unixerr, winerr;
-  struct UnixErrno *ep;
+  char msg[256];
+  int unixerr;
   unixerr = errno;
-  winerr = IsWindows() ? GetLastError() : 0;
   if (!IsTiny() && !(0 < unixerr && unixerr < (!IsWindows() ? 4096 : 65536))) {
     WARNF("errno should not be %d", unixerr);
   }
+  // The fork's error convention: nil, err:string, errno:integer. The
+  // string reuses the old unix.Errno __tostring formatting, e.g.
+  // "open: ENOENT: No such file or directory" (call, symbolic name,
+  // description). The integer errno is pushed as a third value so
+  // callers can branch on specific codes (EINTR, EAGAIN, ...) without
+  // parsing the string.
+  strerror_r(unixerr, msg, sizeof(msg));
   lua_pushnil(L);
-  ep = lua_newuserdatauv(L, sizeof(*ep), 1);
-  luaL_setmetatable(L, "unix.Errno");
-  ep->errno_ = unixerr;
-  ep->winerr = winerr;
-  ep->call = call;
+  lua_pushfstring(L, "%s: %s: %s", call, _strerrno(unixerr), msg);
+  lua_pushinteger(L, unixerr);
   errno = olderr;
-  return 2;
+  return 3;
 }
 
 static int SysretBool(lua_State *L, const char *call, int olderr, int rc) {
@@ -404,7 +407,7 @@ static int LuaUnixUmask(lua_State *L) {
 
 // unix.access(path:str, how:int[, flags:int[, dirfd:int]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixAccess(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -415,7 +418,7 @@ static int LuaUnixAccess(lua_State *L) {
 
 // unix.mkdir(path:str[, mode:int[, dirfd:int]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixMkdir(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -426,7 +429,7 @@ static int LuaUnixMkdir(lua_State *L) {
 
 // unix.makedirs(path:str[, mode:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixMakedirs(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -436,7 +439,7 @@ static int LuaUnixMakedirs(lua_State *L) {
 
 // unix.rmrf(path:str)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRmrf(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "rmrf", olderr, rmrf(luaL_checkstring(L, 1)));
@@ -444,7 +447,7 @@ static int LuaUnixRmrf(lua_State *L) {
 
 // unix.chdir(path:str)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixChdir(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "chdir", olderr, chdir(luaL_checkstring(L, 1)));
@@ -452,7 +455,7 @@ static int LuaUnixChdir(lua_State *L) {
 
 // unix.unlink(path:str[, dirfd:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixUnlink(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -462,7 +465,7 @@ static int LuaUnixUnlink(lua_State *L) {
 
 // unix.rmdir(path:str[, dirfd:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRmdir(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "rmdir", olderr,
@@ -472,7 +475,7 @@ static int LuaUnixRmdir(lua_State *L) {
 
 // unix.rename(oldpath:str, newpath:str[, olddirfd:int, newdirfd:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRename(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -483,7 +486,7 @@ static int LuaUnixRename(lua_State *L) {
 
 // unix.link(existingpath:str, newpath:str[, flags:int[, olddirfd, newdirfd]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixLink(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -495,7 +498,7 @@ static int LuaUnixLink(lua_State *L) {
 
 // unix.symlink(target:str, linkpath:str[, newdirfd:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSymlink(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -506,7 +509,7 @@ static int LuaUnixSymlink(lua_State *L) {
 
 // unix.chown(path:str, uid:int, gid:int[, flags:int[, dirfd:int]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixChown(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -518,7 +521,7 @@ static int LuaUnixChown(lua_State *L) {
 
 // unix.chmod(path:str, mode:int[, flags:int[, dirfd:int]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixChmod(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -529,7 +532,7 @@ static int LuaUnixChmod(lua_State *L) {
 
 // unix.readlink(path:str[, bufsiz:int])
 //     ├─→ content:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Note: this fork changed arg 2 from a dirfd (upstream) to a buffer size;
 // AT_FDCWD is always used.  bufsiz is clamped to [1, 0x7ffff000].
@@ -555,7 +558,7 @@ static int LuaUnixReadlink(lua_State *L) {
 
 // unix.getcwd()
 //     ├─→ path:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetcwd(lua_State *L) {
   char *path;
   int olderr = errno;
@@ -571,7 +574,7 @@ static int LuaUnixGetcwd(lua_State *L) {
 // unix.fork()
 //     ├─┬─→ 0
 //     │ └─→ childpid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFork(lua_State *L) {
   int olderr = errno;
   return SysretInteger(L, "fork", olderr, fork());
@@ -594,7 +597,7 @@ static int LuaUnixEnviron(lua_State *L) {
 
 // unix.setenv(name:str, value:str[, overwrite:bool])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetenv(lua_State *L) {
   int olderr = errno;
   const char *name = luaL_checkstring(L, 1);
@@ -605,7 +608,7 @@ static int LuaUnixSetenv(lua_State *L) {
 
 // unix.unsetenv(name:str)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixUnsetenv(lua_State *L) {
   int olderr = errno;
   const char *name = luaL_checkstring(L, 1);
@@ -614,7 +617,7 @@ static int LuaUnixUnsetenv(lua_State *L) {
 
 // unix.clearenv()
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixClearenv(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "clearenv", olderr, clearenv());
@@ -622,7 +625,7 @@ static int LuaUnixClearenv(lua_State *L) {
 
 // unix.getlogin()
 //     ├─→ str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetlogin(lua_State *L) {
   int olderr = errno;
   char *login = getlogin();
@@ -635,7 +638,7 @@ static int LuaUnixGetlogin(lua_State *L) {
 }
 
 // unix.execve(prog:str[, args:List<*>, env:List<*>])
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixExecve(lua_State *L) {
   int olderr;
   const char *prog;
@@ -675,7 +678,7 @@ static int LuaUnixExecve(lua_State *L) {
 
 // unix.execvp(prog:str[, argv:table])
 //     ├─→ ⊥
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixExecvp(lua_State *L) {
   int olderr;
   const char *prog;
@@ -701,7 +704,7 @@ static int LuaUnixExecvp(lua_State *L) {
 
 // unix.execvpe(prog:str, argv:table[, envp:table])
 //     ├─→ ⊥
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixExecvpe(lua_State *L) {
   int olderr;
   const char *prog;
@@ -732,7 +735,7 @@ static int LuaUnixExecvpe(lua_State *L) {
 
 // unix.fexecve(fd:int, argv:table[, envp:table])
 //     ├─→ ⊥
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFexecve(lua_State *L) {
   int olderr, fd;
   char **argv, **envp, **freeme1, **freeme2;
@@ -762,7 +765,7 @@ static int LuaUnixFexecve(lua_State *L) {
 
 // unix.spawn(prog:str, argv:table[, envp:table])
 //     ├─→ pid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSpawn(lua_State *L) {
   int olderr, rc;
   pid_t pid;
@@ -803,7 +806,7 @@ static int LuaUnixSpawn(lua_State *L) {
 
 // unix.spawnp(prog:str, argv:table[, envp:table])
 //     ├─→ pid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSpawnp(lua_State *L) {
   int olderr, rc;
   pid_t pid;
@@ -844,7 +847,7 @@ static int LuaUnixSpawnp(lua_State *L) {
 
 // unix.commandv(prog:str)
 //     ├─→ path:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixCommandv(lua_State *L) {
   int olderr;
   const char *prog;
@@ -864,7 +867,7 @@ static int LuaUnixCommandv(lua_State *L) {
 
 // unix.realpath(path:str)
 //     ├─→ path:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRealpath(lua_State *L) {
   char *resolved;
   int olderr;
@@ -888,7 +891,7 @@ static int LuaUnixSyslog(lua_State *L) {
 
 // unix.chroot(path:str)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixChroot(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "chroot", olderr, chroot(luaL_checkstring(L, 1)));
@@ -896,7 +899,7 @@ static int LuaUnixChroot(lua_State *L) {
 
 // unix.unshare(flags:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Disassociates parts of the caller's execution context, e.g. placing
 // it into a fresh network, mount, pid, or user namespace. `flags` is a
@@ -909,7 +912,7 @@ static int LuaUnixUnshare(lua_State *L) {
 
 // unix.setns(fd:int[, nstype:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Reassociates the calling thread with the namespace referenced by
 // `fd`, which is typically obtained by opening one of the files under
@@ -925,7 +928,7 @@ static int LuaUnixSetns(lua_State *L) {
 
 // unix.mount(source:str, target:str, fstype:str, flags:int[, data:str])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Mounts a filesystem. `flags` is a bitwise OR of `unix.MS_*`
 // constants. `data` is a filesystem-specific options string (may be
@@ -956,7 +959,7 @@ static int LuaUnixMount(lua_State *L) {
 
 // unix.unmount(target:str[, flags:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Unmounts a filesystem. The BSD-style name (`unmount`) is used for
 // cross-platform compatibility; on Linux this is the `umount2`
@@ -971,7 +974,7 @@ static int LuaUnixUnmount(lua_State *L) {
 
 // unix.pivot_root(new_root:str, put_old:str)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Moves the root filesystem of the current mount namespace to
 // `put_old` and makes `new_root` the new root. Usually paired with
@@ -985,7 +988,7 @@ static int LuaUnixPivotRoot(lua_State *L) {
 
 // unix.prctl(option:int[, arg2:int[, arg3:int[, arg4:int[, arg5:int]]]])
 //     ├─→ rc:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Performs an operation on the calling process. `option` is one of
 // the `unix.PR_*` constants. The remaining arguments are
@@ -1016,7 +1019,7 @@ static int LuaUnixPrctl(lua_State *L) {
 
 // unix.capget([pid:int])
 //     ├─→ effective:int, permitted:int, inheritable:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Returns the calling thread's (or `pid`'s) capability sets as
 // 64-bit bitmasks. Each bit position N in the returned masks
@@ -1047,7 +1050,7 @@ static int LuaUnixCapget(lua_State *L) {
 
 // unix.capset(effective:int, permitted:int, inheritable:int[, pid:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Sets the calling thread's (or `pid`'s) capability sets. Each
 // argument is a 64-bit bitmask of `1 << unix.CAP_*` bits. Note that
@@ -1080,7 +1083,7 @@ static int LuaUnixCapset(lua_State *L) {
 // unix.landlock_create_ruleset([handled_access_fs:int[, flags:int]])
 //     ├─→ fd:int      -- ruleset fd (close with unix.close)
 //     ├─→ abi:int     -- when called with no args, returns ABI version
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // With no arguments, returns the kernel's supported landlock ABI
 // (1 = basic, 2 = REFER, 3 = TRUNCATE, ...). With `handled_access_fs`,
@@ -1117,7 +1120,7 @@ static int LuaUnixLandlockCreateRuleset(lua_State *L) {
 
 // unix.landlock_add_rule(ruleset_fd:int, parent_fd:int, allowed:int[, flags:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Adds a LANDLOCK_RULE_PATH_BENEATH rule: access under the path
 // referenced by `parent_fd` (opened with O_PATH) is granted for the
@@ -1146,7 +1149,7 @@ static int LuaUnixLandlockAddRule(lua_State *L) {
 
 // unix.landlock_restrict_self(ruleset_fd:int[, flags:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Apply the ruleset to the current thread (and its future children).
 // Callers must set PR_SET_NO_NEW_PRIVS first or have CAP_SYS_ADMIN.
@@ -1161,7 +1164,7 @@ static int LuaUnixLandlockRestrictSelf(lua_State *L) {
 
 // unix.setrlimit(resource:int, soft:int[, hard:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetrlimit(lua_State *L) {
   int olderr = errno;
   int64_t soft = luaL_checkinteger(L, 2);
@@ -1173,7 +1176,7 @@ static int LuaUnixSetrlimit(lua_State *L) {
 
 // unix.getrlimit(resource:int)
 //     ├─→ soft:int, hard:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetrlimit(lua_State *L) {
   int olderr = errno;
   struct rlimit rlim;
@@ -1188,7 +1191,7 @@ static int LuaUnixGetrlimit(lua_State *L) {
 
 // unix.getrusage([who:int])
 //     ├─→ unix.Rusage
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetrusage(lua_State *L) {
   struct rusage ru;
   int olderr = errno;
@@ -1202,7 +1205,7 @@ static int LuaUnixGetrusage(lua_State *L) {
 
 // unix.kill(pid:int, sig:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixKill(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "kill", olderr,
@@ -1211,7 +1214,7 @@ static int LuaUnixKill(lua_State *L) {
 
 // unix.killpg(pgrp:int, sig:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixKillpg(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "killpg", olderr,
@@ -1220,7 +1223,7 @@ static int LuaUnixKillpg(lua_State *L) {
 
 // unix.raise(sig:int)
 //     ├─→ rc:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRaise(lua_State *L) {
   int olderr = errno;
   return SysretInteger(L, "raise", olderr, raise(luaL_checkinteger(L, 1)));
@@ -1228,7 +1231,7 @@ static int LuaUnixRaise(lua_State *L) {
 
 // unix.wait([pid:int, options:int])
 //     ├─→ pid:int, wstatus:int, unix.Rusage
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixWait(lua_State *L) {
   struct rusage ru;
   int pid, wstatus, olderr = errno;
@@ -1245,7 +1248,7 @@ static int LuaUnixWait(lua_State *L) {
 
 // unix.fcntl(fd:int, cmd:int[, ...])
 //     ├─→ ...
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFcntl(lua_State *L) {
   struct flock lock;
   int fd, cmd, olderr = errno;
@@ -1284,7 +1287,7 @@ static int LuaUnixFcntl(lua_State *L) {
 // unix.ioctl(fd:int, request:int[, arg:int|str])
 //     ├─→ true               -- when arg is absent or an integer
 //     ├─→ buf:str            -- when arg is a string (possibly modified in place)
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Performs a device-specific control operation on `fd`. The third
 // argument is interpreted as follows:
@@ -1353,7 +1356,7 @@ static int LuaUnixIoctl(lua_State *L) {
 
 // unix.dup(oldfd:int[, newfd:int[, flags:int[, lowest:int]]])
 //     ├─→ newfd:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixDup(lua_State *L) {
   int rc, oldfd, newfd, flags, lowno, olderr;
   olderr = errno;
@@ -1379,7 +1382,7 @@ static int LuaUnixDup(lua_State *L) {
 
 // unix.pipe([flags:int])
 //     ├─→ reader:int, writer:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixPipe(lua_State *L) {
   int pipefd[2], olderr = errno;
   if (!pipe2(pipefd, luaL_optinteger(L, 1, 0))) {
@@ -1393,7 +1396,7 @@ static int LuaUnixPipe(lua_State *L) {
 
 // unix.getsid(pid:int)
 //     ├─→ sid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetsid(lua_State *L) {
   int olderr = errno;
   return SysretInteger(L, "getsid", olderr, getsid(luaL_checkinteger(L, 1)));
@@ -1406,28 +1409,28 @@ static dontinline int LuaUnixRc0(lua_State *L, const char *call, int f(void)) {
 
 // unix.getpgrp()
 //     ├─→ pgid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetpgrp(lua_State *L) {
   return LuaUnixRc0(L, "getpgrp", getpgrp);
 }
 
 // unix.setpgrp()
 //     ├─→ pgid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetpgrp(lua_State *L) {
   return LuaUnixRc0(L, "setpgrp", setpgrp);
 }
 
 // unix.setsid()
 //     ├─→ sid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetsid(lua_State *L) {
   return LuaUnixRc0(L, "setsid", setsid);
 }
 
 // unix.getpgid(pid:int)
 //     ├─→ pgid:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetpgid(lua_State *L) {
   int olderr = errno;
   return SysretInteger(L, "getpgid", olderr, getpgid(luaL_checkinteger(L, 1)));
@@ -1435,7 +1438,7 @@ static int LuaUnixGetpgid(lua_State *L) {
 
 // unix.setpgid(pid:int, pgid:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetpgid(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "setpgid", olderr,
@@ -1450,28 +1453,28 @@ static dontinline int LuaUnixSetid(lua_State *L, const char *call,
 
 // unix.setuid(uid:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetuid(lua_State *L) {
   return LuaUnixSetid(L, "setuid", setuid);
 }
 
 // unix.setgid(gid:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetgid(lua_State *L) {
   return LuaUnixSetid(L, "setgid", setgid);
 }
 
 // unix.setfsuid(fsuid:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetfsuid(lua_State *L) {
   return LuaUnixSetid(L, "setfsuid", setfsuid);
 }
 
 // unix.setfsgid(fsgid:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetfsgid(lua_State *L) {
   return LuaUnixSetid(L, "setfsgid", setfsgid);
 }
@@ -1486,21 +1489,21 @@ static dontinline int LuaUnixSetresid(lua_State *L, const char *call,
 
 // unix.setresuid(real:int, effective:int, saved:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetresuid(lua_State *L) {
   return LuaUnixSetresid(L, "setresuid", setresuid);
 }
 
 // unix.setresgid(real:int, effective:int, saved:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetresgid(lua_State *L) {
   return LuaUnixSetresid(L, "setresgid", setresgid);
 }
 
 // unix.utimensat(path[, asecs, ananos, msecs, mnanos[, dirfd[, flags]]])
 //     ├─→ 0
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixUtimensat(lua_State *L) {
   int olderr = errno;
   return SysretInteger(
@@ -1516,7 +1519,7 @@ static int LuaUnixUtimensat(lua_State *L) {
 
 // unix.futimens(fd:int[, asecs, ananos, msecs, mnanos])
 //     ├─→ 0
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFutimens(lua_State *L) {
   int olderr = errno;
   return SysretInteger(
@@ -1530,7 +1533,7 @@ static int LuaUnixFutimens(lua_State *L) {
 
 // unix.clock_gettime([clock:int])
 //     ├─→ seconds:int, nanos:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGettime(lua_State *L) {
   struct timespec ts;
   int olderr = errno;
@@ -1545,7 +1548,7 @@ static int LuaUnixGettime(lua_State *L) {
 
 // unix.nanosleep(seconds:int[, nanos:int])
 //     ├─→ remseconds:int, remnanos:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixNanosleep(lua_State *L) {
   int olderr = errno;
   struct timespec req, rem;
@@ -1568,7 +1571,7 @@ static int LuaUnixSync(lua_State *L) {
 
 // unix.fsync(fd:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFsync(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "fsync", olderr, fsync(luaL_checkinteger(L, 1)));
@@ -1576,7 +1579,7 @@ static int LuaUnixFsync(lua_State *L) {
 
 // unix.fdatasync(fd:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFdatasync(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "fdatasync", olderr, fdatasync(luaL_checkinteger(L, 1)));
@@ -1584,7 +1587,7 @@ static int LuaUnixFdatasync(lua_State *L) {
 
 // unix.open(path:str[, flags:int[, mode:int[, dirfd:int]]])
 //     ├─→ fd:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixOpen(lua_State *L) {
   int olderr = errno;
   return SysretInteger(
@@ -1595,7 +1598,7 @@ static int LuaUnixOpen(lua_State *L) {
 
 // unix.tmpfd()
 //     ├─→ fd:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixTmpfd(lua_State *L) {
   int olderr = errno;
   return SysretInteger(L, "tmpfd", olderr, tmpfd());
@@ -1603,7 +1606,7 @@ static int LuaUnixTmpfd(lua_State *L) {
 
 // unix.mkdtemp(template:str)
 //     ├─→ path:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixMkdtemp(lua_State *L) {
   char *path;
   int olderr = errno;
@@ -1626,7 +1629,7 @@ static int LuaUnixMkdtemp(lua_State *L) {
 
 // unix.mkstemp(template:str)
 //     ├─→ fd:int, path:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixMkstemp(lua_State *L) {
   char *path;
   int fd, olderr = errno;
@@ -1650,7 +1653,7 @@ static int LuaUnixMkstemp(lua_State *L) {
 
 // unix.close(fd:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixClose(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "close", olderr, close(luaL_checkinteger(L, 1)));
@@ -1658,7 +1661,7 @@ static int LuaUnixClose(lua_State *L) {
 
 // unix.lseek(fd:int, offset:int[, whence:int])
 //     ├─→ newposbytes:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixLseek(lua_State *L) {
   int olderr = errno;
   return SysretInteger(L, "lseek", olderr,
@@ -1668,7 +1671,7 @@ static int LuaUnixLseek(lua_State *L) {
 
 // unix.truncate(path:str[, length:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixTruncate(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "truncate", olderr,
@@ -1677,7 +1680,7 @@ static int LuaUnixTruncate(lua_State *L) {
 
 // unix.ftruncate(fd:int[, length:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFtruncate(lua_State *L) {
   int olderr = errno;
   return SysretBool(
@@ -1687,7 +1690,7 @@ static int LuaUnixFtruncate(lua_State *L) {
 
 // unix.read(fd:int[, bufsiz:str[, offset:int]])
 //     ├─→ data:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRead(lua_State *L) {
   char *buf;
   size_t got;
@@ -1719,7 +1722,7 @@ static int LuaUnixRead(lua_State *L) {
 
 // unix.write(fd:int, data:str[, offset:int])
 //     ├─→ wrotebytes:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixWrite(lua_State *L) {
   ssize_t rc;
   size_t size;
@@ -1740,7 +1743,7 @@ static int LuaUnixWrite(lua_State *L) {
 
 // unix.stat(path:str[, flags:int[, dirfd:int]])
 //     ├─→ unix.Stat
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixStat(lua_State *L) {
   struct stat st;
   int olderr = errno;
@@ -1755,7 +1758,7 @@ static int LuaUnixStat(lua_State *L) {
 
 // unix.fstat(fd:int)
 //     ├─→ unix.Stat
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFstat(lua_State *L) {
   struct stat st;
   int olderr = errno;
@@ -1769,7 +1772,7 @@ static int LuaUnixFstat(lua_State *L) {
 
 // unix.statfs(path:str)
 //     ├─→ unix.Statfs
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixStatfs(lua_State *L) {
   struct statfs f;
   int olderr = errno;
@@ -1783,7 +1786,7 @@ static int LuaUnixStatfs(lua_State *L) {
 
 // unix.fstatfs(fd:int)
 //     ├─→ unix.Stat
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFstatfs(lua_State *L) {
   struct statfs f;
   int olderr = errno;
@@ -1871,21 +1874,21 @@ static int LuaUnixSetsockopt(lua_State *L) {
   if (IsSockoptBool(level, optname)) {
     // unix.setsockopt(fd:int, level:int, optname:int, value:bool)
     //     ├─→ true
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     optint = lua_toboolean(L, 4);
     optval = &optint;
     optsize = sizeof(optint);
   } else if (IsSockoptInt(level, optname)) {
     // unix.setsockopt(fd:int, level:int, optname:int, value:int)
     //     ├─→ true
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     optint = luaL_checkinteger(L, 4);
     optval = &optint;
     optsize = sizeof(optint);
   } else if (IsSockoptTimeval(level, optname)) {
     // unix.setsockopt(fd:int, level:int, optname:int, secs:int[, nanos:int])
     //     ├─→ true
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     tv.tv_sec = luaL_checkinteger(L, 4);
     tv.tv_usec = luaL_optinteger(L, 5, 0) / 1000;
     optval = &tv;
@@ -1893,7 +1896,7 @@ static int LuaUnixSetsockopt(lua_State *L) {
   } else if (level == SOL_SOCKET && optname == SO_LINGER) {
     // unix.setsockopt(fd:int, level:int, optname:int, secs:int, enabled:bool)
     //     ├─→ true
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     l.l_linger = luaL_checkinteger(L, 4);
     l.l_onoff = lua_toboolean(L, 5);
     optval = &l;
@@ -1922,7 +1925,7 @@ static int LuaUnixGetsockopt(lua_State *L) {
   if (IsSockoptBool(level, optname) || IsSockoptInt(level, optname)) {
     // unix.getsockopt(fd:int, level:int, optname:int)
     //     ├─→ value:int
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     size = sizeof(optval);
     if (getsockopt(fd, level, optname, &optval, &size) != -1) {
       CheckOptvalsize(L, sizeof(optval), size);
@@ -1932,7 +1935,7 @@ static int LuaUnixGetsockopt(lua_State *L) {
   } else if (IsSockoptTimeval(level, optname)) {
     // unix.getsockopt(fd:int, level:int, optname:int)
     //     ├─→ secs:int, nsecs:int
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     size = sizeof(tv);
     if (getsockopt(fd, level, optname, &tv, &size) != -1) {
       CheckOptvalsize(L, sizeof(tv), size);
@@ -1943,7 +1946,7 @@ static int LuaUnixGetsockopt(lua_State *L) {
   } else if (level == SOL_SOCKET && optname == SO_LINGER) {
     // unix.getsockopt(fd:int, unix.SOL_SOCKET, unix.SO_LINGER)
     //     ├─→ seconds:int, enabled:bool
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     size = sizeof(l);
     if (getsockopt(fd, level, optname, &l, &size) != -1) {
       CheckOptvalsize(L, sizeof(l), size);
@@ -1954,7 +1957,7 @@ static int LuaUnixGetsockopt(lua_State *L) {
   } else if (level == SOL_TCP && optname == TCP_SAVED_SYN) {
     // unix.getsockopt(fd:int, unix.SOL_TCP, unix.SO_SAVED_SYN)
     //     ├─→ syn_packet_bytes:str
-    //     └─→ nil, unix.Errno
+    //     └─→ nil, error:str, errno:int
     if ((p = malloc((size = 1500)))) {
       if (getsockopt(fd, level, optname, p, &size) != -1) {
         lua_pushlstring(L, p, size);
@@ -1971,7 +1974,7 @@ static int LuaUnixGetsockopt(lua_State *L) {
 
 // unix.socket([family:int[, type:int[, protocol:int]]])
 //     ├─→ fd:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSocket(lua_State *L) {
   int olderr = errno;
   int family = luaL_optinteger(L, 1, AF_INET);
@@ -1982,7 +1985,7 @@ static int LuaUnixSocket(lua_State *L) {
 
 // unix.socketpair([family:int[, type:int[, protocol:int]]])
 //     ├─→ fd1:int, fd2:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSocketpair(lua_State *L) {
   int sv[2], olderr = errno;
   if (!socketpair(luaL_optinteger(L, 1, AF_UNIX),
@@ -1999,7 +2002,7 @@ static int LuaUnixSocketpair(lua_State *L) {
 // unix.bind(fd:int[, ip:uint32, port:uint16])
 // unix.bind(fd:int[, unixpath:str])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixBind(lua_State *L) {
   uint32_t salen;
   struct sockaddr_storage ss;
@@ -2013,7 +2016,7 @@ static int LuaUnixBind(lua_State *L) {
 // unix.connect(fd:int, ip:uint32, port:uint16)
 // unix.connect(fd:int, unixpath:str)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixConnect(lua_State *L) {
   uint32_t salen;
   struct sockaddr_storage ss;
@@ -2026,7 +2029,7 @@ static int LuaUnixConnect(lua_State *L) {
 
 // unix.listen(fd:int[, backlog:int])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixListen(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "listen", olderr,
@@ -2050,7 +2053,7 @@ static int LuaUnixGetname(lua_State *L, const char *name,
 // unix.getsockname(fd:int)
 //     ├─→ ip:uint32, port:uint16
 //     ├─→ unixpath:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetsockname(lua_State *L) {
   return LuaUnixGetname(L, "getsockname", getsockname);
 }
@@ -2058,14 +2061,14 @@ static int LuaUnixGetsockname(lua_State *L) {
 // unix.getpeername(fd:int)
 //     ├─→ ip:uint32, port:uint16
 //     ├─→ unixpath:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGetpeername(lua_State *L) {
   return LuaUnixGetname(L, "getpeername", getpeername);
 }
 
 // unix.siocgifconf()
 //     ├─→ {{name:str,ip:uint32,netmask:uint32}, ...}
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSiocgifconf(lua_State *L) {
   size_t n;
   char *data;
@@ -2112,7 +2115,7 @@ static int LuaUnixSiocgifconf(lua_State *L) {
 
 // sandbox.pledge([promises:str[, execpromises:str[, mode:int]]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixPledge(lua_State *L) {
   int olderr = errno;
   __pledge_mode = luaL_optinteger(L, 3, 0);
@@ -2122,7 +2125,7 @@ static int LuaUnixPledge(lua_State *L) {
 
 // sandbox.unveil([path:str[, permissions:str]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixUnveil(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "unveil", olderr,
@@ -2131,7 +2134,7 @@ static int LuaUnixUnveil(lua_State *L) {
 
 // unix.gethostname()
 //     ├─→ host:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGethostname(lua_State *L) {
   int rc, olderr;
   char buf[DNS_NAME_MAX + 1];
@@ -2149,7 +2152,7 @@ static int LuaUnixGethostname(lua_State *L) {
 
 // unix.sethostname(name:str)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSethostname(lua_State *L) {
   size_t len;
   int olderr = errno;
@@ -2160,7 +2163,7 @@ static int LuaUnixSethostname(lua_State *L) {
 // unix.accept(serverfd:int[, flags:int])
 //     ├─→ clientfd:int, ip:uint32, port:uint16
 //     ├─→ clientfd:int, unixpath:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixAccept(lua_State *L) {
   uint32_t addrsize;
   struct sockaddr_storage ss;
@@ -2180,7 +2183,7 @@ static int LuaUnixAccept(lua_State *L) {
 
 // unix.poll({[fd:int]=events:int, ...}[, timeoutms:int[, mask:unix.Sigset]])
 //     ├─→ {[fd:int]=revents:int, ...}
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixPoll(lua_State *L) {
   size_t nfds;
   sigset_t *mask;
@@ -2239,7 +2242,7 @@ static int LuaUnixPoll(lua_State *L) {
 // unix.recvfrom(fd:int[, bufsiz:int[, flags:int]])
 //     ├─→ data:str, ip:uint32, port:uint16
 //     ├─→ data:str, unixpath:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRecvfrom(lua_State *L) {
   char *buf;
   size_t got;
@@ -2270,7 +2273,7 @@ static int LuaUnixRecvfrom(lua_State *L) {
 
 // unix.recv(fd:int[, bufsiz:int[, flags:int]])
 //     ├─→ data:str
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixRecv(lua_State *L) {
   char *buf;
   size_t got;
@@ -2297,7 +2300,7 @@ static int LuaUnixRecv(lua_State *L) {
 
 // unix.send(fd:int, data:str[, flags:int[, offset:int]])
 //     ├─→ sent:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Sends `data[offset:]` on `fd`. `offset` defaults to 0 and is 0-based
 // (unlike most Lua indexes); offsets past `#data` send an empty
@@ -2327,7 +2330,7 @@ static int LuaUnixSend(lua_State *L) {
 // unix.sendto(fd:int, data:str, ip:uint32, port:uint16[, flags:int])
 // unix.sendto(fd:int, data:str, unixpath:str[, flags:int])
 //     ├─→ sent:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSendto(lua_State *L) {
   size_t size;
   uint32_t salen;
@@ -2345,7 +2348,7 @@ static int LuaUnixSendto(lua_State *L) {
 
 // unix.shutdown(fd:int, how:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixShutdown(lua_State *L) {
   int olderr = errno;
   return SysretBool(L, "shutdown", olderr,
@@ -2354,7 +2357,7 @@ static int LuaUnixShutdown(lua_State *L) {
 
 // unix.sigprocmask(how:int, newmask:unix.Sigset)
 //     ├─→ oldmask:unix.Sigset
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSigprocmask(lua_State *L) {
   sigset_t oldmask;
   int olderr = errno;
@@ -2430,7 +2433,7 @@ static void LuaUnixOnSignal(int sig, siginfo_t *si, void *ctx) {
 
 // unix.sigaction(sig:int[, handler:func|int[, flags:int[, mask:unix.Sigset]]])
 //     ├─→ oldhandler:func|int, flags:int, mask:unix.Sigset
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSigaction(lua_State *L) {
   sigset_t *mask;
   int sig, olderr = errno;
@@ -2510,7 +2513,7 @@ static int LuaUnixSigaction(lua_State *L) {
 }
 
 // unix.sigsuspend([mask:Sigmask])
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSigsuspend(lua_State *L) {
   int olderr = errno;
   sigsuspend(!lua_isnoneornil(L, 1) ? luaL_checkudata(L, 1, "unix.Sigset") : 0);
@@ -2519,7 +2522,7 @@ static int LuaUnixSigsuspend(lua_State *L) {
 
 // unix.sigpending()
 //     ├─→ mask:unix.Sigset
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSigpending(lua_State *L) {
   sigset_t mask;
   int olderr = errno;
@@ -2533,7 +2536,7 @@ static int LuaUnixSigpending(lua_State *L) {
 
 // unix.setitimer(which[, intervalsec, intns, valuesec, valuens])
 //     ├─→ intervalsec:int, intervalns:int, valuesec:int, valuens:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixSetitimer(lua_State *L) {
   int which, olderr = errno;
   struct itimerval it, oldit, *itptr;
@@ -2618,14 +2621,14 @@ static dontinline int LuaUnixTime(lua_State *L, const char *call,
 
 // unix.gmtime(unixsecs:int)
 //     ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
-//     └─→ nil,unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixGmtime(lua_State *L) {
   return LuaUnixTime(L, "gmtime", gmtime_r);
 }
 
 // unix.localtime(unixts:int)
 //     ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
-//     └─→ nil,unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixLocaltime(lua_State *L) {
   return LuaUnixTime(L, "localtime", localtime_r);
 }
@@ -2694,7 +2697,7 @@ static int LuaUnixSissock(lua_State *L) {
 // unix.isatty(fd:int)
 //     ├─→ true
 //     ├─→ false
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixIsatty(lua_State *L) {
   int olderr = errno;
   int rc = isatty(luaL_checkinteger(L, 1));
@@ -2708,7 +2711,7 @@ static int LuaUnixIsatty(lua_State *L) {
 
 // unix.tiocgwinsz(fd:int)
 //     ├─→ rows:int, cols:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixTiocgwinsz(lua_State *L) {
   struct winsize ws;
   int olderr = errno;
@@ -2723,7 +2726,7 @@ static int LuaUnixTiocgwinsz(lua_State *L) {
 
 // unix.tcgetattr(fd:int)
 //     ├─→ termios:table
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixTcgetattr(lua_State *L) {
   struct termios tio;
   int olderr = errno;
@@ -2756,7 +2759,7 @@ static int LuaUnixTcgetattr(lua_State *L) {
 
 // unix.tcsetattr(fd:int, action:int, termios:table)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixTcsetattr(lua_State *L) {
   struct termios tio;
   int olderr = errno;
@@ -2811,7 +2814,7 @@ static int LuaUnixSchedYield(lua_State *L) {
 
 // unix.daemon([nochdir:bool[, noclose:bool]])
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixDaemon(lua_State *L) {
   int olderr = errno;
   int nochdir = lua_toboolean(L, 1);
@@ -2827,7 +2830,7 @@ static int LuaUnixDaemon(lua_State *L) {
 
 // unix.nice(inc:int)
 //     ├─→ priority:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixNice(lua_State *L) {
   int olderr = errno;
   int inc = luaL_checkinteger(L, 1);
@@ -2843,7 +2846,7 @@ static int LuaUnixNice(lua_State *L) {
 
 // unix.getpriority(which:int, who:int)
 //     ├─→ priority:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // which can be:
 //   - unix.PRIO_PROCESS (0) - who is process id (0 = calling process)
@@ -2865,7 +2868,7 @@ static int LuaUnixGetpriority(lua_State *L) {
 
 // unix.setpriority(which:int, who:int, prio:int)
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // which can be:
 //   - unix.PRIO_PROCESS (0) - who is process id (0 = calling process)
@@ -3465,72 +3468,6 @@ static void LuaUnixRusageObj(lua_State *L) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// unix.Errno object
-
-static struct UnixErrno *GetUnixErrno(lua_State *L) {
-  return luaL_checkudata(L, 1, "unix.Errno");
-}
-
-// unix.Errno:errno()
-//     └─→ errno:int
-static int LuaUnixErrnoErrno(lua_State *L) {
-  return ReturnInteger(L, GetUnixErrno(L)->errno_);
-}
-
-static int LuaUnixErrnoWinerr(lua_State *L) {
-  return ReturnInteger(L, GetUnixErrno(L)->winerr);
-}
-
-static int LuaUnixErrnoName(lua_State *L) {
-  return ReturnString(L, _strerrno(GetUnixErrno(L)->errno_));
-}
-
-static int LuaUnixErrnoDoc(lua_State *L) {
-  return ReturnString(L, _strerdoc(GetUnixErrno(L)->errno_));
-}
-
-static int LuaUnixErrnoCall(lua_State *L) {
-  return ReturnString(L, GetUnixErrno(L)->call);
-}
-
-static int LuaUnixErrnoToString(lua_State *L) {
-  char msg[256];
-  struct UnixErrno *e;
-  e = GetUnixErrno(L);
-  if (e->call) {
-    if (IsWindows()) SetLastError(e->winerr);
-    strerror_r(e->errno_, msg, sizeof(msg));
-    lua_pushfstring(L, "%s() failed: %s", e->call, msg);
-  } else {
-    lua_pushstring(L, _strerrno(e->errno_));
-  }
-  return 1;
-}
-
-static const luaL_Reg kLuaUnixErrnoMeth[] = {
-    {"errno", LuaUnixErrnoErrno},    //
-    {"winerr", LuaUnixErrnoWinerr},  //
-    {"name", LuaUnixErrnoName},      //
-    {"call", LuaUnixErrnoCall},      //
-    {"doc", LuaUnixErrnoDoc},        //
-    {0},                             //
-};
-
-static const luaL_Reg kLuaUnixErrnoMeta[] = {
-    {"__tostring", LuaUnixErrnoToString},  //
-    {0},                                   //
-};
-
-static void LuaUnixErrnoObj(lua_State *L) {
-  luaL_newmetatable(L, "unix.Errno");
-  luaL_setfuncs(L, kLuaUnixErrnoMeta, 0);
-  luaL_newlibtable(L, kLuaUnixErrnoMeth);
-  luaL_setfuncs(L, kLuaUnixErrnoMeth, 0);
-  lua_setfield(L, -2, "__index");
-  lua_pop(L, 1);
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // unix.Memory object
 
 struct Memory {
@@ -3712,9 +3649,9 @@ static int LuaUnixMemoryXor(lua_State *L) {
 
 // unix.Memory:wait(word_index:int, expect:int[, abs_deadline:int[, nanos:int]])
 //     ├─→ 0
-//     ├─→ nil, unix.Errno(unix.EINTR)
-//     ├─→ nil, unix.Errno(unix.EAGAIN)
-//     └─→ nil, unix.Errno(unix.ETIMEDOUT)
+//     ├─→ nil, error:str, unix.EINTR
+//     ├─→ nil, error:str, unix.EAGAIN
+//     └─→ nil, error:str, unix.ETIMEDOUT
 static int LuaUnixMemoryWait(lua_State *L) {
   atomic_long *word;
   lua_Integer expect;
@@ -3985,7 +3922,7 @@ static DIR *GetDirOrDie(lua_State *L) {
 
 // unix.Dir:close()
 //     ├─→ true
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixDirClose(lua_State *L) {
   DIR **dirp;
   int rc, olderr;
@@ -4022,7 +3959,7 @@ static int LuaUnixDirRead(lua_State *L) {
 
 // unix.Dir:fd()
 //     ├─→ fd:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixDirFd(lua_State *L) {
   int fd, olderr = errno;
   fd = dirfd(GetDirOrDie(L));
@@ -4036,7 +3973,7 @@ static int LuaUnixDirFd(lua_State *L) {
 
 // unix.Dir:tell()
 //     ├─→ off:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixDirTell(lua_State *L) {
   int olderr = errno;
   return SysretInteger(L, "telldir", olderr, telldir(GetDirOrDie(L)));
@@ -4058,7 +3995,7 @@ static int ReturnDir(lua_State *L, DIR *dir) {
 
 // unix.opendir(path:str)
 //     ├─→ state:unix.Dir
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixOpendir(lua_State *L) {
   DIR *dir;
   int olderr = errno;
@@ -4071,7 +4008,7 @@ static int LuaUnixOpendir(lua_State *L) {
 
 // unix.fdopendir(fd:int)
 //     ├─→ state:unix.Dir
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 static int LuaUnixFdopendir(lua_State *L) {
   DIR *dir;
   int olderr = errno;
@@ -4111,7 +4048,7 @@ static void LuaUnixDirObj(lua_State *L) {
 
 // unix.sysconf(name:int)
 //     ├─→ value:int
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Queries a configurable system limit or value, e.g.
 //
@@ -4119,7 +4056,7 @@ static void LuaUnixDirObj(lua_State *L) {
 //     unix.sysconf(unix.SC_PAGESIZE)          // mmap() page size
 //     unix.sysconf(unix.SC_CLK_TCK)           // clock ticks per second
 //
-// Returns `nil, unix.Errno` with `EINVAL` when `name` isn't recognized.
+// Returns `nil, error, errno` with `EINVAL` when `name` isn't recognized.
 static int LuaUnixSysconf(lua_State *L) {
   long rc;
   int olderr = errno;
@@ -4137,7 +4074,7 @@ static int LuaUnixSysconf(lua_State *L) {
 // unix.uname()
 //     ├─→ {sysname:str, nodename:str, release:str,
 //     │    version:str, machine:str, domainname:str}
-//     └─→ nil, unix.Errno
+//     └─→ nil, error:str, errno:int
 //
 // Returns identity of the current operating system as a table.
 static int LuaUnixUname(lua_State *L) {
@@ -4338,7 +4275,6 @@ int LuaUnix(lua_State *L) {
   LuaUnixRusageObj(L);
   LuaUnixStatfsObj(L);
   LuaUnixMemoryObj(L);
-  LuaUnixErrnoObj(L);
   LuaUnixStatObj(L);
   LuaUnixDirObj(L);
   lua_newtable(L);

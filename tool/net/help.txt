@@ -1707,7 +1707,7 @@ FUNCTIONS
 
   Slurp(filename:str[, i:int[, j:int]])
       ├─→ data:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
           Reads all data from file the easy way.
 
@@ -1727,7 +1727,7 @@ FUNCTIONS
 
   Barf(filename:str, data:str[, mode:int[, flags:int[, offset:int]]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
           Writes all data to file the easy way.
 
@@ -2690,7 +2690,7 @@ UNIX MODULE
 
   unix.open(path:str, flags:int[, mode:int[, dirfd:int]])
       ├─→ fd:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Opens file.
 
@@ -2748,7 +2748,7 @@ UNIX MODULE
 
   unix.close(fd:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Closes file descriptor.
 
@@ -2774,7 +2774,7 @@ UNIX MODULE
 
   unix.read(fd:int[, bufsiz:str[, offset:int]])
       ├─→ data:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Reads from file descriptor.
 
@@ -2784,7 +2784,7 @@ UNIX MODULE
 
   unix.write(fd:int, data:str[, offset:int])
       ├─→ wrotebytes:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Writes to file descriptor.
 
@@ -2820,7 +2820,7 @@ UNIX MODULE
   unix.fork()
       ├─┬─→ 0
       │ └─→ childpid:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Creates a new process mitosis style.
 
@@ -2890,7 +2890,7 @@ UNIX MODULE
 
   unix.commandv(prog:str)
       ├─→ path:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Performs `$PATH` lookup of executable.
 
@@ -2908,7 +2908,7 @@ UNIX MODULE
     need to specify "notepad.exe" so it includes the extension.
 
   unix.execve(prog:str[, args:List<*>, env:List<*>])
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Exits current process, replacing it with a new instance of the
     specified program. `prog` needs to be an absolute path, see
@@ -2943,7 +2943,7 @@ UNIX MODULE
 
   unix.dup(oldfd:int[, newfd:int[, flags:int[, lowest:int]]])
       ├─→ newfd:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Duplicates file descriptor.
 
@@ -2967,7 +2967,7 @@ UNIX MODULE
 
   unix.pipe([flags:int])
       ├─→ reader:int, writer:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Creates fifo which enables communication between processes.
 
@@ -3000,15 +3000,15 @@ UNIX MODULE
            unix.close(writer)
            SetHeader('Content-Type', 'text/plain')
            while true do
-              data, err = unix.read(reader)
+              data, err, errno = unix.read(reader)
               if data then
                  if data ~= "" then
                     Write(data)
                  else
                     break
                  end
-              elseif err:errno() ~= EINTR then
-                 Log(kLogWarn, tostring(err))
+              elseif errno ~= EINTR then
+                 Log(kLogWarn, err)
                  break
               end
            end
@@ -3018,7 +3018,7 @@ UNIX MODULE
 
   unix.wait([pid:int[, options:int]])
       ├─→ pid:int, wstatus:int, unix.Rusage
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Waits for subprocess to terminate.
 
@@ -3041,7 +3041,7 @@ UNIX MODULE
         -- wait for zombies
         -- traditional technique for SIGCHLD handlers
         while true do
-           pid, status = unix.wait(-1, unix.WNOHANG)
+           pid, status, errno = unix.wait(-1, unix.WNOHANG)
            if pid then
               if unix.WIFEXITED(status) then
                  print('child', pid, 'exited with',
@@ -3050,11 +3050,11 @@ UNIX MODULE
                  print('child', pid, 'crashed with',
                        unix.strsignal(unix.WTERMSIG(status)))
               end
-           elseif status:errno() == unix.ECHILD then
+           elseif errno == unix.ECHILD then
               Log(kLogDebug, 'no more zombies')
               break
            else
-              Log(kLogWarn, tostring(err))
+              Log(kLogWarn, status)
               break
            end
         end
@@ -3096,7 +3096,7 @@ UNIX MODULE
 
   unix.kill(pid:int, sig:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sends signal to process(es).
 
@@ -3125,7 +3125,7 @@ UNIX MODULE
 
   unix.raise(sig:int)
       ├─→ rc:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Triggers signal in current process.
 
@@ -3133,7 +3133,7 @@ UNIX MODULE
 
   unix.access(path:str, how:int[, flags:int[, dirfd:int]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Checks if effective user of current process has permission to access
     file. `how` can be `R_OK`, `W_OK`, `X_OK`, or `F_OK` to check for
@@ -3145,7 +3145,7 @@ UNIX MODULE
 
   unix.mkdir(path:str[, mode:int[, dirfd:int]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Makes directory.
 
@@ -3170,7 +3170,7 @@ UNIX MODULE
 
   unix.makedirs(path:str[, mode:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Makes directories.
 
@@ -3185,13 +3185,13 @@ UNIX MODULE
 
   unix.chdir(path:str)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes current directory to `path`.
 
   unix.unlink(path:str[, dirfd:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Removes file at `path`.
 
@@ -3201,7 +3201,7 @@ UNIX MODULE
 
   unix.rmdir(path:str[, dirfd:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Removes empty directory at `path`.
 
@@ -3210,19 +3210,19 @@ UNIX MODULE
 
   unix.rename(oldpath:str, newpath:str[, olddirfd:int, newdirfd:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Renames file or directory.
 
   unix.link(existingpath:str, newpath:str[, flags:int[, olddirfd, newdirfd]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Creates hard link, so your underlying inode has two names.
 
   unix.symlink(target:str, linkpath:str[, newdirfd:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Creates symbolic link.
 
@@ -3232,7 +3232,7 @@ UNIX MODULE
 
   unix.readlink(path:str[, dirfd:int])
       ├─→ content:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Reads contents of symbolic link.
 
@@ -3247,14 +3247,14 @@ UNIX MODULE
 
   unix.realpath(path:str)
       ├─→ path:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns absolute path of filename, with `.` and `..` components
     removed, and symlinks will be resolved.
 
   unix.utimensat(path[, asecs, ananos, msecs, mnanos[, dirfd[, flags]]])
       ├─→ 0
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes access and/or modified timestamps on file.
 
@@ -3289,7 +3289,7 @@ UNIX MODULE
 
   unix.futimens(fd:int[, asecs, ananos, msecs, mnanos])
       ├─→ 0
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes access and/or modified timestamps on file descriptor.
 
@@ -3316,7 +3316,7 @@ UNIX MODULE
 
   unix.chown(path:str, uid:int, gid:int[, flags:int[, dirfd:int]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes user and group on file.
 
@@ -3324,7 +3324,7 @@ UNIX MODULE
 
   unix.chmod(path:str, mode:int[, flags:int[, dirfd:int]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes mode bits on file.
 
@@ -3333,7 +3333,7 @@ UNIX MODULE
 
   unix.getcwd()
       ├─→ path:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns current working directory.
 
@@ -3344,7 +3344,7 @@ UNIX MODULE
 
   unix.rmrf(path:str)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Recursively removes filesystem path.
 
@@ -3356,7 +3356,7 @@ UNIX MODULE
 
   unix.fcntl(fd:int, unix.F_GETFD)
       ├─→ flags:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns file descriptor flags.
 
@@ -3368,7 +3368,7 @@ UNIX MODULE
 
   unix.fcntl(fd:int, unix.F_SETFD, flags:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets file descriptor flags.
 
@@ -3380,7 +3380,7 @@ UNIX MODULE
 
   unix.fcntl(fd:int, unix.F_GETFL)
       ├─→ flags:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns file descriptor status flags.
 
@@ -3409,7 +3409,7 @@ UNIX MODULE
 
   unix.fcntl(fd:int, unix.F_SETFL, flags:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes file descriptor status flags.
 
@@ -3432,7 +3432,7 @@ UNIX MODULE
   unix.fcntl(fd:int, unix.F_SETLK[, type[, start[, len[, whence]]]])
   unix.fcntl(fd:int, unix.F_SETLKW[, type[, start[, len[, whence]]]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Acquires lock on file interval.
 
@@ -3472,7 +3472,7 @@ UNIX MODULE
   unix.fcntl(fd:int, unix.F_GETLK[, type[, start[, len[, whence]]]])
       ├─→ unix.F_UNLCK
       ├─→ type, start, len, whence, pid
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Acquires information about POSIX advisory lock on file.
 
@@ -3492,37 +3492,37 @@ UNIX MODULE
 
   unix.getsid(pid:int)
       ├─→ sid:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets session id.
 
   unix.getpgrp()
       ├─→ pgid:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets process group id.
 
   unix.setpgrp()
       ├─→ pgid:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets process group id. This is the same as `setpgid(0,0)`.
 
   unix.setpgid(pid:int, pgid:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets process group id the modern way.
 
   unix.getpgid(pid:int)
       ├─→ pgid:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets process group id the modern way.
 
   unix.setsid()
       ├─→ sid:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets session id.
 
@@ -3573,7 +3573,7 @@ UNIX MODULE
 
   unix.chroot(path:str)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes root directory.
 
@@ -3581,7 +3581,7 @@ UNIX MODULE
 
   unix.setuid(uid:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets user id.
 
@@ -3611,13 +3611,13 @@ UNIX MODULE
 
   unix.setfsuid(uid:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets user id for file system ops.
 
   unix.setgid(gid:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets group id.
 
@@ -3625,7 +3625,7 @@ UNIX MODULE
 
   unix.setresuid(real:int, effective:int, saved:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets real, effective, and saved user ids.
 
@@ -3636,7 +3636,7 @@ UNIX MODULE
 
   unix.setresgid(real:int, effective:int, saved:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets real, effective, and saved group ids.
 
@@ -3680,7 +3680,7 @@ UNIX MODULE
 
   unix.clock_gettime([clock:int])
       ├─→ seconds:int, nanos:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns nanosecond precision timestamp from system, e.g.
 
@@ -3767,7 +3767,7 @@ UNIX MODULE
 
   unix.nanosleep(seconds:int[, nanos:int])
       ├─→ remseconds:int, remnanos:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sleeps with nanosecond precision.
 
@@ -3776,17 +3776,17 @@ UNIX MODULE
   unix.sync()
   unix.fsync(fd:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
   unix.fdatasync(fd:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     These functions are used to make programs slower by asking the
     operating system to flush data to the physical medium.
 
   unix.lseek(fd:int, offset:int[, whence:int])
       ├─→ newposbytes:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Seeks to file position.
 
@@ -3800,7 +3800,7 @@ UNIX MODULE
 
   unix.truncate(path:str[, length:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Reduces or extends underlying physical medium of file.
     If file was originally larger, content >length is lost.
@@ -3809,7 +3809,7 @@ UNIX MODULE
 
   unix.ftruncate(fd:int[, length:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Reduces or extends underlying physical medium of open file.
     If file was originally larger, content >length is lost.
@@ -3818,7 +3818,7 @@ UNIX MODULE
 
   unix.socket([family:int[, type:int[, protocol:int]]])
       ├─→ fd:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Creates socket endpoint for process communication.
 
@@ -3853,7 +3853,7 @@ UNIX MODULE
 
   unix.socketpair([family:int[, type:int[, protocol:int]]])
       ├─→ fd1:int, fd2:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Creates bidirectional pipe.
 
@@ -3875,7 +3875,7 @@ UNIX MODULE
   unix.bind(fd:int[, ip:uint32, port:uint16])
   unix.bind(fd:int[, unixpath:str])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Binds socket.
 
@@ -3906,12 +3906,12 @@ UNIX MODULE
 
   unix.siocgifconf()
       ├─→ {{name:str,ip:uint32,netmask:uint32}, ...}
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns list of network adapter addresses.
 
   unix.getsockopt(fd:int, level:int, optname:int) → ...
-  unix.setsockopt(fd:int, level:int, optname:int, ...) → ok:bool, unix.Errno
+  unix.setsockopt(fd:int, level:int, optname:int, ...) → ok:bool | nil, error:str, errno:int
 
     Tunes networking parameters.
 
@@ -3931,10 +3931,10 @@ UNIX MODULE
 
     unix.getsockopt(fd:int, level:int, optname:int)
         ├─→ value:int
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
     unix.setsockopt(fd:int, level:int, optname:int, value:bool)
         ├─→ true
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
 
     - `SOL_SOCKET`, `SO_TYPE`
     - `SOL_SOCKET`, `SO_DEBUG`
@@ -3953,10 +3953,10 @@ UNIX MODULE
 
     unix.getsockopt(fd:int, level:int, optname:int)
         ├─→ value:int
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
     unix.setsockopt(fd:int, level:int, optname:int, value:int)
         ├─→ true
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
 
     - `SOL_SOCKET`, `SO_SNDBUF`
     - `SOL_SOCKET`, `SO_RCVBUF`
@@ -3976,10 +3976,10 @@ UNIX MODULE
 
     unix.getsockopt(fd:int, level:int, optname:int)
         ├─→ secs:int, nsecs:int
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
     unix.setsockopt(fd:int, level:int, optname:int, secs:int[, nanos:int])
         ├─→ true
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
 
     - `SOL_SOCKET`, `SO_RCVTIMEO`: If this option is specified then
       your stream socket will have a read() / recv() timeout. If the
@@ -3993,10 +3993,10 @@ UNIX MODULE
 
     unix.getsockopt(fd:int, unix.SOL_SOCKET, unix.SO_LINGER)
         ├─→ seconds:int, enabled:bool
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
     unix.setsockopt(fd:int, unix.SOL_SOCKET, unix.SO_LINGER, secs:int, enabled:bool)
         ├─→ true
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
 
     This `SO_LINGER` parameter can be used to make close() a blocking
     call. Normally when the kernel returns immediately when it receives
@@ -4005,10 +4005,10 @@ UNIX MODULE
 
     unix.setsockopt(serverfd:int, unix.SOL_TCP, unix.TCP_SAVE_SYN, enabled:int)
         ├─→ true
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
     unix.getsockopt(clientfd:int, unix.SOL_TCP, unix.TCP_SAVED_SYN)
         ├─→ syn_packet_bytes:str
-        └─→ nil, unix.Errno
+        └─→ nil, error:str, errno:int
 
     This `TCP_SAVED_SYN` option may be used to retrieve the bytes of the
     TCP SYN packet that the client sent when the connection for `fd` was
@@ -4019,7 +4019,7 @@ UNIX MODULE
 
   unix.poll({[fd:int]=events:int, ...}[, timeoutms:int[, mask:unix.Sigset]])
       ├─→ {[fd:int]=revents:int, ...}
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Checks for events on a set of file descriptors.
 
@@ -4066,20 +4066,20 @@ UNIX MODULE
 
   unix.gethostname()
       ├─→ host:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns hostname of system.
 
   unix.listen(fd:int[, backlog:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Begins listening for incoming connections on a socket.
 
   unix.accept(serverfd:int[, flags:int])
       ├─→ clientfd:int, ip:uint32, port:uint16
       ├─→ clientfd:int, unixpath:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Accepts new client socket descriptor for a listening tcp socket.
 
@@ -4091,7 +4091,7 @@ UNIX MODULE
   unix.connect(fd:int, ip:uint32, port:uint16)
   unix.connect(fd:int, unixpath:str)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Connects a TCP socket to a remote host.
 
@@ -4102,14 +4102,14 @@ UNIX MODULE
   unix.getsockname(fd:int)
       ├─→ ip:uint32, port:uint16
       ├─→ unixpath:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Retrieves the local address of a socket.
 
   unix.getpeername(fd:int)
       ├─→ ip:uint32, port:uint16
       ├─→ unixpath:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Retrieves the remote address of a socket.
 
@@ -4118,7 +4118,7 @@ UNIX MODULE
 
   unix.recv(fd:int[, bufsiz:int[, flags:int]])
       ├─→ data:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Receives message from a socket.
 
@@ -4132,7 +4132,7 @@ UNIX MODULE
   unix.recvfrom(fd:int[, bufsiz:int[, flags:int]])
       ├─→ data:str, ip:uint32, port:uint16
       ├─→ data:str, unixpath:str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Receives message from a socket.
 
@@ -4145,7 +4145,7 @@ UNIX MODULE
 
   unix.send(fd:int, data:str[, flags:int])
       ├─→ sent:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     This is the same as `write` except it has a `flags` argument
     that's intended for sockets.
@@ -4160,7 +4160,7 @@ UNIX MODULE
   unix.sendto(fd:int, data:str, ip:uint32, port:uint16[, flags:int])
   unix.sendto(fd:int, data:str, unixpath:str[, flags:int])
       ├─→ sent:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     This is useful for sending messages over UDP sockets to specific
     addresses.
@@ -4173,7 +4173,7 @@ UNIX MODULE
 
   unix.setenv(name:str, value:str[, overwrite:bool])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Sets environment variable.
 
@@ -4185,7 +4185,7 @@ UNIX MODULE
 
   unix.unsetenv(name:str)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Unsets environment variable.
 
@@ -4194,7 +4194,7 @@ UNIX MODULE
 
   unix.clearenv()
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Clears all environment variables.
 
@@ -4203,7 +4203,7 @@ UNIX MODULE
 
   unix.getlogin()
       ├─→ str
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets login name of current user.
 
@@ -4212,7 +4212,7 @@ UNIX MODULE
 
   unix.shutdown(fd:int, how:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Partially closes socket.
 
@@ -4227,7 +4227,7 @@ UNIX MODULE
 
   unix.sigprocmask(how:int, newmask:unix.Sigset)
       ├─→ oldmask:unix.Sigset
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Manipulates bitset of signals blocked by process.
 
@@ -4249,7 +4249,7 @@ UNIX MODULE
 
   unix.sigaction(sig:int[, handler:func|int[, flags:int[, mask:unix.Sigset]]])
       ├─→ oldhandler:func|int, flags:int, mask:unix.Sigset
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes action taken upon receipt of a specific signal.
 
@@ -4316,9 +4316,9 @@ UNIX MODULE
         assert(unix.sigaction(unix.SIGUSR1, OnSigUsr1))
         assert(unix.raise(unix.SIGUSR1))
         assert(not gotsigusr1)
-        ok, err = unix.sigsuspend(oldmask)
+        ok, err, errno = unix.sigsuspend(oldmask)
         assert(not ok)
-        assert(err:errno() == unix.EINTR)
+        assert(errno == unix.EINTR)
         assert(gotsigusr1)
         assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
 
@@ -4326,12 +4326,12 @@ UNIX MODULE
 
   unix.sigpending()
       ├─→ mask:unix.Sigset
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns the set of signals that are pending for delivery.
 
   unix.sigsuspend([mask:unix.Sigset])
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Waits for signal to be delivered.
 
@@ -4340,7 +4340,7 @@ UNIX MODULE
 
   unix.setitimer(which[, intervalsec, intns, valuesec, valuens])
       ├─→ intervalsec:int, intervalns:int, valuesec:int, valuens:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Causes `SIGALRM` signals to be generated at some point(s) in the
     future. The `which` parameter should be `ITIMER_REAL`.
@@ -4381,7 +4381,7 @@ UNIX MODULE
 
   unix.setrlimit(resource:int, soft:int[, hard:int])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Changes resource limit.
 
@@ -4416,13 +4416,13 @@ UNIX MODULE
 
   unix.getrlimit(resource:int)
       ├─→ soft:int, hard:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns information about resource limits for current process.
 
   unix.getrusage([who:int])
       ├─→ unix.Rusage
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns information about resource usage for current process, e.g.
 
@@ -4440,7 +4440,7 @@ UNIX MODULE
 
   unix.pledge([promises:str[, execpromises:str[, mode:int]]])
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Restrict system operations.
 
@@ -4637,7 +4637,7 @@ UNIX MODULE
 
   unix.unveil(path:str, permissions:str)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Restricts filesystem operations, e.g.
 
@@ -4714,7 +4714,7 @@ UNIX MODULE
 
   unix.gmtime(unixts:int)
       ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
-      └─→ nil,unix.Errno
+      └─→ nil, error:str, errno:int
 
     Breaks down UNIX timestamp into Zulu Time numbers.
 
@@ -4730,7 +4730,7 @@ UNIX MODULE
 
   unix.localtime(unixts:int)
       ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
-      └─→ nil,unix.Errno
+      └─→ nil, error:str, errno:int
 
     Breaks down UNIX timestamp into local time numbers, e.g.
 
@@ -4765,7 +4765,7 @@ UNIX MODULE
 
   unix.stat(path:str[, flags:int[, dirfd:int]])
       ├─→ unix.Stat
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets information about file or directory.
 
@@ -4778,7 +4778,7 @@ UNIX MODULE
 
   unix.fstat(fd:int)
       ├─→ unix.Stat
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets information about opened file descriptor.
 
@@ -4791,7 +4791,7 @@ UNIX MODULE
 
   unix.statfs(path:str)
       ├─→ unix.Statfs
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets information about filesystem.
 
@@ -4799,7 +4799,7 @@ UNIX MODULE
 
   unix.fstatfs(fd:int)
       ├─→ unix.Statfs
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Gets information about filesystem.
 
@@ -4808,7 +4808,7 @@ UNIX MODULE
 
   unix.opendir(path:str)
       ├─→ state:unix.Dir
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Opens directory for listing its contents.
 
@@ -4824,7 +4824,7 @@ UNIX MODULE
 
   unix.fdopendir(fd:int)
       ├─→ state:unix.Dir
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Opens directory for listing its contents, via an fd.
 
@@ -4834,7 +4834,7 @@ UNIX MODULE
 
   unix.isatty(fd:int)
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns true if file descriptor is a teletypewriter. Otherwise nil
     with an Errno object holding one of the following values:
@@ -4847,13 +4847,13 @@ UNIX MODULE
 
   unix.tcgetwinsize(fd:int)
       ├─→ rows:int, cols:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns cellular dimensions of pseudoteletypewriter display.
 
   unix.tmpfd()
       ├─→ fd:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns file descriptor of open anonymous file.
 
@@ -5062,9 +5062,9 @@ UNIX MODULE
 
   unix.Memory:wait(word_index:int, expect:int[, abs_deadline:int[, nanos:int]])
       ├─→ 0
-      ├─→ nil, unix.Errno(unix.EINTR)
-      ├─→ nil, unix.Errno(unix.EAGAIN)
-      └─→ nil, unix.Errno(unix.ETIMEDOUT)
+      ├─→ nil, error:str, unix.EINTR
+      ├─→ nil, error:str, unix.EAGAIN
+      └─→ nil, error:str, unix.ETIMEDOUT
 
     Waits for word to have a different value.
 
@@ -5120,7 +5120,7 @@ UNIX MODULE
 
   unix.Dir:close()
       ├─→ true
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Closes directory stream object and associated its file descriptor.
 
@@ -5153,7 +5153,7 @@ UNIX MODULE
 
   unix.Dir:fd()
       ├─→ fd:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns file descriptor of open directory object.
 
@@ -5162,7 +5162,7 @@ UNIX MODULE
 
   unix.Dir:tell()
       ├─→ off:int
-      └─→ nil, unix.Errno
+      └─→ nil, error:str, errno:int
 
     Returns current arbitrary offset into stream.
 
@@ -5708,70 +5708,6 @@ UNIX MODULE
 
   unix.SIGPWR
     Not implemented in most community editions of system five.
-
-
-────────────────────────────────────────────────────────────────────────────────
- UNIX ERRNO OBJECT
-
-  This object is returned by system calls that fail. We prefer returning
-  an object because for many system calls, an error is part their normal
-  operation. For example, it's often desirable to use the errno() method
-  when performing a read() to check for EINTR.
-
-  unix.Errno:errno()
-      └─→ errno:int
-
-    Returns error magic number.
-
-    The error number is always different for different platforms. On
-    UNIX systems, error numbers occupy the range [1,127] in practice.
-    The System V ABI reserves numbers as high as 4095. On Windows NT,
-    error numbers can go up to 65535.
-
-  unix.Errno:winerr()
-      └─→ errno:int
-
-    Returns Windows error number.
-
-    On UNIX systems this is always 0. On Windows NT this will normally
-    be the same as errno(). Because Windows defines so many error codes,
-    there's oftentimes a multimapping between its error codes and System
-    Five. In those cases, this value reflect the GetLastError() result
-    at the time the error occurred.
-
-  unix.Errno:name()
-      └─→ symbol:str
-
-    Returns string of symbolic name of System Five error code.
-
-    For example, this might return `"EINTR"`.
-
-  unix.Errno:call()
-      └─→ symbol:str
-
-    Returns name of system call that failed.
-
-    For example, this might return `"read"` if read() was what failed.
-
-  unix.Errno:doc()
-      └─→ symbol:str
-
-    Returns English string describing System Five error code.
-
-    For example, this might return `"Interrupted system call"`.
-
-  unix.Errno:__tostring()
-      └─→ str
-
-    Returns verbose string describing error.
-
-    Different information components are delimited by slash.
-
-    For example, this might return `"EINTR/4/Interrupted system call"`.
-
-    On Windows NT this will include additional information about the
-    Windows error (including FormatMessage() output) if the WIN32 error
-    differs from the System Five error code.
 
 
 ────────────────────────────────────────────────────────────────────────────────

@@ -30,15 +30,15 @@ function main()
       SetStatus(200)
       SetHeader('Content-Type', 'text/plain')
       while true do
-         data, err = unix.read(reader)
+         data, err, errno = unix.read(reader)
          if data then
             if data ~= '' then
                Write(data)
             else
                break
             end
-         elseif err:errno() ~= unix.EINTR then
-            Log(kLogWarn, 'read() failed: %s' % {tostring(err)})
+         elseif errno ~= unix.EINTR then
+            Log(kLogWarn, 'read() failed: %s' % {err})
             break
          end
       end

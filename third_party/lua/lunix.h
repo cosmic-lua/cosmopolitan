@@ -3,12 +3,6 @@
 #include "third_party/lua/lauxlib.h"
 COSMOPOLITAN_C_START_
 
-struct UnixErrno {
-  int errno_;
-  int winerr;
-  const char *call;
-};
-
 int LuaUnix(lua_State *);
 int LuaUnixSysretErrno(lua_State *, const char *, int);
 

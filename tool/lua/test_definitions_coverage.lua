@@ -206,7 +206,6 @@ local MODULES = {
       { class = "Stat", reg = reg_table(C_unix, "kLuaUnixStatMeth") },
       { class = "Statfs", reg = reg_table(C_unix, "kLuaUnixStatfsMeth") },
       { class = "Rusage", reg = reg_table(C_unix, "kLuaUnixRusageMeth") },
-      { class = "Errno", reg = reg_table(C_unix, "kLuaUnixErrnoMeth") },
       { class = "Memory", reg = reg_table(C_unix, "kLuaUnixMemoryMeth") },
       { class = "Sigset", reg = reg_table(C_unix, "kLuaUnixSigsetMeth") },
       { class = "Dir", reg = reg_table(C_unix, "kLuaUnixDirMeth") },

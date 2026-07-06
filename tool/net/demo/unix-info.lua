@@ -142,7 +142,7 @@ Write('<dt>unix.getsockopt(GetClientFd(), unix.SOL_SOCKET, unix.SO_SNDTIMEO)\r\n
 if secs then -- is nil on error
    Write('<dd>%d seconds + %d nanoseconds\r\n' % {secs, nanos})
 else
-   err = nanos -- unix.Errno is always second result
+   err = nanos -- error string is always second result
    Write('<dd>%s\r\n' % {err})
 end
 
