@@ -1848,26 +1848,31 @@ function repl.start() end
 --- `require("cosmo.unix")`.
 cosmo = {}
 
+---@class cosmo.BarfOptions
+---@field mode integer? file mode for a newly created file, defaults to 0644
+---@field append boolean? append to the file instead of truncating it (default false)
+---@field offset integer? 1-indexed byte offset for overwriting a slice of the file; incompatible with `append`
+
 --- Writes all data to file the easy way.
 ---
---- This function writes to the local file system.
+--- This function writes to the local file system. By default it truncates
+--- (or creates) the file. Pass `append = true` to append instead, or an
+--- `offset` to overwrite a slice in place. On failure it returns nil plus
+--- an error string that names the path.
 ---
 ---@param filename string
 ---@param data string
----@param mode integer? defaults to 0644. This parameter is ignored when flags doesn't have `unix.O_CREAT`.
+---@param options cosmo.BarfOptions?
 ---
----@param flags integer? defaults to `unix.O_TRUNC | unix.O_CREAT`.
----
----@param offset integer? is 1-indexed and may be used to overwrite arbitrary slices within a file when used in conjunction with `flags=0`.
 --- For example:
 ---
 ---     assert(Barf('x.txt', 'abc123'))
----     assert(Barf('x.txt', 'XX', 0, 0, 3))
+---     assert(Barf('x.txt', 'XX', {offset = 3}))
 ---     assert(assert(Slurp('x.txt', 1, 6)) == 'abXX23')
 ---
 ---@return true
----@overload fun(filename: string, data: string, mode?: integer, flags?: integer, offset?: integer): nil, string, integer
-function cosmo.Barf(filename, data, mode, flags, offset) end
+---@overload fun(filename: string, data: string, options?: cosmo.BarfOptions): nil, string, integer
+function cosmo.Barf(filename, data, options) end
 
 ---@param ip uint32
 ---@return string # a string describing the IP address. This is currently Class A granular. It can tell you if traffic originated from private networks, ARIN, APNIC, DOD, etc.

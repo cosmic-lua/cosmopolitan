@@ -28,6 +28,7 @@
 #include "libc/errno.h"
 #include "libc/fmt/itoa.h"
 #include "libc/fmt/leb128.h"
+#include "libc/fmt/magnumstrs.internal.h"
 #include "libc/intrin/bsf.h"
 #include "libc/intrin/bsr.h"
 #include "libc/intrin/popcnt.h"
@@ -315,6 +316,24 @@ int LuaGetMonospaceWidth(lua_State *L) {
   return 1;
 }
 
+// Builds nil, "<call> <path>: <NAME>: <description>", errno for the file
+// helpers, so the error names the file that failed, e.g.
+// "open /etc/passwd: ENOENT: No such file or directory". This mirrors the
+// unix.* convention (LuaUnixSysretErrno) but includes the path/target,
+// which cosmic otherwise has to add by hand at every call site.
+static int LuaFileError(lua_State *L, const char *call, const char *path,
+                        int olderr) {
+  char msg[256];
+  int err;
+  err = errno;
+  strerror_r(err, msg, sizeof(msg));
+  lua_pushnil(L);
+  lua_pushfstring(L, "%s %s: %s: %s", call, path, _strerrno(err), msg);
+  lua_pushinteger(L, err);
+  errno = olderr;
+  return 3;
+}
+
 // Slurp(path:str[, i:int[, j:int]])
 //     ├─→ data:str
 //     └─→ nil, error:str, errno:int
@@ -323,10 +342,12 @@ int LuaSlurp(lua_State *L) {
   char tb[2048];
   luaL_Buffer b;
   struct stat st;
+  const char *path;
   int fd, olderr;
   bool shouldpread;
   lua_Integer i, j, got;
   olderr = errno;
+  path = luaL_checkstring(L, 1);
   if (lua_isnoneornil(L, 2)) {
     i = 1;
   } else {
@@ -338,13 +359,13 @@ int LuaSlurp(lua_State *L) {
     j = luaL_checkinteger(L, 3);
   }
   luaL_buffinit(L, &b);
-  if ((fd = open(luaL_checkstring(L, 1), O_RDONLY)) == -1) {
-    return LuaUnixSysretErrno(L, "open", olderr);
+  if ((fd = open(path, O_RDONLY)) == -1) {
+    return LuaFileError(L, "open", path, olderr);
   }
   if (i < 0 || j < 0) {
     if (fstat(fd, &st) == -1) {
       close(fd);
-      return LuaUnixSysretErrno(L, "fstat", olderr);
+      return LuaFileError(L, "fstat", path, olderr);
     }
     if (i < 0) {
       i = st.st_size + (i + 1);
@@ -373,49 +394,71 @@ int LuaSlurp(lua_State *L) {
       got = 0;
     } else {
       close(fd);
-      return LuaUnixSysretErrno(L, "read", olderr);
+      return LuaFileError(L, "read", path, olderr);
     }
   }
   if (close(fd) == -1) {
-    return LuaUnixSysretErrno(L, "close", olderr);
+    return LuaFileError(L, "close", path, olderr);
   }
   luaL_pushresult(&b);
   return 1;
 }
 
-// Barf(path:str, data:str[, mode:int[, flags:int[, offset:int]]])
+// Barf(path:str, data:str[, {mode:int, append:bool, offset:int}])
 //     ├─→ true
 //     └─→ nil, error:str, errno:int
 int LuaBarf(lua_State *L) {
   ssize_t rc;
-  const char *data;
-  lua_Number offset;
+  const char *data, *path;
+  lua_Integer offset;
   size_t i, n, wrote;
   int fd, mode, flags, olderr;
+  bool append, has_offset;
   olderr = errno;
+  path = luaL_checkstring(L, 1);
   data = luaL_checklstring(L, 2, &n);
-  if (lua_isnoneornil(L, 5)) {
-    offset = 0;
-  } else {
-    offset = luaL_checkinteger(L, 5);
-    if (offset < 1) {
-      luaL_error(L, "offset must be >= 1");
-      __builtin_unreachable();
+  // Options table replaces the old positional (mode, flags, offset). The
+  // raw `flags` integer was a footgun: the default truncated, so callers
+  // had to pass an explicit 0 to avoid O_TRUNC. Now truncation is the
+  // default; `append = true` opts into O_APPEND, and an `offset`
+  // overwrites a slice in place (neither truncates).
+  mode = 0644;
+  append = false;
+  has_offset = false;
+  offset = 0;
+  if (!lua_isnoneornil(L, 3)) {
+    luaL_checktype(L, 3, LUA_TTABLE);
+    lua_getfield(L, 3, "mode");
+    if (!lua_isnil(L, -1))
+      mode = luaL_checkinteger(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, 3, "append");
+    append = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, 3, "offset");
+    if (!lua_isnil(L, -1)) {
+      has_offset = true;
+      offset = luaL_checkinteger(L, -1);
+      if (offset < 1) {
+        luaL_error(L, "offset must be >= 1");
+        __builtin_unreachable();
+      }
+      --offset;
     }
-    --offset;
+    lua_pop(L, 1);
   }
-  mode = luaL_optinteger(L, 3, 0644);
-  flags = O_WRONLY | luaL_optinteger(L, 4, O_TRUNC | O_CREAT);
-  if (flags & O_NONBLOCK) {
-    luaL_error(L, "O_NONBLOCK not allowed");
+  if (append && has_offset) {
+    luaL_error(L, "append with offset is not possible");
     __builtin_unreachable();
   }
-  if ((flags & O_APPEND) && offset) {
-    luaL_error(L, "O_APPEND with offset not possible");
-    __builtin_unreachable();
+  flags = O_WRONLY | O_CREAT;
+  if (append) {
+    flags |= O_APPEND;
+  } else if (!has_offset) {
+    flags |= O_TRUNC;
   }
-  if ((fd = open(luaL_checkstring(L, 1), flags, mode)) == -1) {
-    return LuaUnixSysretErrno(L, "open", olderr);
+  if ((fd = open(path, flags, mode)) == -1) {
+    return LuaFileError(L, "open", path, olderr);
   }
   for (i = 0; i < n; i += wrote) {
     if (offset) {
@@ -430,11 +473,11 @@ int LuaBarf(lua_State *L) {
       wrote = 0;
     } else {
       close(fd);
-      return LuaUnixSysretErrno(L, "write", olderr);
+      return LuaFileError(L, "write", path, olderr);
     }
   }
   if (close(fd) == -1) {
-    return LuaUnixSysretErrno(L, "close", olderr);
+    return LuaFileError(L, "close", path, olderr);
   }
   lua_pushboolean(L, true);
   return 1;
