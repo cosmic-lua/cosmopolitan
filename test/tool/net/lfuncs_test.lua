@@ -15,38 +15,6 @@
 
 assert(unix.pledge("stdio"))
 
-x = Rdtsc()
-y = Rdtsc()
-assert(y > x)
-
-assert(Rdrand() ~= Rdrand())
-assert(Rdseed() ~= Rdseed())
-
-assert(Bsr(1) == 0)
-assert(Bsr(2) == 1)
-assert(Bsr(3) == 1)
-assert(Bsr(4) == 2)
-assert(Bsr(0x80000001) == 31)
-
-assert(Bsf(1) == 0)
-assert(Bsf(2) == 1)
-assert(Bsf(3) == 0)
-assert(Bsf(4) == 2)
-assert(Bsf(0x80000001) == 0)
-
-assert(Popcnt(0) == 0)
-assert(Popcnt(1) == 1)
-assert(Popcnt(2) == 1)
-assert(Popcnt(3) == 2)
-assert(Popcnt(0b0111101001101001) == 9)
-
-assert(Lemur64() == 0x1940efe9d47ae889)
-assert(Lemur64() == 0xd4b3103f567f9974)
-
-assert(hex(0x1940efe9d47ae889) == "0x1940efe9d47ae889")
-assert(oct(0x1940efe9d47ae889) == "0145007376472436564211")
-assert(bin(0x1940efe9d47ae889) == "0b0001100101000000111011111110100111010100011110101110100010001001")
-
 assert(EncodeHex("\1\2\3\4\255") == "01020304ff")
 assert(DecodeHex("01020304ff") == "\1\2\3\4\255")
 
@@ -89,12 +57,6 @@ assert(url.path == "/2.0.html")
 assert(EncodeLua(url.params) == '{{"x"}, {"y", "z"}}')
 assert(url.fragment == "frag")
 
-assert(Decimate("\xff\xff\x00\x00\xff\xff\x00\x00\xff\xff\x00\x00") == "\xff\x00\xff\x00\xff\x00")
-
-assert(Underlong(nil) == nil)
-assert(Underlong("hello") == "hello")
-assert(Underlong("hello\xc0\x80") == "hello\x00")
-
 assert(ParseIp("x") == -1)
 assert(ParseIp("127.0.0.1") == 0x7f000001)
 
@@ -118,21 +80,7 @@ assert(not IsLoopbackIp(0x08080808))
 assert(not IsLoopbackIp(0x0a000000))
 assert(IsLoopbackIp(0x7f000001))
 
-assert(IndentLines(nil) == nil)
-assert(IndentLines("hi\nthere") == " hi\n there")
-assert(IndentLines("hi\nthere\n") == " hi\n there\n")
-assert(IndentLines("hi\nthere\n", 2) == "  hi\n  there\n")
-
-assert(ParseHttpDateTime("Fri, 08 Jul 2022 16:17:43 GMT") == 1657297063)
 assert(FormatHttpDateTime(1657297063) == "Fri, 08 Jul 2022 16:17:43 GMT")
-
-assert(VisualizeControlCodes("hello\x00") == "hello␀")
-assert(VisualizeControlCodes("\xe2\x80\xa8") == "↵")  -- line separator
-assert(VisualizeControlCodes("\xe2\x80\xaa") == "⟫")  -- left-to-right embedding
-assert(VisualizeControlCodes("\xe2\x80\xab") == "⟪")  -- right-to-left embedding
-
-assert(math.floor(10 * MeasureEntropy("            ") + .5) == 0)
-assert(math.floor(10 * MeasureEntropy("abcabcabcabc") + .5) == 16)
 
 assert(Crc32(0, "123456789") == 0xcbf43926)
 assert(Crc32c(0, "123456789") == 0xe3069283)

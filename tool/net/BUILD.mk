@@ -23,7 +23,6 @@ TOOL_NET_COMS =								\
 	o/$(MODE)/tool/net/redbean					\
 	o/$(MODE)/tool/net/redbean-demo					\
 	o/$(MODE)/tool/net/redbean-static				\
-	o/$(MODE)/tool/net/libresolv_query				\
 	o/$(MODE)/tool/net/redbean-unsecure				\
 	o/$(MODE)/tool/net/redbean-original				\
 
@@ -97,10 +96,8 @@ o/$(MODE)/tool/net/%.dbg:						\
 TOOL_NET_REDBEAN_LUA_MODULES =						\
 	o/$(MODE)/tool/net/lfuncs.o					\
 	o/$(MODE)/tool/net/lpath.o					\
-	o/$(MODE)/tool/net/lfinger.o					\
 	o/$(MODE)/tool/net/lre.o					\
 	o/$(MODE)/tool/net/ljson.o					\
-	o/$(MODE)/tool/net/lmaxmind.o					\
 	o/$(MODE)/tool/net/lsqlite3.o					\
 	o/$(MODE)/tool/net/largon2.o					\
 	o/$(MODE)/tool/net/launch.o					\
@@ -121,7 +118,6 @@ o/$(MODE)/tool/net/redbean.dbg:						\
 
 o/$(MODE)/tool/net/lsqlite3.o: private					\
 		CFLAGS +=						\
-			-DSQLITE_ENABLE_SESSION				\
 			-DSQLITE_ENABLE_DESERIALIZE
 
 # REDBEAN-DEMO
