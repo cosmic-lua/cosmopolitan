@@ -444,6 +444,29 @@ do
   end
 end
 
+-- 8) fallibility dialect: the `---@overload fun(...): nil[, ...]` idiom is
+-- banned. A fallible binding must express failure inline with `---@return
+-- T|nil value` plus `---@return <errtype>? <name>` lines, so the whole
+-- surface speaks ONE dialect. The mixed dialects (this idiom vs the inline
+-- `T|nil` one) are why cosmic's generated types silently lost `| nil`.
+-- Non-fallible `@overload`s (alternate signatures returning `true`, `0`, a
+-- class, `T?, string?`, ...) are unaffected -- only a `nil`-first return is
+-- the fallibility idiom. This is a ratchet: the allowlist may only shrink.
+local QALLOW_OVERLOAD_NIL = set({})
+do
+  local lineno = 0
+  for line in (D .. "\n"):gmatch("([^\n]*)\n") do
+    lineno = lineno + 1
+    if line:match("^%s*%-%-%-@overload%s+fun%b()%s*:%s*nil%f[%W]") then
+      if not QALLOW_OVERLOAD_NIL[line] then
+        fail("line " .. lineno .. ": banned `@overload fun(...): nil` " ..
+          "fallibility idiom; express failure with `@return T|nil value` " ..
+          "plus `@return <err>? <name>` lines instead: " .. line)
+      end
+    end
+  end
+end
+
 -- ===== annotation quality ratchet (shrink-only allowlists) =====
 --
 -- The checks above enforce that every binding is annotated at all. These four
