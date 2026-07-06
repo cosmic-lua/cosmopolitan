@@ -121,6 +121,10 @@ o/$(MODE)/tool/lua/test_argon2.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_argo
 	$< tool/lua/test_argon2.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_lfuncs_errors.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_lfuncs_errors.lua
+	$< tool/lua/test_lfuncs_errors.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_zip.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip.lua
 	$< tool/lua/test_zip.lua
 	@touch $@
@@ -166,6 +170,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
 	o/$(MODE)/tool/lua/test_re.ok					\
 	o/$(MODE)/tool/lua/test_argon2.ok				\
+	o/$(MODE)/tool/lua/test_lfuncs_errors.ok			\
 	o/$(MODE)/tool/lua/test_strftime.ok				\
 	o/$(MODE)/tool/lua/test_zip.ok					\
 	o/$(MODE)/tool/lua/test_zip_append.ok				\

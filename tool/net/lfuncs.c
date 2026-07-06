@@ -466,10 +466,16 @@ dontinline int LuaBase32Impl(lua_State *L,
   const char *s = luaL_checklstring(L, 1, &sl);
   // use an empty string, as EncodeBase32 provides a default value
   const char *a = luaL_optlstring(L, 2, "", &al);
-  if (!IS2POW(al) || al > 128 || al == 1)
-    return luaL_error(L, "alphabet length is not a power of 2 in range 2..128");
-  if (!(p = B32(s, sl, a, al, &sl)))
-    return luaL_error(L, "out of memory");
+  if (!IS2POW(al) || al > 128 || al == 1) {
+    lua_pushnil(L);
+    lua_pushliteral(L, "alphabet length is not a power of 2 in range 2..128");
+    return 2;
+  }
+  if (!(p = B32(s, sl, a, al, &sl))) {
+    lua_pushnil(L);
+    lua_pushliteral(L, "out of memory");
+    return 2;
+  }
   lua_pushlstring(L, p, sl);
   free(p);
   return 1;
@@ -503,15 +509,19 @@ int LuaDecodeHex(lua_State *L) {
   luaL_Buffer buf;
   s = luaL_checklstring(L, 1, &n);
   if (n & 1) {
-    luaL_argerror(L, 1, "hex string length uneven");
-    __builtin_unreachable();
+    // odd length is a property of the input data, not a programmer error,
+    // so it is reported as nil, err rather than raised.
+    lua_pushnil(L);
+    lua_pushliteral(L, "hex string length uneven");
+    return 2;
   }
   p = luaL_buffinitsize(L, &buf, n >> 1);
   for (i = 0; i < n; i += 2) {
     if ((x = kHexToInt[s[i + 0] & 255]) == -1 ||
         (y = kHexToInt[s[i + 1] & 255]) == -1) {
-      luaL_argerror(L, 1, "hex string has non-hex character");
-      __builtin_unreachable();
+      lua_pushnil(L);
+      lua_pushliteral(L, "hex string has non-hex character");
+      return 2;
     }
     p[i >> 1] = x << 4 | y;
   }
@@ -566,14 +576,24 @@ int LuaGetCryptoHash(lua_State *L) {
   const void *p = luaL_checklstring(L, 2, &pl);
   const void *k = luaL_optlstring(L, 3, "", &kl);
   const mbedtls_md_info_t *digest = mbedtls_md_info_from_string(h);
-  if (!digest)
-    return luaL_argerror(L, 1, "unknown hash type");
+  if (!digest) {
+    lua_pushnil(L);
+    lua_pushfstring(L, "unknown hash type: %s", (const char *)h);
+    return 2;
+  }
   if (kl == 0) {
     // no key provided, run generic hash function
-    if ((digest->f_md)(p, pl, d))
-      return luaL_error(L, "bad input data");
+    if ((digest->f_md)(p, pl, d)) {
+      mbedtls_platform_zeroize(d, sizeof(d));
+      lua_pushnil(L);
+      lua_pushliteral(L, "bad input data");
+      return 2;
+    }
   } else if (mbedtls_md_hmac(digest, k, kl, p, pl, d)) {
-    return luaL_error(L, "bad input data");
+    mbedtls_platform_zeroize(d, sizeof(d));
+    lua_pushnil(L);
+    lua_pushliteral(L, "bad input data");
+    return 2;
   }
   lua_pushlstring(L, (void *)d, digest->size);
   mbedtls_platform_zeroize(d, sizeof(d));
@@ -887,23 +907,26 @@ int LuaUncompress(lua_State *L) {
   p = luaL_checklstring(L, 1, &n);
   if (lua_isnoneornil(L, 2)) {
     if ((rc = unuleb64(p, n, &m)) == -1 || n < rc + 4) {
-      luaL_error(L, "compressed value too short to be valid");
-      __builtin_unreachable();
+      lua_pushnil(L);
+      lua_pushliteral(L, "compressed value too short to be valid");
+      return 2;
     }
     len = m;
     crc = READ32LE(p + rc);
     q = luaL_buffinitsize(L, &buf, m);
     if (uncompress((void *)q, &m, (unsigned char *)p + rc + 4, n) != Z_OK ||
         m != len || crc32_z(0, q, m) != crc) {
-      luaL_error(L, "compressed value is corrupted");
-      __builtin_unreachable();
+      lua_pushnil(L);
+      lua_pushliteral(L, "compressed value is corrupted");
+      return 2;
     }
   } else {
     len = m = luaL_checkinteger(L, 2);
     q = luaL_buffinitsize(L, &buf, m);
     if (uncompress((void *)q, &m, (void *)p, n) != Z_OK || m != len) {
-      luaL_error(L, "compressed value is corrupted");
-      __builtin_unreachable();
+      lua_pushnil(L);
+      lua_pushliteral(L, "compressed value is corrupted");
+      return 2;
     }
   }
   luaL_pushresultsize(&buf, m);
