@@ -177,6 +177,10 @@ o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool
 	$< tool/lua/test_definitions_coverage.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_ssl_roots.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_ssl_roots.lua net/https/sslroots.c $(wildcard usr/share/ssl/root/*.pem)
+	$< tool/lua/test_ssl_roots.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -196,7 +200,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_shm.ok					\
 	o/$(MODE)/tool/lua/test_isatty.ok				\
 	o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok			\
-	o/$(MODE)/tool/lua/test_definitions_coverage.ok
+	o/$(MODE)/tool/lua/test_definitions_coverage.ok			\
+	o/$(MODE)/tool/lua/test_ssl_roots.ok
 
 .PHONY: o/$(MODE)/tool/lua
 o/$(MODE)/tool/lua:							\
