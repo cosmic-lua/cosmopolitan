@@ -32,6 +32,7 @@ __static_yoink("usr/share/ssl/root/isrg.pem");
 __static_yoink("usr/share/ssl/root/quovadis.pem");
 __static_yoink("usr/share/ssl/root/redbean.pem");
 __static_yoink("usr/share/ssl/root/starfield.pem");
+__static_yoink("usr/share/ssl/root/usertrust.pem");
 __static_yoink("usr/share/ssl/root/verisign.pem");
 
 char ssl_root_support;
