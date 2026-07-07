@@ -49,8 +49,8 @@ local entries = reader:list()
 assert(#entries == 4, "should have 4 entries after append, got " .. #entries)
 
 local entry_set = {}
-for _, name in ipairs(entries) do
-  entry_set[name] = true
+for _, e in ipairs(entries) do
+  entry_set[e.name] = true
 end
 assert(entry_set["original.txt"], "should have original.txt")
 assert(entry_set["another.txt"], "should have another.txt")
@@ -191,8 +191,8 @@ entries = reader:list()
 assert(#entries == 2, "should have 2 entries after remove, got " .. #entries)
 
 entry_set = {}
-for _, name in ipairs(entries) do
-  entry_set[name] = true
+for _, e in ipairs(entries) do
+  entry_set[e.name] = true
 end
 assert(entry_set["keep.txt"], "keep.txt should still exist")
 assert(entry_set["also_keep.txt"], "also_keep.txt should still exist")
@@ -258,8 +258,8 @@ entries = reader:list()
 assert(#entries == 2, "should have 2 entries (existing + new2), got " .. #entries)
 
 entry_set = {}
-for _, name in ipairs(entries) do
-  entry_set[name] = true
+for _, e in ipairs(entries) do
+  entry_set[e.name] = true
 end
 assert(entry_set["existing.txt"], "existing.txt should be present")
 assert(entry_set["new2.txt"], "new2.txt should be present")
@@ -337,8 +337,8 @@ entries = reader:list()
 assert(#entries == 2, "should have 2 entries after dir remove, got " .. #entries)
 
 entry_set = {}
-for _, name in ipairs(entries) do
-  entry_set[name] = true
+for _, e in ipairs(entries) do
+  entry_set[e.name] = true
 end
 assert(entry_set["root.txt"], "root.txt should still exist")
 assert(entry_set["other/d.txt"], "other/d.txt should still exist")
@@ -373,8 +373,8 @@ entries = reader:list()
 assert(#entries == 2, "should have 2 entries, got " .. #entries)
 
 entry_set = {}
-for _, name in ipairs(entries) do
-  entry_set[name] = true
+for _, e in ipairs(entries) do
+  entry_set[e.name] = true
 end
 assert(entry_set["existing.txt"], "existing.txt should be present")
 assert(entry_set["other.txt"], "other.txt should be present")

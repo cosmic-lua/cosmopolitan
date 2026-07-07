@@ -22,6 +22,7 @@
 #include "libc/intrin/likely.h"
 #include "libc/log/log.h"
 #include "libc/log/rop.internal.h"
+#include "libc/math.h"
 #include "libc/mem/alg.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
@@ -55,13 +56,24 @@ OnError:
   return -1;
 }
 
-static int SerializeNumber(lua_State *L, char **buf, int idx) {
+static int SerializeNumber(lua_State *L, char **buf, int idx,
+                           struct Serializer *z) {
+  double x;
   char ibuf[128];
   if (lua_isinteger(L, idx)) {
     RETURN_ON_ERROR(appendd(
         buf, ibuf, FormatInt64(ibuf, luaL_checkinteger(L, idx)) - ibuf));
   } else {
-    RETURN_ON_ERROR(appends(buf, DoubleToJson(ibuf, lua_tonumber(L, idx))));
+    x = lua_tonumber(L, idx);
+    if (UNLIKELY(!isfinite(x))) {
+      if (!z->conf.nannull) {
+        z->reason = isnan(x) ? "cannot encode NaN" : "cannot encode Infinity";
+        goto OnError;
+      }
+      RETURN_ON_ERROR(appendw(buf, READ32LE("null")));
+    } else {
+      RETURN_ON_ERROR(appends(buf, DoubleToJson(ibuf, x)));
+    }
   }
   return 0;
 OnError:
@@ -209,14 +221,13 @@ static int SerializeTable(lua_State *L, char **buf, int idx,
   RETURN_ON_ERROR(rc = LuaPushVisit(&z->visited, lua_topointer(L, idx)));
   if (!rc) {
     lua_pushvalue(L, idx);  // +1
+    isarray = false;
     if ((n = lua_rawlen(L, -1)) > 0) {
       isarray = true;
-    } else {
-      // the json parser inserts `[0]=false` in empty arrays
-      // so we can tell them apart from empty objects, which
-      // is needed in order to have `[]` roundtrip the parse
-      isarray =
-          (lua_rawgeti(L, -1, 0) == LUA_TBOOLEAN && !lua_toboolean(L, -1));
+    } else if (z->arraymt && lua_getmetatable(L, -1)) {
+      // the json parser marks arrays with the shared json.array
+      // metatable so an empty `[]` won't round-trip as `{}`
+      isarray = lua_rawequal(L, -1, z->arraymt);
       lua_pop(L, 1);
     }
     if (isarray) {
@@ -251,8 +262,17 @@ static int Serialize(lua_State *L, char **buf, int idx, struct Serializer *z,
       case LUA_TSTRING:
         return SerializeString(L, buf, idx, z);
       case LUA_TNUMBER:
-        return SerializeNumber(L, buf, idx);
+        return SerializeNumber(L, buf, idx, z);
       case LUA_TTABLE:
+        if (z->nullmt && lua_getmetatable(L, idx)) {
+          // a table marked with the json.null sentinel metatable
+          // encodes as null, for lossless `{"a":null}` round-trips
+          int isnull = lua_rawequal(L, -1, z->nullmt);
+          lua_pop(L, 1);
+          if (isnull) {
+            return SerializeNull(L, buf);
+          }
+        }
         return SerializeTable(L, buf, idx, z, depth);
       default:
         z->reason = "unsupported lua type";
@@ -296,17 +316,27 @@ int LuaEncodeJsonData(lua_State *L, char **buf, int idx,
                       struct EncoderConfig conf) {
   int rc;
   struct Serializer z = {
-    .reason = "out of memory", 
+    .reason = "out of memory",
     .bsp = GetStackBottom() + 4096,
     .conf = conf,
   };
   if (lua_checkstack(L, conf.maxdepth * 3 + LUA_MINSTACK)) {
+    // pin the json marker metatables (if they exist) to fixed stack
+    // slots so table serialization can identity-compare against them
+    // without a registry lookup per table
+    idx = lua_absindex(L, idx);
+    luaL_getmetatable(L, "json.array");
+    z.arraymt = lua_isnil(L, -1) ? 0 : lua_gettop(L);
+    luaL_getmetatable(L, "json.null");
+    z.nullmt = lua_isnil(L, -1) ? 0 : lua_gettop(L);
     rc = Serialize(L, buf, idx, &z, 0);
     free(z.visited.p);
     free(z.strbuf);
     if (rc == -1) {
       lua_pushnil(L);
       lua_pushstring(L, z.reason);
+    } else {
+      lua_pop(L, 2);  // the pinned metatable slots
     }
     return rc;
   } else {

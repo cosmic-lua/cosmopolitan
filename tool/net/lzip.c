@@ -23,6 +23,7 @@
 #include "libc/dos.h"
 #include "libc/errno.h"
 #include "libc/limits.h"
+#include "libc/mem/alg.h"
 #include "libc/mem/mem.h"
 #include "libc/runtime/runtime.h"
 #include "libc/str/str.h"
@@ -42,6 +43,12 @@
 #define MAX_CDIR_SIZE (256 * 1024 * 1024)
 #define MAX_FILE_SIZE (1024 * 1024 * 1024)
 
+struct LuaZipIndexEntry {
+  const char *name;   // points into the reader's cdir copy
+  uint32_t namelen;
+  uint32_t cdir_off;  // offset of the cfile header within cdir
+};
+
 struct LuaZipReader {
   int fd;
   int owns_fd;
@@ -51,6 +58,7 @@ struct LuaZipReader {
   int64_t file_size;
   int64_t max_file_size;
   const uint8_t *data;  // non-NULL when reading from buffer (uservalue 1)
+  struct LuaZipIndexEntry *index;  // name-sorted, built once at open
 };
 
 struct LuaZipCdirEntry {
@@ -128,25 +136,85 @@ static int WriterSysError(lua_State *L, struct LuaZipWriter *w,
   return SysError(L, what);
 }
 
-static uint8_t *FindEntry(struct LuaZipReader *z, const char *name,
-                          size_t namelen) {
+static int CompareEntryNames(const char *aname, size_t alen,
+                             const char *bname, size_t blen) {
+  size_t n = alen < blen ? alen : blen;
+  int c = memcmp(aname, bname, n);
+  if (c)
+    return c;
+  if (alen != blen)
+    return alen < blen ? -1 : 1;
+  return 0;
+}
+
+static int CompareIndexEntries(const void *va, const void *vb) {
+  const struct LuaZipIndexEntry *a = va;
+  const struct LuaZipIndexEntry *b = vb;
+  int c = CompareEntryNames(a->name, a->namelen, b->name, b->namelen);
+  if (c)
+    return c;
+  // stable tiebreak on file order so duplicate names keep the
+  // first-in-archive semantics the old linear scan had
+  return a->cdir_off < b->cdir_off ? -1 : (a->cdir_off > b->cdir_off);
+}
+
+// Walks the central directory once, validating every record and building
+// a name-sorted index so entry lookups are O(log N) instead of a linear
+// scan per call. Returns NULL on success or an error message; the caller
+// owns cleanup of the reader via __gc.
+static const char *BuildEntryIndex(struct LuaZipReader *z) {
+  struct LuaZipIndexEntry *idx;
   int64_t i, got, hdrsize;
+  if (z->count <= 0)
+    return NULL;
+  if (z->count > z->cdir_size / kZipCfileHdrMinSize)
+    return "central directory record count out of range";
+  if (!(idx = malloc(z->count * sizeof(*idx))))
+    return "out of memory";
   for (i = got = 0;
        i + kZipCfileHdrMinSize <= z->cdir_size && got < z->count;
        i += hdrsize, ++got) {
-    if (ZIP_CFILE_MAGIC(z->cdir + i) != kZipCfileHdrMagic)
-      return NULL;
+    if (ZIP_CFILE_MAGIC(z->cdir + i) != kZipCfileHdrMagic) {
+      free(idx);
+      return "corrupted central directory";
+    }
     hdrsize = ZIP_CFILE_HDRSIZE(z->cdir + i);
-    if (hdrsize < kZipCfileHdrMinSize || i + hdrsize > z->cdir_size)
-      return NULL;
-    const char *entry_name = ZIP_CFILE_NAME(z->cdir + i);
-    int entry_namelen = ZIP_CFILE_NAMESIZE(z->cdir + i);
-    if (entry_namelen == (int)namelen &&
-        !memcmp(entry_name, name, namelen)) {
-      return z->cdir + i;
+    if (hdrsize < kZipCfileHdrMinSize || i + hdrsize > z->cdir_size) {
+      free(idx);
+      return "corrupted central directory";
+    }
+    idx[got].name = (const char *)ZIP_CFILE_NAME(z->cdir + i);
+    idx[got].namelen = ZIP_CFILE_NAMESIZE(z->cdir + i);
+    idx[got].cdir_off = i;
+  }
+  if (got < z->count) {
+    free(idx);
+    return "truncated central directory";
+  }
+  qsort(idx, z->count, sizeof(*idx), CompareIndexEntries);
+  z->index = idx;
+  return NULL;
+}
+
+static uint8_t *FindEntry(struct LuaZipReader *z, const char *name,
+                          size_t namelen) {
+  int64_t lo = 0, hi = z->count - 1, mid;
+  const struct LuaZipIndexEntry *best = NULL;
+  if (!z->index)
+    return NULL;
+  while (lo <= hi) {
+    mid = lo + (hi - lo) / 2;
+    int c = CompareEntryNames(name, namelen, z->index[mid].name,
+                              z->index[mid].namelen);
+    if (c > 0) {
+      lo = mid + 1;
+    } else {
+      if (!c)
+        best = &z->index[mid];
+      hi = mid - 1;  // keep scanning left for the first-in-archive dup
     }
   }
-  return NULL;
+  return best ? z->cdir + best->cdir_off : NULL;
 }
 
 // Read from either fd or in-memory buffer
@@ -199,7 +267,7 @@ static int LuaZipOpenReader(lua_State *L) {
       max_file_size = luaL_checkinteger(L, -1);
       if (max_file_size <= 0) {
         if (owns_fd) close(fd);
-        return luaL_error(L, "max_file_size must be positive");
+        return ZipError(L, "max_file_size must be positive");
       }
     }
     lua_pop(L, 1);
@@ -263,6 +331,7 @@ static int LuaZipOpenReader(lua_State *L) {
   z->file_size = 0;
   z->max_file_size = 0;
   z->data = NULL;
+  z->index = NULL;
 
   // allocate and copy central directory
   uint8_t *cdir = malloc(cdir_size ? cdir_size : 1);
@@ -282,6 +351,10 @@ static int LuaZipOpenReader(lua_State *L) {
   z->file_size = zsize;
   z->max_file_size = max_file_size;
 
+  const char *ierr = BuildEntryIndex(z);
+  if (ierr)
+    return ZipError(L, ierr);  // __gc cleans up the reader
+
   return 1;
 }
 
@@ -299,7 +372,7 @@ static int LuaZipFrom(lua_State *L) {
     if (!lua_isnil(L, -1)) {
       max_file_size = luaL_checkinteger(L, -1);
       if (max_file_size <= 0) {
-        return luaL_error(L, "max_file_size must be positive");
+        return ZipError(L, "max_file_size must be positive");
       }
     }
     lua_pop(L, 1);
@@ -349,6 +422,7 @@ static int LuaZipFrom(lua_State *L) {
   z->file_size = 0;
   z->max_file_size = 0;
   z->data = NULL;
+  z->index = NULL;
 
   // allocate and copy central directory
   uint8_t *cdir = malloc(cdir_size ? cdir_size : 1);
@@ -366,6 +440,10 @@ static int LuaZipFrom(lua_State *L) {
   z->max_file_size = max_file_size;
   z->data = (const uint8_t *)data;
 
+  const char *ierr = BuildEntryIndex(z);
+  if (ierr)
+    return ZipError(L, ierr);  // __gc cleans up the reader
+
   return 1;
 }
 
@@ -375,6 +453,10 @@ static int LuaZipReaderClose(lua_State *L) {
   if (z->fd != -1) {
     if (z->owns_fd) close(z->fd);
     z->fd = -1;
+  }
+  if (z->index) {
+    free(z->index);
+    z->index = NULL;
   }
   if (z->cdir) {
     free(z->cdir);
@@ -389,26 +471,26 @@ static int LuaZipReaderGc(lua_State *L) {
   return LuaZipReaderClose(L);
 }
 
-// reader:list() -> {name, ...}
+// reader:list() -> {{name=, size=, mode=}, ...}
+// entries appear in archive order; the central directory was validated
+// when the reader was opened, so no corruption checks are needed here
 static int LuaZipReaderList(lua_State *L) {
   struct LuaZipReader *z = GetZipReader(L);
   if (z->fd == -1 && !z->data)
     return ZipError(L, "zip reader is closed");
 
-  lua_newtable(L);
+  lua_createtable(L, z->count, 0);
   int idx = 1;
-  int64_t i, got, hdrsize;
-  for (i = got = 0;
-       i + kZipCfileHdrMinSize <= z->cdir_size && got < z->count;
-       i += hdrsize, ++got) {
-    if (ZIP_CFILE_MAGIC(z->cdir + i) != kZipCfileHdrMagic)
-      return ZipError(L, "corrupted central directory");
-    hdrsize = ZIP_CFILE_HDRSIZE(z->cdir + i);
-    if (hdrsize < kZipCfileHdrMinSize || i + hdrsize > z->cdir_size)
-      return ZipError(L, "corrupted central directory");
-    const char *name = ZIP_CFILE_NAME(z->cdir + i);
-    int namelen = ZIP_CFILE_NAMESIZE(z->cdir + i);
-    lua_pushlstring(L, name, namelen);
+  int64_t i, got;
+  for (i = got = 0; got < z->count; i += ZIP_CFILE_HDRSIZE(z->cdir + i), ++got) {
+    lua_createtable(L, 0, 3);
+    lua_pushlstring(L, ZIP_CFILE_NAME(z->cdir + i),
+                    ZIP_CFILE_NAMESIZE(z->cdir + i));
+    lua_setfield(L, -2, "name");
+    lua_pushinteger(L, GetZipCfileUncompressedSize(z->cdir + i));
+    lua_setfield(L, -2, "size");
+    lua_pushinteger(L, GetZipCfileMode(z->cdir + i));
+    lua_setfield(L, -2, "mode");
     lua_rawseti(L, -2, idx++);
   }
   return 1;
@@ -426,7 +508,8 @@ static int LuaZipReaderStat(lua_State *L) {
   uint8_t *cfile = FindEntry(z, name, namelen);
   if (!cfile) {
     lua_pushnil(L);
-    return 1;
+    lua_pushfstring(L, "entry not found: %s", name);
+    return 2;
   }
 
   lua_newtable(L);
@@ -464,8 +547,11 @@ static int LuaZipReaderRead(lua_State *L) {
     return ZipError(L, "zip reader is closed");
 
   uint8_t *cfile = FindEntry(z, name, namelen);
-  if (!cfile)
-    return ZipError(L, "entry not found");
+  if (!cfile) {
+    lua_pushnil(L);
+    lua_pushfstring(L, "entry not found: %s", name);
+    return 2;
+  }
 
   int64_t lfile_off = GetZipCfileOffset(cfile);
   int64_t compressed_size = GetZipCfileCompressedSize(cfile);
@@ -925,7 +1011,7 @@ static int LuaZipCreate(lua_State *L) {
     if (!lua_isnil(L, -1)) {
       level = luaL_checkinteger(L, -1);
       if (level < 0 || level > 9)
-        return luaL_error(L, "compression level must be 0-9");
+        return ZipError(L, "compression level must be 0-9");
     }
     lua_pop(L, 1);
 
@@ -933,7 +1019,7 @@ static int LuaZipCreate(lua_State *L) {
     if (!lua_isnil(L, -1)) {
       max_file_size = luaL_checkinteger(L, -1);
       if (max_file_size <= 0)
-        return luaL_error(L, "max_file_size must be positive");
+        return ZipError(L, "max_file_size must be positive");
     }
     lua_pop(L, 1);
   }
@@ -1035,8 +1121,11 @@ static int LuaZipWriterAdd(lua_State *L) {
         force_store = true;
       else if (!strcmp(m, "deflate"))
         force_deflate = true;
-      else
-        return luaL_error(L, "unknown method: %s", m);
+      else {
+        lua_pushnil(L);
+        lua_pushfstring(L, "unknown method: %s", m);
+        return 2;
+      }
     }
     lua_pop(L, 1);
 

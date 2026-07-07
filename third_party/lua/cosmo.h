@@ -10,6 +10,7 @@ struct EncoderConfig {
   short maxdepth;
   bool sorted;
   bool pretty;
+  bool nannull;  // json: encode non-finite numbers as null instead of erroring
   const char *indent;
 };
 
@@ -20,6 +21,8 @@ struct Serializer {
   char *strbuf;
   size_t strbuflen;
   uintptr_t bsp;
+  int arraymt;  // stack index of the json.array marker metatable, or 0
+  int nullmt;   // stack index of the json.null sentinel metatable, or 0
 };
 
 bool LuaHasMultipleItems(lua_State *);

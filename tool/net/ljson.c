@@ -244,6 +244,9 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
         // rehash-on-grow cycles lua_rawseti would otherwise pay; 8 covers
         // the common short array without meaningful waste on tiny ones.
         lua_createtable(L, 8, 0);  // +1
+        // mark the table with the shared json.array metatable so the
+        // encoder can tell an empty array apart from an empty object
+        luaL_setmetatable(L, "json.array");
         for (context = ARRAY, i = 0;;) {
           r = Parse(L, p, e, context, depth - 1, bsp);  // +2
           if (UNLIKELY(r.rc == -1)) {
@@ -256,11 +259,6 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
           }
           lua_rawseti(L, -2, i++ + 1);
           context = ARRAY | COMMA;
-        }
-        if (!i) {
-          // we need this kludge so `[]` won't round-trip as `{}`
-          lua_pushboolean(L, false);  // +2
-          lua_rawseti(L, -2, 0);
         }
         return (struct DecodeJson){1, p};
 
@@ -608,6 +606,10 @@ struct DecodeJson DecodeJson(struct lua_State *L, const char *p, size_t n) {
     n = p ? strlen(p) : 0;
   uintptr_t bsp = GetStackBottom() + 4096;
   if (lua_checkstack(L, DEPTH * 3 + LUA_MINSTACK)) {
+    // ensure the shared array marker metatable exists so decoded
+    // arrays round-trip even if the host never ran luaopen_cosmo
+    luaL_newmetatable(L, "json.array");
+    lua_pop(L, 1);
     return Parse(L, p, p + n, 0, DEPTH, bsp);
   } else {
     return (struct DecodeJson){-1, "can't set stack depth"};

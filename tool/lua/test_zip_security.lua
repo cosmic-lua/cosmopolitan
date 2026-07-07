@@ -109,21 +109,18 @@ assert(err:match("too large"), "error should mention size")
 
 reader:close()
 
--- Test invalid max_file_size values
-ok, err = pcall(function()
-  zip.open(tmpdir .. "/bad.zip", "w", {max_file_size = 0})
-end)
-assert(not ok, "max_file_size = 0 should error")
+-- Test invalid max_file_size values: nil, err instead of a raise (issue #153)
+result, err = zip.open(tmpdir .. "/bad.zip", "w", {max_file_size = 0})
+assert(result == nil, "max_file_size = 0 should error")
+assert(type(err) == "string", "max_file_size = 0 should return an error string")
 
-ok, err = pcall(function()
-  zip.open(tmpdir .. "/bad.zip", "w", {max_file_size = -1})
-end)
-assert(not ok, "max_file_size = -1 should error")
+result, err = zip.open(tmpdir .. "/bad.zip", "w", {max_file_size = -1})
+assert(result == nil, "max_file_size = -1 should error")
+assert(type(err) == "string", "max_file_size = -1 should return an error string")
 
-ok, err = pcall(function()
-  zip.open(limit_zip, {max_file_size = 0})
-end)
-assert(not ok, "max_file_size = 0 on open should error")
+result, err = zip.open(limit_zip, {max_file_size = 0})
+assert(result == nil, "max_file_size = 0 on open should error")
+assert(type(err) == "string", "max_file_size = 0 on open should return an error string")
 
 --------------------------------------------------------------------------------
 -- Test append mode security validations

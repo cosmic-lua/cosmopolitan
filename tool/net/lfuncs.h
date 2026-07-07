@@ -10,7 +10,6 @@ int luaopen_lsqlite3(lua_State *);
 
 int LuaBarf(lua_State *);
 int LuaCategorizeIp(lua_State *);
-int LuaCompress(lua_State *);
 int LuaCrc32(lua_State *);
 int LuaCrc32c(lua_State *);
 int LuaDecodeBase32(lua_State *);
@@ -58,7 +57,6 @@ int LuaResolveIp(lua_State *);
 int LuaSha256(lua_State *);
 int LuaSlurp(lua_State *);
 int LuaStrftime(lua_State *);
-int LuaUncompress(lua_State *);
 int LuaUuidV4(lua_State *);
 int LuaUuidV7(lua_State *);
 

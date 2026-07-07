@@ -3898,6 +3898,17 @@ static int LuaEncodeSmth(lua_State *L, int Encoder(lua_State *, char **, int,
     if (!lua_isnoneornil(L, -1)) {
       conf.sorted = lua_toboolean(L, -1);
     }
+    lua_getfield(L, 2, "nan");
+    if (!lua_isnoneornil(L, -1)) {
+      const char *nanopt = lua_tostring(L, -1);
+      if (nanopt && !strcmp(nanopt, "null")) {
+        conf.nannull = true;
+      } else {
+        lua_pushnil(L);
+        lua_pushliteral(L, "invalid nan option (must be \"null\")");
+        return 2;
+      }
+    }
     lua_getfield(L, 2, "pretty");
     if (!lua_isnoneornil(L, -1)) {
       conf.pretty = lua_toboolean(L, -1);
@@ -5033,7 +5044,6 @@ static const char *const kDontAutoComplete[] = {
 static const luaL_Reg kLuaFuncs[] = {
     {"Barf", LuaBarf},                                          //
     {"CategorizeIp", LuaCategorizeIp},                          //
-    {"Compress", LuaCompress},                                  //
     {"Crc32", LuaCrc32},                                        //
     {"Crc32c", LuaCrc32c},                                      //
     {"DecodeBase32", LuaDecodeBase32},                          //
@@ -5158,7 +5168,6 @@ static const luaL_Reg kLuaFuncs[] = {
     {"Sha256", LuaSha256},                                      //
     {"Slurp", LuaSlurp},                                        //
     {"StoreAsset", LuaStoreAsset},                              //
-    {"Uncompress", LuaUncompress},                              //
     {"UuidV4", LuaUuidV4},                                      //
     {"UuidV7", LuaUuidV7},                                      //
     {"Write", LuaWrite},                                        //

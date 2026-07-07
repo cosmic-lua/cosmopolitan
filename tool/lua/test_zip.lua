@@ -48,9 +48,13 @@ assert(entries, "list should return a table")
 assert(#entries == 2, "should have 2 entries, got " .. #entries)
 
 local has_file1, has_file2 = false, false
-for _, name in ipairs(entries) do
-  if name == "file1.txt" then has_file1 = true end
-  if name == "file2.txt" then has_file2 = true end
+for _, e in ipairs(entries) do
+  if e.name == "file1.txt" then
+    has_file1 = true
+    assert(e.size == #file1_content, "list record should carry size")
+    assert(type(e.mode) == "number", "list record should carry mode")
+  end
+  if e.name == "file2.txt" then has_file2 = true end
 end
 assert(has_file1, "should have file1.txt")
 assert(has_file2, "should have file2.txt")
@@ -63,9 +67,13 @@ assert(stat.crc32, "should have crc32")
 assert(stat.method ~= nil, "should have method")
 assert(stat.mtime, "should have mtime")
 
--- Test stat for non-existent file
-local stat2 = reader:stat("nonexistent.txt")
+-- Test stat for non-existent file: nil, err like read (issue #153)
+local stat2, staterr2 = reader:stat("nonexistent.txt")
 assert(stat2 == nil, "stat should return nil for non-existent file")
+assert(select("#", reader:stat("nonexistent.txt")) == 2,
+       "stat should return two values for missing entry")
+assert(type(staterr2) == "string" and staterr2:find("nonexistent.txt", 1, true),
+       "stat error should name the missing entry: " .. tostring(staterr2))
 
 -- Test reading uncompressed content
 local content1 = reader:read("file1.txt")
@@ -152,11 +160,11 @@ assert(entries, "list should return a table")
 assert(#entries == 4, "should have 4 entries, got " .. #entries)
 
 has_file1, has_file2, has_stored, has_timed = false, false, false, false
-for _, name in ipairs(entries) do
-  if name == "file1.txt" then has_file1 = true end
-  if name == "subdir/file2.txt" then has_file2 = true end
-  if name == "stored.txt" then has_stored = true end
-  if name == "with_time.txt" then has_timed = true end
+for _, e in ipairs(entries) do
+  if e.name == "file1.txt" then has_file1 = true end
+  if e.name == "subdir/file2.txt" then has_file2 = true end
+  if e.name == "stored.txt" then has_stored = true end
+  if e.name == "with_time.txt" then has_timed = true end
 end
 assert(has_file1, "should have file1.txt")
 assert(has_file2, "should have subdir/file2.txt")
@@ -295,11 +303,15 @@ local bad_writer, bad_err = zip.open("/nonexistent/path/to/file.zip", "w")
 assert(bad_writer == nil, "creating in non-existent dir should fail")
 assert(bad_err, "should have error message")
 
--- Invalid compression level
-ok, err = pcall(function()
-  zip.open(tmpdir .. "/bad.zip", "w", {level = 10})
-end)
-assert(not ok, "level 10 should error")
+-- Invalid compression level: nil, err instead of a raise (issue #153)
+local bad_level, bad_level_err = zip.open(tmpdir .. "/bad.zip", "w", {level = 10})
+assert(bad_level == nil, "level 10 should return nil")
+assert(type(bad_level_err) == "string", "level 10 should return an error string")
+
+-- Invalid max_file_size: nil, err instead of a raise (issue #153)
+local bad_mfs, bad_mfs_err = zip.open(zippath, "r", {max_file_size = -1})
+assert(bad_mfs == nil, "negative max_file_size should return nil")
+assert(type(bad_mfs_err) == "string", "negative max_file_size should return an error string")
 
 --------------------------------------------------------------------------------
 -- Test zip.from (Reader from in-memory buffer)
@@ -424,8 +436,8 @@ assert(#final_entries == expected_count,
 
 -- Verify the new entry exists and can be read
 local found_new_entry = false
-for _, name in ipairs(final_entries) do
-  if name == ".lua/test_append.lua" then
+for _, e in ipairs(final_entries) do
+  if e.name == ".lua/test_append.lua" then
     found_new_entry = true
     break
   end

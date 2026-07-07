@@ -934,119 +934,77 @@ void LuaPushUrlView(lua_State *L, struct UrlView *v) {
   }
 }
 
-static void LuaCompress2(lua_State *L, void *dest, size_t *destLen,
-                         const void *source, size_t sourceLen, int level) {
-  switch (compress2(dest, destLen, source, sourceLen, level)) {
-    case Z_OK:
-      break;
-    case Z_BUF_ERROR:
-      luaL_error(L, "out of memory");
-      __builtin_unreachable();
-    case Z_STREAM_ERROR:
-      luaL_error(L, "invalid level");
-      __builtin_unreachable();
-    default:
-      __builtin_unreachable();
-  }
-}
-
-// VERY DEPRECATED - PLEASE DO NOT USE
-int LuaCompress(lua_State *L) {
-  size_t n, m;
-  char *q, *e;
-  uint32_t crc;
-  const char *p;
-  luaL_Buffer buf;
-  int level, hdrlen;
-  p = luaL_checklstring(L, 1, &n);
-  level = luaL_optinteger(L, 2, Z_DEFAULT_COMPRESSION);
-  m = compressBound(n);
-  if (lua_toboolean(L, 3)) {
-    // raw mode
-    q = luaL_buffinitsize(L, &buf, m);
-    LuaCompress2(L, q, &m, p, n, level);
-  } else {
-    // easy mode
-    q = luaL_buffinitsize(L, &buf, 10 + 4 + m);
-    crc = crc32_z(0, p, n);
-    e = uleb64(q, n);
-    e = WRITE32LE(e, crc);
-    hdrlen = e - q;
-    LuaCompress2(L, q + hdrlen, &m, p, n, level);
-    m += hdrlen;
-  }
-  luaL_pushresultsize(&buf, m);
-  return 1;
-}
-
-// VERY DEPRECATED - PLEASE DO NOT USE
-int LuaUncompress(lua_State *L) {
-  int rc;
-  char *q;
-  uint32_t crc;
-  const char *p;
-  luaL_Buffer buf;
-  size_t n, m, len;
-  p = luaL_checklstring(L, 1, &n);
-  if (lua_isnoneornil(L, 2)) {
-    if ((rc = unuleb64(p, n, &m)) == -1 || n < rc + 4) {
+// parses the shared format option of Deflate/Inflate into zlib window
+// bits; "auto" (header detection) is only meaningful for Inflate
+// returns false and pushes nil, error on an unrecognized format
+static bool GetZlibFormat(lua_State *L, int idx, bool inflating, int *wbits) {
+  const char *fmt;
+  lua_getfield(L, idx, "format");
+  if (!lua_isnil(L, -1)) {
+    fmt = lua_tostring(L, -1);
+    if (fmt && !strcmp(fmt, "raw")) {
+      *wbits = -MAX_WBITS;
+    } else if (fmt && !strcmp(fmt, "zlib")) {
+      *wbits = MAX_WBITS;
+    } else if (fmt && !strcmp(fmt, "gzip")) {
+      *wbits = MAX_WBITS + 16;
+    } else if (fmt && inflating && !strcmp(fmt, "auto")) {
+      *wbits = MAX_WBITS + 32;  // detects zlib or gzip header
+    } else {
       lua_pushnil(L);
-      lua_pushliteral(L, "compressed value too short to be valid");
-      return 2;
-    }
-    len = m;
-    crc = READ32LE(p + rc);
-    q = luaL_buffinitsize(L, &buf, m);
-    if (uncompress((void *)q, &m, (unsigned char *)p + rc + 4, n) != Z_OK ||
-        m != len || crc32_z(0, q, m) != crc) {
-      lua_pushnil(L);
-      lua_pushliteral(L, "compressed value is corrupted");
-      return 2;
-    }
-  } else {
-    len = m = luaL_checkinteger(L, 2);
-    q = luaL_buffinitsize(L, &buf, m);
-    if (uncompress((void *)q, &m, (void *)p, n) != Z_OK || m != len) {
-      lua_pushnil(L);
-      lua_pushliteral(L, "compressed value is corrupted");
-      return 2;
+      lua_pushfstring(L, "invalid format: %s", fmt ? fmt : "(not a string)");
+      return false;
     }
   }
-  luaL_pushresultsize(&buf, m);
-  return 1;
+  lua_pop(L, 1);
+  return true;
 }
 
-// unix.deflate(uncompressed:str[, level:int])
+// cosmo.Deflate(uncompressed:str[, opts:tbl])
 //     ├─→ compressed:str
 //     └─→ nil, error:str
+// opts.level: compression level -1..9 (default -1, the zlib default)
+// opts.format: "raw" (default), "zlib", or "gzip"
 int LuaDeflate(lua_State *L) {
   char *out;
-  z_stream zs;
-  int rc, level;
+  z_stream zs = {0};
   const char *in;
   luaL_Buffer buf;
-  size_t insize, outsize, actualoutsize;
+  size_t insize, outsize;
+  int rc, level = Z_DEFAULT_COMPRESSION, wbits = -MAX_WBITS;
   in = luaL_checklstring(L, 1, &insize);
-  level = luaL_optinteger(L, 2, Z_DEFAULT_COMPRESSION);
-  outsize = compressBound(insize);
-  out = luaL_buffinitsize(L, &buf, outsize);
+  if (!lua_isnoneornil(L, 2)) {
+    luaL_checktype(L, 2, LUA_TTABLE);
+    lua_getfield(L, 2, "level");
+    if (!lua_isnil(L, -1)) {
+      level = luaL_checkinteger(L, -1);
+      if (level < -1 || level > 9) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "level must be in range -1..9");
+        return 2;
+      }
+    }
+    lua_pop(L, 1);
+    if (!GetZlibFormat(L, 2, false, &wbits))
+      return 2;
+  }
 
-  zs.next_in = (const uint8_t *)in;
-  zs.avail_in = insize;
-  zs.next_out = (uint8_t *)out;
-  zs.avail_out = outsize;
-  zs.zalloc = Z_NULL;
-  zs.zfree = Z_NULL;
-
-  if ((rc = deflateInit2(&zs, level, Z_DEFLATED, -MAX_WBITS, MAX_MEM_LEVEL,
+  if ((rc = deflateInit2(&zs, level, Z_DEFLATED, wbits, MAX_MEM_LEVEL,
                          Z_DEFAULT_STRATEGY)) != Z_OK) {
     lua_pushnil(L);
     lua_pushfstring(L, "%s() failed: %d", "deflateInit2", rc);
     return 2;
   }
 
+  outsize = deflateBound(&zs, insize);
+  out = luaL_buffinitsize(L, &buf, outsize);
+  zs.next_in = (const uint8_t *)in;
+  zs.avail_in = insize;
+  zs.next_out = (uint8_t *)out;
+  zs.avail_out = outsize;
+
   rc = deflate(&zs, Z_FINISH);
-  actualoutsize = outsize - zs.avail_out;
+  outsize -= zs.avail_out;
   deflateEnd(&zs);
 
   if (rc != Z_STREAM_END) {
@@ -1055,50 +1013,84 @@ int LuaDeflate(lua_State *L) {
     return 2;
   }
 
-  luaL_pushresultsize(&buf, actualoutsize);
+  luaL_pushresultsize(&buf, outsize);
   return 1;
 }
 
-// unix.inflate(compressed:str, maxoutsize:int)
+// cosmo.Inflate(compressed:str[, opts:tbl])
 //     ├─→ uncompressed:str
 //     └─→ nil, error:str
+// opts.maxsize: decompressed size cap in bytes (default 64 MiB)
+// opts.format: "raw" (default), "zlib", "gzip", or "auto"
+// streams into a growing buffer, so the exact decompressed size need
+// not be known in advance and no attacker-controlled length is trusted
 int LuaInflate(lua_State *L) {
-  int rc;
-  char *out;
-  z_stream zs;
+  size_t n;
+  z_stream zs = {0};
   const char *in;
   luaL_Buffer buf;
-  size_t insize, outsize, actualoutsize;
+  char chunk[16384];
+  size_t insize, total = 0;
+  int rc, wbits = -MAX_WBITS;
+  lua_Integer maxsize = 64 * 1024 * 1024;
   in = luaL_checklstring(L, 1, &insize);
-  outsize = luaL_checkinteger(L, 2);
-  out = luaL_buffinitsize(L, &buf, outsize);
+  if (!lua_isnoneornil(L, 2)) {
+    luaL_checktype(L, 2, LUA_TTABLE);
+    lua_getfield(L, 2, "maxsize");
+    if (!lua_isnil(L, -1)) {
+      maxsize = luaL_checkinteger(L, -1);
+      if (maxsize <= 0) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "maxsize must be positive");
+        return 2;
+      }
+    }
+    lua_pop(L, 1);
+    if (!GetZlibFormat(L, 2, true, &wbits))
+      return 2;
+  }
 
-  zs.next_in = (const uint8_t *)in;
-  zs.avail_in = insize;
-  zs.total_in = insize;
-  zs.next_out = (uint8_t *)out;
-  zs.avail_out = outsize;
-  zs.total_out = outsize;
-  zs.zalloc = Z_NULL;
-  zs.zfree = Z_NULL;
-
-  if ((rc = inflateInit2(&zs, -MAX_WBITS)) != Z_OK) {
+  if ((rc = inflateInit2(&zs, wbits)) != Z_OK) {
     lua_pushnil(L);
     lua_pushfstring(L, "%s() failed: %d", "inflateInit2", rc);
     return 2;
   }
 
-  rc = inflate(&zs, Z_FINISH);
-  actualoutsize = outsize - zs.avail_out;
-  inflateEnd(&zs);
-
-  if (rc != Z_STREAM_END) {
-    lua_pushnil(L);
-    lua_pushfstring(L, "%s() failed: %d", "inflate", rc);
-    return 2;
+  zs.next_in = (const uint8_t *)in;
+  zs.avail_in = insize;
+  luaL_buffinit(L, &buf);
+  for (;;) {
+    zs.next_out = (uint8_t *)chunk;
+    zs.avail_out = sizeof(chunk);
+    rc = inflate(&zs, Z_NO_FLUSH);
+    if (rc != Z_OK && rc != Z_STREAM_END && rc != Z_BUF_ERROR) {
+      inflateEnd(&zs);
+      lua_pushnil(L);
+      lua_pushfstring(L, "inflate failed: %s",
+                      zs.msg ? zs.msg : "invalid compressed data");
+      return 2;
+    }
+    n = sizeof(chunk) - zs.avail_out;
+    if (n > (size_t)maxsize - total) {
+      inflateEnd(&zs);
+      lua_pushnil(L);
+      lua_pushliteral(L, "maximum decompressed size exceeded");
+      return 2;
+    }
+    total += n;
+    luaL_addlstring(&buf, chunk, n);
+    if (rc == Z_STREAM_END)
+      break;
+    if (rc == Z_BUF_ERROR && !n) {
+      // no progress possible: input ended before the stream did
+      inflateEnd(&zs);
+      lua_pushnil(L);
+      lua_pushliteral(L, "unexpected end of compressed data");
+      return 2;
+    }
   }
-
-  luaL_pushresultsize(&buf, actualoutsize);
+  inflateEnd(&zs);
+  luaL_pushresult(&buf);
   return 1;
 }
 
