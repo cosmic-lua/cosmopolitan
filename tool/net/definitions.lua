@@ -68,11 +68,11 @@ arg = nil
 ---@field body string? request payload.
 ---@field maxredirects integer? maximum number of redirects to follow.
 ---@field followredirect boolean? whether to follow redirects. Defaults to `true`.
+---@field allowprivate boolean? allow requests to private, loopback, and other non-public network addresses (disables the SSRF guard). Applies to every hop of a redirect chain. Defaults to `false`.
 ---@field keepalive boolean? whether to keep the connection alive.
 ---@field proxy string? proxy URL to route the request through.
 ---@field maxresponse integer? limit on response (or per-read buffer) size.
 ---@field timeout number? request timeout in seconds. `0` or absent keeps the 60-second default; there is no "infinite" option.
----@field resettls boolean? whether to reset TLS session state before the request.
 
 -- MODULES
 
@@ -2338,12 +2338,17 @@ function cosmo.EscapeUser(str) end
 ---   connection open (unless closed by the server) and reuse for the
 ---   next request to the same host. This option is disabled when SSL
 ---   connection is used.
----   The mapping of hosts and their sockets is stored in a table
----   assigned to the `keepalive` field itself, so it can be passed to
----   the next call.
----   If the table includes the `close` field set to a true value,
----   then the connection is closed after the request is made and the
----   host is removed from the mapping table.
+---   When a table is passed, it is used as the socket pool: the mapping
+---   of hosts to their sockets is stored in it, so the same table can be
+---   passed to the next call. If that table includes the `close` field
+---   set to a true value, then the connection is closed after the
+---   request is made and the host is removed from the mapping table.
+---   When `true` is passed, a process-wide internal pool is used
+---   instead; the options table is never modified.
+--- - `allowprivate` (default: `false`): allow requests to private,
+---   loopback, and other non-public network addresses, which are
+---   otherwise blocked to prevent SSRF. The opt-out covers every hop of
+---   a redirect chain.
 --- - `proxy` (string): HTTP proxy URL, e.g. `"http://proxy:8080"`.
 ---   Supports Basic authentication: `"http://user:pass@proxy:8080"`.
 --- - `maxresponse` (default: `104857600`): maximum response size in bytes.
@@ -2353,8 +2358,6 @@ function cosmo.EscapeUser(str) end
 ---   connect).  A value of `0` or absent keeps the 60-second default.  There
 ---   is no "infinite" option — use a large positive value if needed.  The
 ---   timeout also bounds the TLS handshake.
---- - `resettls` (default: `true`): reset TLS state after fork.
----   Ensures child processes get fresh DRBG entropy.
 ---
 --- Environment variables:
 ---
@@ -2367,13 +2370,25 @@ function cosmo.EscapeUser(str) end
 ---
 --- When the redirect is being followed, the same method and body values are being
 --- sent in all cases except when 303 status is returned. In that case the method
---- is set to GET and the body is removed before the redirect is followed. Note
---- that if these (method/body) values are provided as table fields, they will be
---- modified in place.
+--- is set to GET and the body is removed before the redirect is followed. The
+--- options table is read-only: it is never modified, even across redirects.
+---
+--- On success, the fourth return value is the effective URL: the URL of
+--- the final request after any redirects were followed.
+---
+--- On failure, returns `nil`, a descriptive error message, and a
+--- machine-readable failure kind, one of `"dns"` (name resolution
+--- failed), `"connect"` (connection failed or was reset), `"tls"`
+--- (handshake or certificate verification failed), `"timeout"`,
+--- `"proxy"` (proxy configuration or tunnel failure), `"protocol"`
+--- (malformed request or response), `"too_large"` (response exceeded
+--- `maxresponse`), or `"blocked"` (refused by SSRF protection or the
+--- HTTPS-to-HTTP downgrade guard).
 ---@param url string
 ---@param body? string|cosmo.FetchOptions
----@return integer|nil status, table<string,string> headers, string body
+---@return integer|nil status, table<string,string> headers, string body, string url
 ---@return string? error
+---@return string? kind machine-readable failure kind; see above for values
 ---@nodiscard
 function cosmo.Fetch(url, body) end
 
@@ -2381,14 +2396,23 @@ function cosmo.Fetch(url, body) end
 --- Useful for Server-Sent Events (SSE), large downloads, or processing data incrementally.
 ---
 --- Accepts the same options table as `Fetch()`, including `timeout`, `maxresponse`,
---- `headers`, `method`, `body`, `proxy`, `followredirect`, and `maxredirects`.
+--- `headers`, `method`, `body`, `proxy`, `allowprivate`, `followredirect`,
+--- and `maxredirects` (`keepalive` is ignored: streaming connections are
+--- always closed). The options table is read-only: it is never modified,
+--- even across redirects.
 --- Note: `timeout=0` (or absent) retains the 60-second default; there is no
 --- "infinite" option.  `maxresponse` limits per-read buffer growth; negative
 --- values are rejected.
+---
+--- On success, the fourth return value is the effective URL after any
+--- redirects. On failure, returns `nil`, a descriptive error message,
+--- and a machine-readable failure kind with the same values as
+--- `Fetch()`.
 ---@param url string The URL to fetch
 ---@param options? cosmo.FetchOptions Request options
----@return integer|nil status, table<string,string> headers, cosmo.StreamReader reader
+---@return integer|nil status, table<string,string> headers, cosmo.StreamReader reader, string url
 ---@return string? error
+---@return string? kind machine-readable failure kind; see `Fetch`
 ---@nodiscard
 function cosmo.FetchStream(url, options) end
 
@@ -2766,12 +2790,12 @@ function cosmo.UuidV7() end
 
 --- Reads the next chunk of the response body.
 ---
---- Returns a string chunk on success. An empty string may be returned
---- for chunked transfer encodings when framing data arrived without any
---- payload; callers should skip empty chunks rather than treating them
---- as EOF. Returns `nil` when the stream ends. Returns `nil` plus an
---- error message string if the reader is closed, the connection failed,
---- or the response was truncated.
+--- Returns a non-empty string chunk on success (chunked transfer framing
+--- that arrives without payload is consumed internally and never surfaces
+--- as an empty chunk). Returns `nil` with no error when the stream ends,
+--- including for bodyless responses such as 204 and 304. Returns `nil`
+--- plus an error message string if the reader was closed with `close`,
+--- the connection failed, or the response was truncated.
 ---@return string? chunk next chunk of data, or nil on EOF
 ---@return string? error error message on failure
 function cosmo.StreamReader:read() end

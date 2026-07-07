@@ -103,8 +103,6 @@ static bool logbodies;
 #define WRITE write
 
 // Forward declarations
-static int LuaNilError(lua_State *, const char *, ...);
-static int LuaNilTlsError(lua_State *, const char *, int);
 static void LuaPushHeaders(lua_State *, struct HttpMessage *, const char *);
 static void LogMessage(const char *, const char *, size_t);
 static void LogBody(const char *, const char *, size_t);
@@ -125,23 +123,6 @@ static bool IsRepeatable(const char *s, size_t n) {
     return kHttpRepeatable[h];
   }
   return false;
-}
-
-static int LuaNilError(lua_State *L, const char *fmt, ...) {
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  lua_pushnil(L);
-  lua_pushstring(L, buf);
-  return 2;
-}
-
-static int LuaNilTlsError(lua_State *L, const char *s, int r) {
-  char buf[300];
-  mbedtls_strerror(r, buf, sizeof(buf));
-  return LuaNilError(L, "%s failed: %s", s, buf);
 }
 
 static void LuaPushHeaders(lua_State *L, struct HttpMessage *msg,
@@ -299,7 +280,7 @@ fail:
 }
 
 // Reset TLS state after fork so child processes get fresh entropy/DRBG
-// Called automatically by Fetch() when resettls=true (the default)
+// Called automatically by Fetch()/FetchStream() when the pid changes
 // lfetch.c needs its own version due to mutex
 static void LuaResetFetchTlsState(void) {
   pthread_mutex_lock(&g_ssl_mu);
@@ -444,104 +425,104 @@ static int LuaFetchReaderRead(lua_State *L) {
     }
   }
 
-  // Read from socket
+  // Read from socket. Loops so that chunk framing arriving without any
+  // payload (e.g. a chunk-size line in its own packet) never surfaces as
+  // an empty-string chunk: keep reading until payload, EOF, or error.
   char readbuf[16384];
+  for (;;) {
 #ifndef UNSECURE
-  if (r->usingssl) {
-    rc = mbedtls_ssl_read(r->sslctx, (unsigned char *)readbuf,
-                          sizeof(readbuf));
-    if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || rc == 0) {
-      // EOF
-      if (r->body_state == kHttpClientStateBody) {
+    if (r->usingssl) {
+      rc = mbedtls_ssl_read(r->sslctx, (unsigned char *)readbuf,
+                            sizeof(readbuf));
+      if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || rc == 0) {
+        // EOF
+        if (r->body_state == kHttpClientStateBody) {
+          lua_pushnil(L);
+          return 1;
+        }
         lua_pushnil(L);
-        return 1;
+        lua_pushliteral(L, "unexpected EOF");
+        return 2;
       }
-      lua_pushnil(L);
-      lua_pushliteral(L, "unexpected EOF");
-      return 2;
-    }
-    if (rc < 0) {
-      char errbuf[300];
-      mbedtls_strerror(rc, errbuf, sizeof(errbuf));
-      lua_pushnil(L);
-      lua_pushstring(L, errbuf);
-      return 2;
-    }
-  } else
+      if (rc < 0) {
+        char errbuf[300];
+        mbedtls_strerror(rc, errbuf, sizeof(errbuf));
+        lua_pushnil(L);
+        lua_pushstring(L, errbuf);
+        return 2;
+      }
+    } else
 #endif
-  {
-    rc = READ(r->sock, readbuf, sizeof(readbuf));
-    if (rc == 0) {
-      // EOF
-      if (r->body_state == kHttpClientStateBody) {
+    {
+      rc = READ(r->sock, readbuf, sizeof(readbuf));
+      if (rc == 0) {
+        // EOF
+        if (r->body_state == kHttpClientStateBody) {
+          lua_pushnil(L);
+          return 1;
+        }
+        lua_pushnil(L);
+        lua_pushliteral(L, "unexpected EOF");
+        return 2;
+      }
+      if (rc == -1) {
+        lua_pushnil(L);
+        lua_pushstring(L, strerror(errno));
+        return 2;
+      }
+    }
+
+    // Process the data we read
+    if (r->body_state == kHttpClientStateBodyChunked) {
+      // Reset i/j for fresh buffer (state machine state in t/m persists)
+      r->u.i = 0;
+      r->u.j = 0;
+      size_t paylen = 0;
+      int uc = Unchunk(&r->u, readbuf, rc, &paylen);
+      if (uc == -1) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "unchunk error");
+        return 2;
+      }
+      // Unchunk writes decoded data in-place; u.j has decoded byte count.
+      // paylen is only set when uc>0 (complete), so use u.j always.
+      size_t decoded = r->u.j;
+      if (uc > 0) {
+        // Chunked encoding complete (final chunk + trailers received)
+        r->stream_complete = true;
+        if (decoded > 0) {
+          // Return the decoded data; next read will return EOF
+          lua_pushlstring(L, readbuf, decoded);
+          r->bytes_read += decoded;
+          return 1;
+        }
+        // No data in final chunk, return EOF immediately
         lua_pushnil(L);
         return 1;
       }
-      lua_pushnil(L);
-      lua_pushliteral(L, "unexpected EOF");
-      return 2;
-    }
-    if (rc == -1) {
-      lua_pushnil(L);
-      lua_pushstring(L, strerror(errno));
-      return 2;
-    }
-  }
-
-  // Process the data we read
-  if (r->body_state == kHttpClientStateBodyChunked) {
-    // Reset i/j for fresh buffer (state machine state in t/m persists)
-    r->u.i = 0;
-    r->u.j = 0;
-    size_t paylen = 0;
-    int uc = Unchunk(&r->u, readbuf, rc, &paylen);
-    if (uc == -1) {
-      lua_pushnil(L);
-      lua_pushliteral(L, "unchunk error");
-      return 2;
-    }
-    // Unchunk writes decoded data in-place; u.j has decoded byte count.
-    // paylen is only set when uc>0 (complete), so use u.j always.
-    size_t decoded = r->u.j;
-    if (uc > 0) {
-      // Chunked encoding complete (final chunk + trailers received)
-      r->stream_complete = true;
       if (decoded > 0) {
-        // Return the decoded data; next read will return EOF
         lua_pushlstring(L, readbuf, decoded);
         r->bytes_read += decoded;
         return 1;
       }
-      // No data in final chunk, return EOF immediately
-      lua_pushnil(L);
-      return 1;
+      // Chunk framing but no payload data yet; read more
+      continue;
     }
-    if (decoded > 0) {
-      lua_pushlstring(L, readbuf, decoded);
-      r->bytes_read += decoded;
-      return 1;
+
+    // Non-chunked body
+    size_t len = rc;
+    if (r->body_state == kHttpClientStateBodyLengthed) {
+      size_t remaining = r->content_length - r->bytes_read;
+      if (len > remaining) len = remaining;
     }
-    // Got chunk framing but no payload data yet.
-    // NOTE: Returns empty string when chunk framing received but no payload data.
-    // Callers should handle empty chunks gracefully (e.g., skip if #chunk == 0).
-    // This can occur when chunk headers arrive separately from chunk data.
-    lua_pushliteral(L, "");
+    lua_pushlstring(L, readbuf, len);
+    r->bytes_read += len;
+    if (r->body_state == kHttpClientStateBodyLengthed &&
+        r->bytes_read >= r->content_length) {
+      r->stream_complete = true;
+    }
     return 1;
   }
-
-  // Non-chunked body
-  size_t len = rc;
-  if (r->body_state == kHttpClientStateBodyLengthed) {
-    size_t remaining = r->content_length - r->bytes_read;
-    if (len > remaining) len = remaining;
-  }
-  lua_pushlstring(L, readbuf, len);
-  r->bytes_read += len;
-  if (r->body_state == kHttpClientStateBodyLengthed &&
-      r->bytes_read >= r->content_length) {
-    r->stream_complete = true;
-  }
-  return 1;
 }
 
 // reader:close()
@@ -587,7 +568,7 @@ void LuaInitFetchReader(lua_State *L) {
   lua_pop(L, 1);
 }
 
-// FetchStream(url, opts) -> status, headers, reader
+// FetchStream(url, opts) -> status, headers, reader, url
 // Shares all setup with Fetch but returns a reader instead of buffering body.
 int LuaFetchStream(lua_State *L) {
 #define ssl nope
@@ -623,9 +604,7 @@ int LuaFetchStream(lua_State *L) {
   uint64_t imethod;
   int numredirects = 0, maxredirects = 5;
   bool followredirect = true;
-#ifndef UNSECURE
-  bool resettls = true;
-#endif
+  bool allowprivate = false;
   size_t maxresponse = 100 * 1024 * 1024;
   struct timeval fetchtimeout = timeout;   // local copy, may be overridden
   struct addrinfo hints = {.ai_family = AF_INET,
@@ -648,11 +627,14 @@ int LuaFetchStream(lua_State *L) {
       WRITE64LE(canmethod, imethod);
       method = canmethod;
     } else {
-      return LuaNilError(L, "bad method");
+      return LuaFetchError(L, "protocol", "bad method");
     }
     lua_getfield(L, 2, "followredirect");
     if (lua_isboolean(L, -1))
       followredirect = lua_toboolean(L, -1);
+    lua_getfield(L, 2, "allowprivate");
+    if (lua_isboolean(L, -1))
+      allowprivate = lua_toboolean(L, -1);
     lua_getfield(L, 2, "maxredirects");
     maxredirects = luaL_optinteger(L, -1, maxredirects);
     lua_getfield(L, 2, "numredirects");
@@ -681,11 +663,6 @@ int LuaFetchStream(lua_State *L) {
             (int64_t)((timeout_val - (int64_t)timeout_val) * 1e6);
       }
     }
-#ifndef UNSECURE
-    lua_getfield(L, 2, "resettls");
-    if (lua_isboolean(L, -1))
-      resettls = lua_toboolean(L, -1);
-#endif
     // Streaming always disables keepalive
     lua_getfield(L, 2, "headers");
     if (!lua_isnil(L, -1)) {
@@ -696,10 +673,11 @@ int LuaFetchStream(lua_State *L) {
         if (lua_type(L, -2) == LUA_TSTRING) {
           key = lua_tolstring(L, -2, &keylen);
           if (!IsValidHttpToken(key, keylen))
-            return LuaNilError(L, "invalid header name: %s", key);
+            return LuaFetchError(L, "protocol", "invalid header name: %s", key);
           val = lua_tolstring(L, -1, &vallen);
           if (!(hdr = gc(EncodeHttpHeaderValue(val, vallen, 0))))
-            return LuaNilError(L, "invalid header %s value encoding", key);
+            return LuaFetchError(L, "protocol",
+                                 "invalid header %s value encoding", key);
           if ((hdridx = GetHttpHeader(key, keylen)) == -1 ||
               hdridx != kHttpContentLength) {
             if (hdridx == kHttpUserAgent) {
@@ -724,7 +702,7 @@ int LuaFetchStream(lua_State *L) {
     lua_getfield(L, 2, "proxy");
     if (!lua_isnil(L, -1)) {
       if (!lua_isstring(L, -1))
-        return LuaNilError(L, "bad proxy; string expected");
+        return LuaFetchError(L, "proxy", "bad proxy; string expected");
       proxyarg = lua_tolstring(L, -1, &proxyarglen);
     }
     lua_settop(L, 2);
@@ -756,15 +734,18 @@ int LuaFetchStream(lua_State *L) {
     } else
 #endif
         if (!(url.scheme.n == 4 && !memcasecmp(url.scheme.p, "http", 4))) {
-      return LuaNilError(L, "bad scheme");
+      return LuaFetchError(L, "protocol", "bad scheme");
     }
   }
 
 #ifndef UNSECURE
-  if (usingssl && resettls)
-    LuaResetFetchTlsState();
-  if (usingssl && !sslinitialized)
-    TlsInit();
+  if (usingssl) {
+    if (sslinitialized && getpid() != luafetchsslpid)
+      LuaResetFetchTlsState();  // forked child needs fresh entropy/DRBG
+    if (!sslinitialized)
+      TlsInit();
+    luafetchsslpid = getpid();
+  }
 #endif
 
   // ---- Parse proxy ----
@@ -784,29 +765,31 @@ int LuaFetchStream(lua_State *L) {
       proxyunix = true;
       // Path is in url path, e.g. unix:///tmp/proxy.sock
       if (!proxyurl.path.n) {
-        return LuaNilError(L, "bad unix proxy; missing socket path");
+        return LuaFetchError(L, "proxy", "bad unix proxy; missing socket path");
       }
       if (proxyurl.path.n >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
-        return LuaNilError(L, "bad unix proxy; socket path too long (max %zu)",
-                           sizeof(((struct sockaddr_un *)0)->sun_path) - 1);
+        return LuaFetchError(L, "proxy",
+                             "bad unix proxy; socket path too long (max %zu)",
+                             sizeof(((struct sockaddr_un *)0)->sun_path) - 1);
       }
       if (!IsReasonablePath(proxyurl.path.p, proxyurl.path.n)) {
-        return LuaNilError(L, "bad unix proxy; path contains . or .. segments");
+        return LuaFetchError(L, "proxy",
+                             "bad unix proxy; path contains . or .. segments");
       }
       proxysockpath = gc(strndup(proxyurl.path.p, proxyurl.path.n));
       DEBUGF("(ftch) using unix proxy %s", proxysockpath);
     } else if (proxyurl.scheme.n == 4 &&
                !memcasecmp(proxyurl.scheme.p, "http", 4)) {
       if (!proxyurl.host.n)
-        return LuaNilError(L, "bad proxy; missing host");
+        return LuaFetchError(L, "proxy", "bad proxy; missing host");
       proxyhost = gc(strndup(proxyurl.host.p, proxyurl.host.n));
       proxyport = proxyurl.port.n
                       ? gc(strndup(proxyurl.port.p, proxyurl.port.n))
                       : "80";
       if (!IsAcceptableHost(proxyhost, -1))
-        return LuaNilError(L, "bad proxy; invalid host");
+        return LuaFetchError(L, "proxy", "bad proxy; invalid host");
       if (!IsAcceptablePort(proxyport, -1))
-        return LuaNilError(L, "bad proxy; invalid port");
+        return LuaFetchError(L, "proxy", "bad proxy; invalid port");
       if (proxyurl.user.n) {
         char *creds = gc(xasprintf("%.*s:%.*s",
                                    (int)proxyurl.user.n, proxyurl.user.p,
@@ -816,7 +799,8 @@ int LuaFetchStream(lua_State *L) {
           proxyauthhdr = gc(xasprintf("Proxy-Authorization: Basic %s\r\n", b64));
       }
     } else {
-      return LuaNilError(L, "bad proxy scheme; only http:// and unix:// supported");
+      return LuaFetchError(
+          L, "proxy", "bad proxy scheme; only http:// and unix:// supported");
     }
   }
 
@@ -835,12 +819,12 @@ int LuaFetchStream(lua_State *L) {
     host = urlarg;
     port = "80";
   } else {
-    return LuaNilError(L, "invalid host");
+    return LuaFetchError(L, "protocol", "invalid host");
   }
   if (!IsAcceptableHost(host, -1))
-    return LuaNilError(L, "invalid host");
+    return LuaFetchError(L, "protocol", "invalid host");
   if (!IsAcceptablePort(port, -1))
-    return LuaNilError(L, "invalid port");
+    return LuaFetchError(L, "protocol", "invalid port");
   if (!hosthdr)
     hosthdr = gc(xasprintf("%s:%s", host, port));
 
@@ -883,33 +867,44 @@ int LuaFetchStream(lua_State *L) {
     struct sockaddr_un addr_un = {.sun_family = AF_UNIX};
     strlcpy(addr_un.sun_path, proxysockpath, sizeof(addr_un.sun_path));
     if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
-      return LuaNilError(L, "socket(AF_UNIX) failed: %s", strerror(errno));
+      return LuaFetchError(L, "proxy", "socket(AF_UNIX) failed: %s",
+                           strerror(errno));
     if (connect(sock, (struct sockaddr *)&addr_un, sizeof(addr_un)) == -1) {
       close(sock);
-      return LuaNilError(L, "connect(%s) failed: %s", proxysockpath,
-                         strerror(errno));
+      return LuaFetchError(L, "proxy", "connect(%s) failed: %s", proxysockpath,
+                           strerror(errno));
     }
   } else {
     const char *connecthost = proxyhost ? proxyhost : host;
     const char *connectport = proxyhost ? proxyport : port;
     if ((rc = getaddrinfo(connecthost, connectport, &hints, &addr)) != 0)
-      return LuaNilError(L, "getaddrinfo(%s:%s) error: EAI_%s %s", connecthost,
-                         connectport, gai_strerror(rc), strerror(errno));
+      return LuaFetchError(L, "dns", "getaddrinfo(%s:%s) error: EAI_%s %s",
+                           connecthost, connectport, gai_strerror(rc),
+                           strerror(errno));
     ip = ntohl(((struct sockaddr_in *)addr->ai_addr)->sin_addr.s_addr);
-    if (!proxyhost && !IsPublicIp(ip)) {
+    // Skip SSRF check for proxy connections (proxy handles target
+    // resolution) and when the caller opted out with allowprivate=true
+    // (the opt-out covers every hop of a redirect chain).
+    if (!proxyhost && !allowprivate && !IsPublicIp(ip)) {
       freeaddrinfo(addr);
-      return LuaNilError(L, "request to private network blocked (SSRF protection)");
+      return LuaFetchError(
+          L, "blocked", "request to private network blocked (SSRF protection)");
     }
     if ((sock = GoodSocket(addr->ai_family, addr->ai_socktype,
                            addr->ai_protocol, false, &fetchtimeout)) == -1) {
       freeaddrinfo(addr);
-      return LuaNilError(L, "socket error: %s", strerror(errno));
+      return LuaFetchError(L, "connect", "socket error: %s", strerror(errno));
     }
     rc = connect(sock, addr->ai_addr, addr->ai_addrlen);
     freeaddrinfo(addr);
     if (rc == -1) {
       close(sock);
-      return LuaNilError(L, "connect error: %s", strerror(errno));
+      return LuaFetchError(
+          L,
+          (errno == EINPROGRESS || errno == EAGAIN || errno == ETIMEDOUT)
+              ? "timeout"
+              : "connect",
+          "connect error: %s", strerror(errno));
     }
   }
 
@@ -935,7 +930,8 @@ int LuaFetchStream(lua_State *L) {
     for (i = 0; i < connectreqlen; i += connectrc) {
       if ((connectrc = WRITE(sock, connectreq + i, connectreqlen - i)) <= 0) {
         close(sock);
-        return LuaNilError(L, "proxy CONNECT write error: %s", strerror(errno));
+        return LuaFetchError(L, "proxy", "proxy CONNECT write error: %s",
+                             strerror(errno));
       }
     }
     // Read and parse proxy CONNECT response properly
@@ -948,13 +944,13 @@ int LuaFetchStream(lua_State *L) {
           DestroyHttpMessage(&connectmsg);
           free(connectbuf.p);
           close(sock);
-          return LuaNilError(L, "proxy CONNECT response too large");
+          return LuaFetchError(L, "proxy", "proxy CONNECT response too large");
         }
         if (!(newp = realloc(connectbuf.p, connectbuf.c))) {
           DestroyHttpMessage(&connectmsg);
           free(connectbuf.p);
           close(sock);
-          return LuaNilError(L, "out of memory");
+          return LuaFetchError(L, "proxy", "out of memory");
         }
         connectbuf.p = newp;
       }
@@ -963,7 +959,8 @@ int LuaFetchStream(lua_State *L) {
         DestroyHttpMessage(&connectmsg);
         free(connectbuf.p);
         close(sock);
-        return LuaNilError(L, "proxy CONNECT read error: %s", strerror(errno));
+        return LuaFetchError(L, "proxy", "proxy CONNECT read error: %s",
+                             strerror(errno));
       }
       connectbuf.n += connectrc;
       rc = ParseHttpMessage(&connectmsg, connectbuf.p, connectbuf.n, SHRT_MAX);
@@ -971,7 +968,7 @@ int LuaFetchStream(lua_State *L) {
         DestroyHttpMessage(&connectmsg);
         free(connectbuf.p);
         close(sock);
-        return LuaNilError(L, "proxy CONNECT malformed response");
+        return LuaFetchError(L, "proxy", "proxy CONNECT malformed response");
       }
       if (rc > 0) break;  // complete
     }
@@ -980,7 +977,7 @@ int LuaFetchStream(lua_State *L) {
       DestroyHttpMessage(&connectmsg);
       free(connectbuf.p);
       close(sock);
-      return LuaNilError(L, "proxy CONNECT failed: HTTP %d", status);
+      return LuaFetchError(L, "proxy", "proxy CONNECT failed: HTTP %d", status);
     }
     DestroyHttpMessage(&connectmsg);
     free(connectbuf.p);
@@ -992,14 +989,14 @@ int LuaFetchStream(lua_State *L) {
     sslctx = malloc(sizeof(*sslctx));
     if (!sslctx) {
       close(sock);
-      return LuaNilError(L, "out of memory");
+      return LuaFetchError(L, "protocol", "out of memory");
     }
     mbedtls_ssl_init(sslctx);
     if ((ret = mbedtls_ssl_setup(sslctx, &confcli)) != 0) {
       mbedtls_ssl_free(sslctx);
       free(sslctx);
       close(sock);
-      return LuaNilTlsError(L, "ssl_setup", ret);
+      return LuaFetchTlsError(L, "tls", "ssl_setup", ret);
     }
     if (!evadedragnetsurveillance)
       mbedtls_ssl_set_hostname(sslctx, host);
@@ -1008,7 +1005,7 @@ int LuaFetchStream(lua_State *L) {
       mbedtls_ssl_free(sslctx);
       free(sslctx);
       close(sock);
-      return LuaNilError(L, "out of memory");
+      return LuaFetchError(L, "protocol", "out of memory");
     }
     bio->fd = sock;
     bio->a = 0;
@@ -1036,7 +1033,7 @@ int LuaFetchStream(lua_State *L) {
             mbedtls_ssl_free(sslctx);
             free(sslctx);
             close(sock);
-            return LuaNilError(L, "TLS handshake timed out");
+            return LuaFetchError(L, "timeout", "TLS handshake timed out");
           }
           break;
         case MBEDTLS_ERR_X509_CERT_VERIFY_FAILED:
@@ -1046,7 +1043,7 @@ int LuaFetchStream(lua_State *L) {
           mbedtls_ssl_free(sslctx);
           free(sslctx);
           close(sock);
-          return LuaNilTlsError(L, "handshake", ret);
+          return LuaFetchTlsError(L, "tls", "handshake", ret);
       }
     }
     LockInc(&shared->c.sslhandshakes);
@@ -1066,13 +1063,15 @@ int LuaFetchStream(lua_State *L) {
         mbedtls_ssl_free(sslctx);
         free(sslctx);
         close(sock);
-        return LuaNilTlsError(L, "write", rc);
+        return LuaFetchTlsError(L, "tls", "write", rc);
       }
     } else
 #endif
         if ((rc = WRITE(sock, request + i, requestlen - i)) <= 0) {
       close(sock);
-      return LuaNilError(L, "write error: %s", strerror(errno));
+      return LuaFetchError(
+          L, (errno == EAGAIN || errno == EWOULDBLOCK) ? "timeout" : "connect",
+          "write error: %s", strerror(errno));
     }
   }
 
@@ -1105,7 +1104,9 @@ int LuaFetchStream(lua_State *L) {
           mbedtls_ssl_free(sslctx);
           free(sslctx);
           close(sock);
-          return LuaNilTlsError(L, "read", rc);
+          if (rc == MBEDTLS_ERR_SSL_WANT_READ)  // SO_RCVTIMEO expired
+            return LuaFetchError(L, "timeout", "read timeout");
+          return LuaFetchTlsError(L, "tls", "read", rc);
         }
       }
     } else
@@ -1117,7 +1118,9 @@ int LuaFetchStream(lua_State *L) {
       if (sslctx) { free(bio); mbedtls_ssl_free(sslctx); free(sslctx); }
 #endif
       close(sock);
-      return LuaNilError(L, "read error: %s", strerror(errno));
+      if (errno == EAGAIN || errno == EWOULDBLOCK)  // SO_RCVTIMEO expired
+        return LuaFetchError(L, "timeout", "read timeout");
+      return LuaFetchError(L, "connect", "read error: %s", strerror(errno));
     }
     g = rc;
     inbuf.n += g;
@@ -1158,22 +1161,14 @@ int LuaFetchStream(lua_State *L) {
              msg.status == 302 || msg.status == 307 ||
              msg.status == 303) &&
             numredirects < maxredirects) {
+          bool crossorigin;
           // Clean up and follow redirect
           if (msg.status == 303) {
             body = "";
             bodylen = 0;
             method = "GET";
           }
-          if (!lua_istable(L, 2)) {
-            lua_settop(L, 1);
-            lua_createtable(L, 0, 3);
-          }
-          lua_pushlstring(L, body, bodylen);
-          lua_setfield(L, -2, "body");
-          lua_pushstring(L, method);
-          lua_setfield(L, -2, "method");
-          lua_pushinteger(L, numredirects + 1);
-          lua_setfield(L, -2, "numredirects");
+          lua_settop(L, 2);  // normalize stack to [url, opts]
           // Parse redirect URL
           gc(ParseUrl(FetchHeaderData(kHttpLocation),
                       FetchHeaderLength(kHttpLocation), &url, true));
@@ -1185,21 +1180,13 @@ int LuaFetchStream(lua_State *L) {
             free(inbuf.p);
             if (sslctx) { free(bio); mbedtls_ssl_free(sslctx); free(sslctx); }
             close(sock);
-            return LuaNilError(L, "refusing HTTPS to HTTP redirect downgrade");
+            return LuaFetchError(L, "blocked",
+                                 "refusing HTTPS to HTTP redirect downgrade");
           }
 #endif
-          // Strip auth headers on cross-origin redirect
-          if (url.host.n && url.scheme.n && lua_istable(L, 2)) {
-            lua_getfield(L, 2, "headers");
-            if (lua_istable(L, -1)) {
-              lua_pushnil(L); lua_setfield(L, -2, "Authorization");
-              lua_pushnil(L); lua_setfield(L, -2, "authorization");
-              lua_pushnil(L); lua_setfield(L, -2, "Cookie");
-              lua_pushnil(L); lua_setfield(L, -2, "cookie");
-            }
-            lua_pop(L, 1);
-          }
-          if (url.host.n && url.scheme.n) {
+          crossorigin = url.host.n && url.scheme.n;
+          // push the redirect target URL (stack slot 3)
+          if (crossorigin) {
             lua_pushlstring(L, FetchHeaderData(kHttpLocation),
                             FetchHeaderLength(kHttpLocation));
           } else {
@@ -1221,7 +1208,54 @@ int LuaFetchStream(lua_State *L) {
             url.path.n = strlen(url.path.p);
             lua_pushstring(L, gc(EncodeUrl(&url, 0)));
           }
-          lua_replace(L, -3);
+          // build a fresh options table (stack slot 4) for the recursive
+          // call; the caller's options table is read-only, never modified
+          lua_createtable(L, 0, 9);
+          lua_pushlstring(L, body, bodylen);
+          lua_setfield(L, 4, "body");
+          lua_pushstring(L, method);
+          lua_setfield(L, 4, "method");
+          lua_pushinteger(L, numredirects + 1);
+          lua_setfield(L, 4, "numredirects");
+          lua_pushinteger(L, maxredirects);
+          lua_setfield(L, 4, "maxredirects");
+          lua_pushboolean(L, followredirect);
+          lua_setfield(L, 4, "followredirect");
+          lua_pushboolean(L, allowprivate);
+          lua_setfield(L, 4, "allowprivate");
+          lua_pushinteger(L, (lua_Integer)maxresponse);
+          lua_setfield(L, 4, "maxresponse");
+          lua_pushnumber(L, fetchtimeout.tv_sec + fetchtimeout.tv_usec * 1e-6);
+          lua_setfield(L, 4, "timeout");
+          if (lua_istable(L, 2)) {
+            lua_getfield(L, 2, "proxy");
+            lua_setfield(L, 4, "proxy");
+            lua_getfield(L, 2, "headers");  // stack slot 5
+            if (lua_istable(L, 5)) {
+              // copy the headers table, stripping Authorization and Cookie
+              // on cross-origin redirect to prevent credential leakage;
+              // the caller's headers table is left untouched
+              lua_createtable(L, 0, 4);  // stack slot 6
+              lua_pushnil(L);
+              while (lua_next(L, 5)) {
+                // stack: 5=orig, 6=copy, 7=key, 8=val
+                if (lua_type(L, 7) == LUA_TSTRING) {
+                  key = lua_tostring(L, 7);
+                  if (!(crossorigin && (!strcasecmp(key, "authorization") ||
+                                        !strcasecmp(key, "cookie")))) {
+                    lua_pushvalue(L, 7);
+                    lua_pushvalue(L, 8);
+                    lua_settable(L, 6);
+                  }
+                }
+                lua_pop(L, 1);  // pop the value, keep the key for lua_next
+              }
+              lua_setfield(L, 4, "headers");
+            }
+            lua_settop(L, 4);
+          }
+          lua_replace(L, 2);  // options for the recursive call
+          lua_replace(L, 1);  // redirect target URL
           DestroyHttpMessage(&msg);
           free(inbuf.p);
 #ifndef UNSECURE
@@ -1315,10 +1349,11 @@ StreamCreateReader: {
     // Stack is now: ..., reader, status, headers
     // Rotate to the expected return order: ..., status, headers, reader
     lua_rotate(L, -3, 2);
+    lua_pushlstring(L, urlarg, urlarglen);  // effective URL after redirects
 
-    // Stack: ..., status, headers, reader
+    // Stack: ..., status, headers, reader, url
     // Ownership transferred to reader: inbuf.p, bio, sock, sslctx
-    return 3;
+    return 4;
   }
 
 StreamFinishNoBody: {
@@ -1336,15 +1371,18 @@ StreamFinishNoBody: {
 #endif
     close(sock);
 
-    // Create a closed reader (no body)
+    // Create a completed reader (no body): read() reports clean EOF (nil
+    // with no error) rather than a "reader closed" error, since 204/304
+    // are successful responses
     FetchReader *reader = lua_newuserdata(L, sizeof(FetchReader));
     memset(reader, 0, sizeof(FetchReader));
     luaL_setmetatable(L, FETCH_READER_MT);
     reader->sock = -1;
-    reader->closed = true;
+    reader->stream_complete = true;
+    lua_pushlstring(L, urlarg, urlarglen);  // effective URL after redirects
 
-    // Stack: ..., status, headers, reader
-    return 3;
+    // Stack: ..., status, headers, reader, url
+    return 4;
   }
 
 StreamCleanupError:
@@ -1358,7 +1396,7 @@ StreamCleanupError:
   }
 #endif
   close(sock);
-  return LuaNilError(L, "transport error");
+  return LuaFetchError(L, "protocol", "transport error");
 
 #ifndef UNSECURE
 StreamVerifyFailed:
@@ -1369,7 +1407,8 @@ StreamVerifyFailed:
     mbedtls_ssl_free(sslctx);
     free(sslctx);
     close(sock);
-    return LuaNilTlsError(L, gc(DescribeSslVerifyFailure(verify_result)), ret);
+    return LuaFetchTlsError(L, "tls",
+                            gc(DescribeSslVerifyFailure(verify_result)), ret);
   }
 #endif
 #undef ssl

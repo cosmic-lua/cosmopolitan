@@ -120,6 +120,7 @@
 #include "third_party/lua/lunix.h"
 #include "third_party/mbedtls/ctr_drbg.h"
 #include "third_party/mbedtls/debug.h"
+#include "third_party/mbedtls/error.h"
 #include "third_party/mbedtls/iana.h"
 #include "third_party/mbedtls/net_sockets.h"
 #include "third_party/mbedtls/oid.h"
