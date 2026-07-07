@@ -86,6 +86,17 @@ static int LuaEncodeSmth(lua_State *L, int Encoder(lua_State *, char **, int,
     if (!lua_isnoneornil(L, -1)) {
       conf.sorted = lua_toboolean(L, -1);
     }
+    lua_getfield(L, 2, "nan");
+    if (!lua_isnoneornil(L, -1)) {
+      const char *nanopt = lua_tostring(L, -1);
+      if (nanopt && !strcmp(nanopt, "null")) {
+        conf.nannull = true;
+      } else {
+        lua_pushnil(L);
+        lua_pushliteral(L, "invalid nan option (must be \"null\")");
+        return 2;
+      }
+    }
     lua_getfield(L, 2, "pretty");
     if (!lua_isnoneornil(L, -1)) {
       conf.pretty = lua_toboolean(L, -1);
@@ -107,6 +118,20 @@ static int LuaEncodeSmth(lua_State *L, int Encoder(lua_State *, char **, int,
 
 static int LuaEncodeJson(lua_State *L) {
   return LuaEncodeSmth(L, LuaEncodeJsonData);
+}
+
+// jsonarray([t]) - mark t (or a fresh table) with the shared json.array
+// metatable so EncodeJson serializes it as an array even when empty
+static int LuaJsonArray(lua_State *L) {
+  if (lua_isnoneornil(L, 1)) {
+    lua_settop(L, 0);
+    lua_createtable(L, 0, 0);
+  } else {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_settop(L, 1);
+  }
+  luaL_setmetatable(L, "json.array");
+  return 1;
 }
 
 static int LuaEncodeLua(lua_State *L) {
@@ -171,7 +196,6 @@ static int LuaIsMain(lua_State *L) {
 static const luaL_Reg kCosmoFuncs[] = {
     {"Barf", LuaBarf},
     {"CategorizeIp", LuaCategorizeIp},
-    {"Compress", LuaCompress},
     {"Crc32", LuaCrc32},
     {"Crc32c", LuaCrc32c},
     {"DecodeBase32", LuaDecodeBase32},
@@ -214,6 +238,7 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"IsPrivateIp", LuaIsPrivateIp},
     {"IsPublicIp", LuaIsPublicIp},
     {"IsReasonablePath", LuaIsReasonablePath},
+    {"jsonarray", LuaJsonArray},
     {"ParseHost", LuaParseHost},
     {"ParseIp", LuaParseIp},
     {"ParseParams", LuaParseParams},
@@ -222,7 +247,6 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"ResolveIp", LuaResolveIp},
     {"Slurp", LuaSlurp},
     {"Strftime", LuaStrftime},
-    {"Uncompress", LuaUncompress},
     {"UuidV4", LuaUuidV4},
     {"UuidV7", LuaUuidV7},
     {"FormatHttpDateTime", LuaFormatHttpDateTime},
@@ -249,6 +273,17 @@ int luaopen_cosmo(lua_State *L) {
   LuaInitFetchReader(L);
 
   luaL_newlib(L, kCosmoFuncs);
+
+  /* shared marker metatables for JSON round-tripping: json.array marks
+     tables that encode as arrays even when empty; json.null marks the
+     cosmo.null sentinel that encodes as JSON null */
+  luaL_newmetatable(L, "json.array");
+  lua_pop(L, 1);
+  luaL_newmetatable(L, "json.null");
+  lua_pop(L, 1);
+  lua_createtable(L, 0, 0);
+  luaL_setmetatable(L, "json.null");
+  lua_setfield(L, -2, "null");
 
   /* register submodules for direct require("cosmo.xxx") */
   LuaUnix(L);

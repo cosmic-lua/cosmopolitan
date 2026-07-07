@@ -61,6 +61,15 @@ arg = nil
 ---@field pretty boolean? defaults to `false`. Setting this option to true will cause tables with more than one entry to be formatted across multiple lines for readability.
 ---@field indent string? defaults to " ". This option controls the indentation of pretty formatting. This field is ignored if pretty isn't true.
 ---@field maxdepth integer? defaults to 64. This option controls the maximum amount of recursion the serializer is allowed to perform. The max is 32767. You might not be able to set it that high if there isn't enough C stack memory. Your serializer checks for this and will return an error rather than crashing.
+---@field nan "null"? `EncodeJson` only: encode NaN and Infinity as `null` (the v8 behavior) instead of failing with `nil, error`.
+
+---@class cosmo.DeflateOptions
+---@field level integer? compression level `-1`..`9`; defaults to `-1`, the zlib default (currently 6). `0` stores without compressing; higher levels are slower but compress better.
+---@field format "raw"|"zlib"|"gzip"? framing of the compressed stream; defaults to `"raw"` (headerless DEFLATE, as used inside ZIP files).
+
+---@class cosmo.InflateOptions
+---@field maxsize integer? cap on the decompressed size in bytes; defaults to 64 MiB. Decompression streams into a growing buffer and fails with `nil, error` once the cap is exceeded, so no attacker-controlled length is ever trusted as an allocation size.
+---@field format "raw"|"zlib"|"gzip"|"auto"? framing of the compressed stream; defaults to `"raw"`. `"auto"` detects zlib or gzip framing from the stream header (but cannot detect `"raw"`).
 
 ---@class cosmo.FetchOptions
 ---@field headers table<string,string>? request headers to send.
@@ -1665,9 +1674,9 @@ function argon2.verify(encoded, pass) end
 ---     local zip = require("cosmo.zip")
 ---     local archive = assert(zip.open("input.zip", "r"))
 ---     local files = archive:list()
----     for _, name in ipairs(files) do
----       local content = archive:read(name)
----       print(name, #content)
+---     for _, entry in ipairs(files) do
+---       local content = archive:read(entry.name)
+---       print(entry.name, entry.size, #content)
 ---     end
 ---     archive:close()
 ---
@@ -1747,6 +1756,13 @@ function zip.validate_name(name) end
 ---@field mode integer Unix file mode/permissions
 zip.Stat = {}
 
+---@class zip.Entry
+--- Directory entry returned by `zip.Reader:list`.
+---@field name string Entry path within the archive
+---@field size integer Uncompressed size in bytes
+---@field mode integer Unix file mode/permissions
+zip.Entry = {}
+
 ---@class zip.AddOptions
 ---@field method? string Compression method: `"store"` or `"deflate"`
 ---@field mtime? integer Modification time as Unix timestamp
@@ -1756,23 +1772,26 @@ zip.Stat = {}
 --- Reader for extracting files from a ZIP archive.
 zip.Reader = {}
 
---- Lists all files in the ZIP archive.
+--- Lists all files in the ZIP archive, in archive order. Each record
+--- carries the entry's name, uncompressed size, and mode, so bulk
+--- operations don't need a follow-up `stat` per entry.
 ---
----@return string[] files Array of file paths in the archive
+---@return zip.Entry[] files Array of directory entry records
 ---@nodiscard
 function zip.Reader:list() end
 
 --- Gets metadata for a specific file in the archive.
 ---
 ---@param name string The file path within the archive
----@return zip.Stat? stat File metadata, or nil if not found
+---@return zip.Stat|nil stat File metadata
+---@return string? error `"entry not found: <name>"` when absent
 ---@nodiscard
 function zip.Reader:stat(name) end
 
 --- Reads the contents of a file from the archive.
 ---
 ---@param name string The file path within the archive
----@return string? content The file contents
+---@return string|nil content The file contents
 ---@return string? error Error message on failure
 ---@nodiscard
 function zip.Reader:read(name) end
@@ -1880,24 +1899,6 @@ function cosmo.Barf(filename, data, options) end
 ---@nodiscard
 function cosmo.CategorizeIp(ip) end
 
---- Compresses data using zlib DEFLATE with a small framing header.
----
---- By default the result starts with a header that stores the
---- uncompressed byte length (as a ULEB64 varint) followed by a `Crc32`
---- checksum, so `Uncompress` can decode it without being told the
---- original size. If `raw` is truthy then only the raw zlib stream is
---- returned, in which case `Uncompress` requires the uncompressed size
---- as its second argument.
----
---- This function raises an error if the level is invalid or the system
---- runs out of memory.
----@param uncompressed string
----@param level integer? zlib compression level 0..9; defaults to zlib's default level (currently 6)
----@param raw boolean? omit the length/checksum header (default `false`)
----@return string compressed
----@nodiscard
-function cosmo.Compress(uncompressed, level, raw) end
-
 --- Computes Phil Katz CRC-32 used by zip/zlib/gzip/etc.
 ---@param initial integer
 ---@param data string
@@ -1970,13 +1971,19 @@ function cosmo.DecodeHex(ascii) end
 ---
 --- This parser supports 64-bit signed integers. If an overflow
 --- happens, then the integer is silently coerced to double, as
---- consistent with v8. If a double overflows into `Infinity`, we
---- coerce it to `null` since that's what v8 does, and the same
---- goes for underflows which, like v8, are coerced to `0.0`.
+--- consistent with v8. If a double overflows, it decodes as
+--- `Infinity`, which `EncodeJson` refuses to re-encode unless
+--- `nan="null"` is given; underflows, like v8, are coerced to `0.0`.
 ---
 --- When objects are parsed, your Lua object can't preserve the
 --- original ordering of fields. As such, they'll be sorted by
 --- `EncodeJson()` and may not round-trip with original intent.
+---
+--- Decoded arrays are marked with a shared `json.array` metatable so
+--- that an empty `[]` won't round-trip as `{}`. The marker carries no
+--- data: `next()` on a decoded `[]` returns nil, and `pairs()` sees
+--- only the array elements. Use `jsonarray()` to mark tables you build
+--- yourself.
 ---
 --- This parser has perfect conformance with JSONTestSuite.
 ---
@@ -1997,21 +2004,24 @@ function cosmo.DecodeLatin1(iso_8859_1) end
 ---
 ---     >: Deflate("hello")
 ---     "\xcbH\xcd\xc9\xc9\x07\x00"
----     >: Inflate("\xcbH\xcd\xc9\xc9\x07\x00", 5)
+---     >: Inflate("\xcbH\xcd\xc9\xc9\x07\x00")
 ---     "hello"
 ---
---- The output format is raw DEFLATE that's suitable for embedding into formats
---- like a ZIP file. It's recommended that, like ZIP, you also store separately a
---- `Crc32()` checksum in addition to the original uncompressed size.
+--- The default output format is raw DEFLATE that's suitable for embedding
+--- into formats like a ZIP file. Pass `{format = "zlib"}` or
+--- `{format = "gzip"}` for streams that interoperate with other zlib and
+--- gzip tooling; those framings carry their own integrity checks, whereas
+--- with `"raw"` it's recommended that, like ZIP, you also store a `Crc32()`
+--- checksum separately.
 ---
+--- Returns `nil, error` when an option value is invalid (for example a
+--- level outside `-1`..`9` or an unknown format).
 ---@param uncompressed string
----@param level integer? the compression level, which defaults to `7`. The max is `9`.
---- Lower numbers go faster (4 for instance is a sweet spot) and higher numbers go
---- slower but have better compression.
+---@param options cosmo.DeflateOptions?
 ---@return string|nil compressed
 ---@return string? error
 ---@nodiscard
-function cosmo.Deflate(uncompressed, level) end
+function cosmo.Deflate(uncompressed, options) end
 
 --- Turns binary into ASCII using the provided alphabet (Crockford's
 --- base32 alphabet by default). Any alphabet that has a power of 2
@@ -2061,24 +2071,26 @@ function cosmo.EncodeHex(binary) end
 ---     >: EncodeJson({[2]=1, [3]=3})
 ---     nil     "json objects must only use string keys"
 ---
---- If the raw length of a table is reported as zero, then we
---- check for the magic element `[0]=false`. If it's present, then
---- your table will be serialized as empty array `[]`. An entry is
---- inserted by `DecodeJson()` automatically, only when encountering
---- empty arrays, and it's necessary in order to make empty arrays
---- round-trip. If raw length is zero and `[0]=false` is absent,
---- then your table will be serialized as an iterated object.
+--- If the raw length of a table is reported as zero, then we check
+--- whether it carries the shared `json.array` marker metatable. If it
+--- does, your table will be serialized as empty array `[]`. The marker
+--- is applied by `DecodeJson()` to every decoded array, so empty arrays
+--- round-trip; use `jsonarray()` to mark empty tables you build
+--- yourself. If raw length is zero and the marker is absent, then your
+--- table will be serialized as an iterated object.
 ---
 ---     >: EncodeJson({})
 ---     "{}"
----     >: EncodeJson({[0]=false})
+---     >: EncodeJson(jsonarray({}))
 ---     "[]"
 ---     >: EncodeJson({["hi"]=1})
 ---     "{\"hi\":1}"
----     >: EncodeJson({["hi"]=1, [0]=false})
----     "[]"
 ---     >: EncodeJson({["hi"]=1, [7]=false})
 ---     nil     "json objects must only use string keys"
+---
+--- A table carrying the `json.null` sentinel metatable (see the
+--- `null` value on this module) is serialized as `null`, which makes
+--- lossless `{"a":null}` round-trips possible.
 ---
 --- The following options may be used:
 ---
@@ -2097,14 +2109,9 @@ function cosmo.EncodeHex(binary) end
 ---   the serializer is allowed to perform. The max is 32767. You might not be able
 ---   to set it that high if there isn't enough C stack memory. Your serializer
 ---   checks for this and will return an error rather than crashing.
----
---- If the raw length of a table is reported as zero, then we
---- check for the magic element `[0]=false`. If it's present, then
---- your table will be serialized as empty array `[]`. An entry is
---- inserted by `DecodeJson()` automatically, only when encountering
---- empty arrays, and it's necessary in order to make empty arrays
---- round-trip. If raw length is zero and `[0]=false` is absent,
---- then your table will be serialized as an iterated object.
+--- - `nan`: `(str)` The only accepted value is `"null"`, which makes NaN
+---   and Infinity serialize as `null` (the v8 behavior) instead of
+---   failing the encode.
 ---
 --- This function will return an error if:
 ---
@@ -2112,15 +2119,13 @@ function cosmo.EncodeHex(binary) end
 --- - value has depth greater than 64
 --- - value contains functions, user data, or threads
 --- - value is table that blends string / non-string keys
+--- - value contains NaN or Infinity and `nan="null"` wasn't given
 --- - Your serializer runs out of C heap memory (setrlimit)
 ---
 --- We assume strings in value contain UTF-8. This serializer currently does not
 --- produce UTF-8 output. The output format is right now ASCII. Your UTF-8 data
 --- will be safely transcoded to `\uXXXX` sequences which are UTF-16. Overlong
 --- encodings in your input strings will be canonicalized rather than validated.
----
---- NaNs are serialized as `null` and Infinities are `null` which is consistent
---- with the v8 behavior.
 ---@param value JsonValue
 ---@param options cosmo.EncoderOptions?
 ---@return string|nil
@@ -2472,18 +2477,19 @@ function cosmo.HasControlCodes(str, flags) end
 
 --- Decompresses data.
 ---
---- This function performs the inverse of Deflate(). It's recommended that you
---- perform a `Crc32()` check on the output string after this function succeeds.
+--- This function performs the inverse of `Deflate()`. The decompressed
+--- size need not be known in advance: output streams into a growing
+--- buffer, bounded by `options.maxsize` (default 64 MiB). Corrupt or
+--- truncated input yields `nil, error` rather than raising. When using
+--- the default `"raw"` framing it's recommended that you perform a
+--- `Crc32()` check on the output string after this function succeeds.
 ---
 ---@param compressed string
----@param maxoutsize integer the uncompressed size, which should be known.
---- However, it is permissable (although not advised) to specify some large number
---- in which case (on success) the byte length of the output string may be less
---- than `maxoutsize`.
+---@param options cosmo.InflateOptions?
 ---@return string|nil uncompressed
 ---@return string? error
 ---@nodiscard
-function cosmo.Inflate(compressed, maxoutsize) end
+function cosmo.Inflate(compressed, options) end
 
 --- Check if the calling script is being run directly (not require'd).
 ---
@@ -2557,6 +2563,33 @@ function cosmo.IsPublicIp(uint32) end
 ---@return boolean # `true` if path doesn't contain "." or ".." segments See `isreasonablepath.c`
 ---@nodiscard
 function cosmo.IsReasonablePath(str) end
+
+--- Marks a table with the shared `json.array` metatable so `EncodeJson`
+--- serializes it as a JSON array even when it's empty. `DecodeJson`
+--- applies the same marker to every array it decodes, which is how an
+--- empty `[]` round-trips instead of turning into `{}`. Passing no
+--- argument creates and returns a fresh marked table.
+---
+---     >: EncodeJson({})
+---     "{}"
+---     >: EncodeJson(jsonarray({}))
+---     "[]"
+---
+---@param t JsonValue[]? the table to mark; a new empty table is created when omitted
+---@return JsonValue[] t the same table (or the new one), marked as an array
+function cosmo.jsonarray(t) end
+
+--- Sentinel value that `EncodeJson` serializes as JSON `null`, enabling
+--- lossless `{"a":null}` round-trips (a plain `nil` value would erase
+--- the key from the Lua table). It's an empty table carrying the shared
+--- `json.null` metatable; any table with that metatable encodes as
+--- `null`.
+---
+---     >: EncodeJson({a = cosmo.null})
+---     "{\"a\":null}"
+---
+---@type JsonValue
+cosmo.null = {}
 
 --- Parses a `host[:port]` string, e.g. `"example.com:8080"`.
 ---
@@ -2725,22 +2758,6 @@ function cosmo.Slurp(filename, i, j) end
 ---@return string? error
 ---@nodiscard
 function cosmo.Strftime(format, timestamp, localtime) end
-
---- Decompresses data produced by `Compress`.
----
---- If `maxoutsize` is absent, the input is expected to begin with the
---- header that `Compress` writes by default; the embedded length and
---- `Crc32` checksum are verified. If `maxoutsize` is given, the input
---- must be a raw zlib stream that decompresses to exactly `maxoutsize`
---- bytes.
----
---- This function returns nil, err if the input is truncated or corrupt.
----@param compressed string
----@param maxoutsize integer? the exact uncompressed size, for raw streams
----@return string|nil uncompressed
----@return string? error
----@nodiscard
-function cosmo.Uncompress(compressed, maxoutsize) end
 
 --- Unescapes URL parameter name or value. Decodes `%XX` hex sequences and
 --- converts `+` to space (common in application/x-www-form-urlencoded).

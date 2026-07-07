@@ -1,5 +1,5 @@
 -- Tests for lfuncs data-dependent throwers converted to nil,err returns
--- (issue #151, item 3): DecodeHex, Uncompress, GetCryptoHash, and base32 no
+-- (issue #151, item 3): DecodeHex, Inflate, GetCryptoHash, and base32 no
 -- longer raise on recoverable, data-dependent failures.
 local cosmo = require("cosmo")
 
@@ -13,13 +13,17 @@ assert(select("#", cosmo.DecodeHex("abc")) == 2, "DecodeHex returns two values")
 local h2, h2err = cosmo.DecodeHex("zz")
 assert(h2 == nil and type(h2err) == "string", "DecodeHex non-hex -> nil,err")
 
--- Uncompress: round-trip, then corrupt/truncated input
-local comp = cosmo.Compress("hello world, hello world")
-assert(cosmo.Uncompress(comp) == "hello world, hello world",
-  "Compress/Uncompress round-trip")
-local u, uerr = cosmo.Uncompress("not valid compressed data")
-assert(u == nil and type(uerr) == "string", "Uncompress corrupt -> nil,err")
-assert(select("#", cosmo.Uncompress("xx")) == 2, "Uncompress returns two values")
+-- Inflate: round-trip, then corrupt/truncated input (issue #153: the
+-- deprecated Compress/Uncompress pair is gone; Deflate/Inflate are the
+-- one compression API, and Inflate never throws on bad data)
+local comp = cosmo.Deflate("hello world, hello world")
+assert(cosmo.Inflate(comp) == "hello world, hello world",
+  "Deflate/Inflate round-trip")
+local u, uerr = cosmo.Inflate("not valid compressed data")
+assert(u == nil and type(uerr) == "string", "Inflate corrupt -> nil,err")
+assert(select("#", cosmo.Inflate("xx")) == 2, "Inflate returns two values")
+assert(cosmo.Compress == nil and cosmo.Uncompress == nil,
+  "deprecated Compress/Uncompress are deleted")
 
 -- GetCryptoHash: valid digest, then unknown hash name
 local dg = cosmo.GetCryptoHash("SHA256", "abc")

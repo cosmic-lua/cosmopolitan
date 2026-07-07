@@ -86,10 +86,10 @@ assert(Crc32(0, "123456789") == 0xcbf43926)
 assert(Crc32c(0, "123456789") == 0xe3069283)
 
 assert(assert(Deflate("hello")) == "\xcbH\xcd\xc9\xc9\x07\x00")
-assert(assert(Inflate("\xcbH\xcd\xc9\xc9\x07\x00", 5)) == "hello")
-
--- deprecated compression api we wish to forget as quickly as possible
-assert(Uncompress(Compress("hello")) == "hello")
-assert(Compress("hello") == "\x05\x86\xa6\x106x\x9c\xcbH\xcd\xc9\xc9\x07\x00\x06,\x02\x15")
-assert(Compress("hello", 0) == "\x05\x86\xa6\x106x\x01\x01\x05\x00\xfa\xffhello\x06,\x02\x15")
-assert(Compress("hello", 0, true) == "x\x01\x01\x05\x00\xfa\xffhello\x06,\x02\x15")
+assert(assert(Inflate("\xcbH\xcd\xc9\xc9\x07\x00")) == "hello")
+assert(assert(Inflate(assert(Deflate("hello", {format = "gzip"})),
+                      {format = "gzip"})) == "hello")
+assert(not Inflate("garbage that is not a deflate stream"))
+-- the deprecated Compress/Uncompress api is gone
+assert(Compress == nil)
+assert(Uncompress == nil)
