@@ -772,6 +772,7 @@ static int LuaUnixSpawn(lua_State *L) {
   const char *prog;
   char **argv, **envp, **freeme1, **freeme2;
   posix_spawn_file_actions_t fa;
+  posix_spawnattr_t sa;
   olderr = errno;
   prog = luaL_checkstring(L, 1);
   if ((argv = ConvertLuaArrayToStringList(L, 2))) {
@@ -791,7 +792,10 @@ static int LuaUnixSpawn(lua_State *L) {
     return LuaUnixSysretErrno(L, "spawn", olderr);
   }
   posix_spawn_file_actions_init(&fa);
-  rc = posix_spawn(&pid, prog, &fa, NULL, argv, envp);
+  posix_spawnattr_init(&sa);
+  posix_spawnattr_setflags(&sa, POSIX_SPAWN_USEVFORK);
+  rc = posix_spawn(&pid, prog, &fa, &sa, argv, envp);
+  posix_spawnattr_destroy(&sa);
   posix_spawn_file_actions_destroy(&fa);
   FreeStringList(freeme1);
   FreeStringList(freeme2);
@@ -813,6 +817,7 @@ static int LuaUnixSpawnp(lua_State *L) {
   const char *prog;
   char **argv, **envp, **freeme1, **freeme2;
   posix_spawn_file_actions_t fa;
+  posix_spawnattr_t sa;
   olderr = errno;
   prog = luaL_checkstring(L, 1);
   if ((argv = ConvertLuaArrayToStringList(L, 2))) {
@@ -832,7 +837,10 @@ static int LuaUnixSpawnp(lua_State *L) {
     return LuaUnixSysretErrno(L, "spawnp", olderr);
   }
   posix_spawn_file_actions_init(&fa);
-  rc = posix_spawnp(&pid, prog, &fa, NULL, argv, envp);
+  posix_spawnattr_init(&sa);
+  posix_spawnattr_setflags(&sa, POSIX_SPAWN_USEVFORK);
+  rc = posix_spawnp(&pid, prog, &fa, &sa, argv, envp);
+  posix_spawnattr_destroy(&sa);
   posix_spawn_file_actions_destroy(&fa);
   FreeStringList(freeme1);
   FreeStringList(freeme2);
