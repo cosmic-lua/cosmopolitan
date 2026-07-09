@@ -95,7 +95,7 @@ static const char kJsonStr[256] = {
 
 static struct DecodeJson Parse(struct lua_State *L, const char *p,
                                const char *e, int context, int depth,
-                               uintptr_t bsp) {
+                               uintptr_t bsp, int arraymt) {
   long x;
   char w[4];
   luaL_Buffer b;
@@ -245,10 +245,13 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
         // the common short array without meaningful waste on tiny ones.
         lua_createtable(L, 8, 0);  // +1
         // mark the table with the shared json.array metatable so the
-        // encoder can tell an empty array apart from an empty object
-        luaL_setmetatable(L, "json.array");
+        // encoder can tell an empty array apart from an empty object;
+        // the metatable was resolved once in DecodeJson() and sits at
+        // stack slot arraymt, saving a registry lookup per array
+        lua_pushvalue(L, arraymt);
+        lua_setmetatable(L, -2);
         for (context = ARRAY, i = 0;;) {
-          r = Parse(L, p, e, context, depth - 1, bsp);  // +2
+          r = Parse(L, p, e, context, depth - 1, bsp, arraymt);  // +2
           if (UNLIKELY(r.rc == -1)) {
             lua_pop(L, 1);
             return r;
@@ -284,7 +287,7 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
         lua_createtable(L, 0, 8);  // +1
         context = KEY | OBJECT;
         for (;;) {
-          r = Parse(L, p, e, context, depth - 1, bsp);  // +2
+          r = Parse(L, p, e, context, depth - 1, bsp, arraymt);  // +2
           if (r.rc == -1) {
             lua_pop(L, 1);
             return r;
@@ -293,7 +296,7 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
           if (!r.rc) {
             return (struct DecodeJson){1, p};
           }
-          r = Parse(L, p, e, COLON, depth - 1, bsp);  // +3
+          r = Parse(L, p, e, COLON, depth - 1, bsp, arraymt);  // +3
           if (r.rc == -1) {
             lua_pop(L, 2);
             return r;
@@ -606,11 +609,15 @@ struct DecodeJson DecodeJson(struct lua_State *L, const char *p, size_t n) {
     n = p ? strlen(p) : 0;
   uintptr_t bsp = GetStackBottom() + 4096;
   if (lua_checkstack(L, DEPTH * 3 + LUA_MINSTACK)) {
-    // ensure the shared array marker metatable exists so decoded
-    // arrays round-trip even if the host never ran luaopen_cosmo
+    // resolve the shared array marker metatable once per call (creating
+    // it if the host never ran luaopen_cosmo) and keep it at a stable
+    // stack slot so Parse can apply it without a registry lookup per
+    // decoded array
     luaL_newmetatable(L, "json.array");
-    lua_pop(L, 1);
-    return Parse(L, p, p + n, 0, DEPTH, bsp);
+    int arraymt = lua_gettop(L);
+    struct DecodeJson r = Parse(L, p, p + n, 0, DEPTH, bsp, arraymt);
+    lua_remove(L, arraymt);
+    return r;
   } else {
     return (struct DecodeJson){-1, "can't set stack depth"};
   }
