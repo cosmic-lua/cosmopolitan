@@ -41,6 +41,8 @@
 
 static atomic_bool has_vfork;  // i.e. not qemu/wsl/xnu/openbsd
 
+int __has_vfork(void);  // defined in hasvfork.c; also used by vfork.S
+
 /**
  * Spawns process, the POSIX way, e.g.
  *
@@ -185,7 +187,11 @@ errno_t posix_spawn(int *pid, const char *path,
   } else if (IsWindows()) {
     use_vfork = true;
   } else {
-    use_vfork = atomic_load_explicit(&has_vfork, memory_order_acquire);
+    // sys_fork() never shares memory with the parent, so the clobber
+    // probe below can't set has_vfork; trust the same platform check
+    // vfork() itself uses to decide between vfork and fork syscalls.
+    use_vfork = atomic_load_explicit(&has_vfork, memory_order_acquire) ||
+                __has_vfork();
   }
   if (!use_vfork) {
     if (pipe2(pfds, O_CLOEXEC)) {
