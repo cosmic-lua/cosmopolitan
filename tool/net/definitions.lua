@@ -2588,6 +2588,17 @@ function cosmo.IsPublicIp(uint32) end
 ---@nodiscard
 function cosmo.IsReasonablePath(str) end
 
+--- Returns `true` if a percent-encoded string is well-formed, i.e.
+--- every `%` byte begins a valid `%XX` sequence where both `X` are hex
+--- digits. Decoders like `UnescapeParam` are lenient and pass malformed
+--- sequences through unchanged; this predicate lets callers reject such
+--- input up front with a single scan and no allocation. See
+--- `isvalidpercentencoding.c`.
+---@param str string
+---@return boolean
+---@nodiscard
+function cosmo.IsValidPercentEncoding(str) end
+
 --- Marks a table with the shared `json.array` metatable so `EncodeJson`
 --- serializes it as a JSON array even when it's empty. `DecodeJson`
 --- applies the same marker to every array it decodes, which is how an

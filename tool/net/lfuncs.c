@@ -707,6 +707,10 @@ int LuaIsAcceptablePort(lua_State *L) {
   return LuaIsValid(L, IsAcceptablePort);
 }
 
+int LuaIsValidPercentEncoding(lua_State *L) {
+  return LuaIsValid(L, IsValidPercentEncoding);
+}
+
 static dontinline int LuaCoderImpl(lua_State *L,
                                    char *C(const char *, size_t, size_t *)) {
   void *q;

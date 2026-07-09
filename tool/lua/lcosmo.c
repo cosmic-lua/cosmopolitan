@@ -238,6 +238,7 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"IsPrivateIp", LuaIsPrivateIp},
     {"IsPublicIp", LuaIsPublicIp},
     {"IsReasonablePath", LuaIsReasonablePath},
+    {"IsValidPercentEncoding", LuaIsValidPercentEncoding},
     {"jsonarray", LuaJsonArray},
     {"ParseHost", LuaParseHost},
     {"ParseIp", LuaParseIp},

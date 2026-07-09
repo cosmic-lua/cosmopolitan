@@ -23,6 +23,7 @@ char *EscapeHost(const char *, size_t, size_t *) libcesque;
 char *EscapePath(const char *, size_t, size_t *) libcesque;
 char *EscapeParam(const char *, size_t, size_t *) libcesque;
 char *UnescapeParam(const char *, size_t, size_t *) libcesque;
+bool32 IsValidPercentEncoding(const char *, size_t) libcesque;
 char *EscapeFragment(const char *, size_t, size_t *) libcesque;
 char *EscapeSegment(const char *, size_t, size_t *) libcesque;
 char *EscapeJsStringLiteral(char **, size_t *, const char *, size_t,

@@ -49,6 +49,7 @@ int LuaIsLoopbackIp(lua_State *);
 int LuaIsPrivateIp(lua_State *);
 int LuaIsPublicIp(lua_State *);
 int LuaIsReasonablePath(lua_State *);
+int LuaIsValidPercentEncoding(lua_State *);
 int LuaParseHost(lua_State *);
 int LuaParseIp(lua_State *);
 int LuaParseParams(lua_State *);
