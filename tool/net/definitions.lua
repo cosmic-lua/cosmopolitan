@@ -2450,11 +2450,12 @@ function cosmo.GetCryptoHash(name, payload, key) end
 --- - `"X86_64"` for Intel and AMD systems
 --- - `"AARCH64"` for ARM64, M1, and Raspberry Pi systems
 --- - `"POWERPC64"` for OpenPOWER Raptor Computing Systems
----@return "X86_64"|"AARCH64"|"POWERPC64"
+--- - `"S390X"` for IBM System/390 systems
+---@return "X86_64"|"AARCH64"|"POWERPC64"|"S390X"
 ---@nodiscard
 function cosmo.GetHostIsa() end
 
----@return "LINUX"|"METAL"|"WINDOWS"|"XNU"|"NETBSD"|"FREEBSD"|"OPENBSD" osname string that describes the host OS.
+---@return "LINUX"|"METAL"|"WINDOWS"|"XNU"|"NETBSD"|"FREEBSD"|"OPENBSD"|nil osname string that describes the host OS, or nil if the host OS is unrecognized.
 ---@nodiscard
 function cosmo.GetHostOs() end
 
