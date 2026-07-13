@@ -55,6 +55,15 @@ arg = nil
 ---@alias uint8 integer Unsigned 8-bit integer
 ---@alias int8 integer Signed 8-bit integer
 
+--- Machine-readable failure kind returned by `Fetch` / `FetchStream`.
+--- Every `LuaFetchError` call site in `tool/net/lfetch.c` uses one of
+--- these values; extend this alias when adding a new kind there.
+---@alias cosmo.FetchErrorKind "blocked"|"connect"|"dns"|"protocol"|"proxy"|"timeout"
+
+--- Network category names emitted by `CategorizeIp`, in the order
+--- `net/http/getipcategoryname.c` tests them.
+---@alias cosmo.IpCategory "MULTICAST"|"LOOPBACK"|"PRIVATE"|"TESTNET"|"AFRINIC"|"LACNIC"|"APNIC"|"ARIN"|"RIPE"|"DOD"|"AT&T"|"APPLE"|"FORD"|"COGENT"|"PRUDENTIAL"|"USPS"|"COMCAST"|"FUTURE"|"ANONYMOUS"
+
 ---@class cosmo.EncoderOptions
 ---@field useoutput boolean? defaults to `false`. Encodes the result directly to the output buffer and returns `nil` value. This option is ignored if used outside of request handling code.
 ---@field sorted boolean? defaults to `true`. Lua uses hash tables so the order of object keys is lost in a Lua table. So, by default, we use strcmp to impose a deterministic output order. If you don't care about ordering then setting sorted=false should yield a performance boost in serialization.
@@ -1595,12 +1604,16 @@ function path.islink(path) end
 --- consider throttling your login endpoint.
 argon2 = {}
 
+--- Argon2 variant names accepted by `argon2.hash_encoded` (validated
+--- by the strcmp chain in `tool/net/largon2.c`).
+---@alias argon2.Variant "argon2id"|"argon2i"|"argon2d"
+
 ---@class argon2.Config
 ---@field m_cost integer? the memory hardness in kibibytes, which defaults to 4096 (4 mibibytes). It's recommended that this be tuned upwards.
 ---@field t_cost integer? the number of iterations, which defaults to `3`.
 ---@field parallelism integer? the parallelism factor, which defaults to `1`.
 ---@field hash_len integer? the number of desired bytes in hash output, which defaults to 32.
----@field variant string? the Argon2 variant: `"argon2id"` blend of other two methods [default], `"argon2i"` maximize resistance to side-channel attacks, or `"argon2d"` maximize resistance to gpu cracking attacks
+---@field variant argon2.Variant? the Argon2 variant: `"argon2id"` blend of other two methods [default], `"argon2i"` maximize resistance to side-channel attacks, or `"argon2d"` maximize resistance to gpu cracking attacks
 
 --- Hashes password.
 ---
@@ -1689,6 +1702,14 @@ function argon2.verify(encoded, pass) end
 ---
 zip = {}
 
+--- Archive open modes, validated by the strcmp chain in `LuaZipOpen`
+--- (`tool/net/lzip.c`).
+---@alias zip.OpenMode "r"|"w"|"a"
+
+--- Entry compression methods (`tool/net/lzip.c`); anything else is
+--- rejected with "invalid method".
+---@alias zip.CompressionMethod "store"|"deflate"
+
 ---@class zip.OpenOptions
 ---@field level? integer Compression level 0-9 (for "w" and "a" modes)
 ---@field max_file_size? integer Maximum file size limit in bytes
@@ -1698,7 +1719,7 @@ zip = {}
 --- The first argument can be a file path string or a file descriptor integer.
 ---
 ---@param path string|integer Path to the ZIP file, or file descriptor
----@param mode? string Open mode: `"r"` for reading (default), `"w"` for writing, `"a"` for appending
+---@param mode? zip.OpenMode Open mode: `"r"` for reading (default), `"w"` for writing, `"a"` for appending
 ---@param options? zip.OpenOptions Optional settings
 ---@return zip.Reader|zip.Writer|zip.Appender? archive Archive object on success
 ---@return string? error Error message on failure
@@ -1764,7 +1785,7 @@ zip.Stat = {}
 zip.Entry = {}
 
 ---@class zip.AddOptions
----@field method? string Compression method: `"store"` or `"deflate"`
+---@field method? zip.CompressionMethod Compression method: `"store"` or `"deflate"`
 ---@field mtime? integer Modification time as Unix timestamp
 ---@field mode? integer Unix file mode (default 0644)
 
@@ -1895,7 +1916,7 @@ cosmo = {}
 function cosmo.Barf(filename, data, options) end
 
 ---@param ip uint32
----@return string # a string describing the IP address. This is currently Class A granular. It can tell you if traffic originated from private networks, ARIN, APNIC, DOD, etc.
+---@return cosmo.IpCategory # a string describing the IP address. This is currently Class A granular. It can tell you if traffic originated from private networks, ARIN, APNIC, DOD, etc.
 ---@nodiscard
 function cosmo.CategorizeIp(ip) end
 
@@ -2393,7 +2414,7 @@ function cosmo.EscapeUser(str) end
 ---@param body? string|cosmo.FetchOptions
 ---@return integer|nil status, table<string,string> headers, string body, string url
 ---@return string? error
----@return string? kind machine-readable failure kind; see above for values
+---@return cosmo.FetchErrorKind? kind machine-readable failure kind; see above for values
 ---@nodiscard
 function cosmo.Fetch(url, body) end
 
@@ -2417,7 +2438,7 @@ function cosmo.Fetch(url, body) end
 ---@param options? cosmo.FetchOptions Request options
 ---@return integer|nil status, table<string,string> headers, cosmo.StreamReader reader, string url
 ---@return string? error
----@return string? kind machine-readable failure kind; see `Fetch`
+---@return cosmo.FetchErrorKind? kind machine-readable failure kind; see `Fetch`
 ---@nodiscard
 function cosmo.FetchStream(url, options) end
 
