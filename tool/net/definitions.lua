@@ -483,6 +483,15 @@ lsqlite3 = {
 
 }
 
+--- SQLite result/status code (the OK/ERROR/BUSY/DONE/ROW/... family
+--- of lsqlite3.* integer constants; see the SC() table in
+--- tool/net/lsqlite3.c).
+---@alias lsqlite3.ResultCode integer
+
+--- Bitmask of lsqlite3.OPEN_* flags accepted by `lsqlite3.open` (see
+--- https://www.sqlite.org/c3ref/open.html).
+---@alias lsqlite3.OpenFlag integer
+
 --- Opens (or creates if it does not exist) an SQLite database with name filename
 --- and returns its handle as userdata (the returned object should be used for all
 --- further method calls in connection with this specific database, see Database
@@ -500,9 +509,9 @@ lsqlite3 = {
 ---     local db = lsqlite3.open('foo.db', lsqlite3.OPEN_READWRITE + lsqlite3.OPEN_CREATE + lsqlite3.OPEN_SHAREDCACHE)
 ---
 ---@param filename string
----@param flags? integer defaults to `lsqlite3.OPEN_READWRITE + lsqlite3.OPEN_CREATE`
+---@param flags? lsqlite3.OpenFlag defaults to `lsqlite3.OPEN_READWRITE + lsqlite3.OPEN_CREATE`
 ---@return lsqlite3.Database|nil db
----@return integer? errorcode
+---@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
 ---@nodiscard
 function lsqlite3.open(filename, flags) end
@@ -511,7 +520,7 @@ function lsqlite3.open(filename, flags) end
 --- of an error, the function returns `nil`, an error code and an error message.
 --- (In-memory databases are volatile as they are never stored on disk.)
 ---@return lsqlite3.Database|nil db
----@return integer? errorcode
+---@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
 ---@nodiscard
 function lsqlite3.open_memory() end
@@ -748,7 +757,7 @@ function lsqlite3.Database:db_filename(name) end
 ---@param s string
 function lsqlite3.Database:deserialize(s) end
 
----@return integer error the numerical result code (or extended result code) for the most recent failed call associated with database db.
+---@return lsqlite3.ResultCode error the numerical result code (or extended result code) for the most recent failed call associated with database db.
 ---@nodiscard
 function lsqlite3.Database:errcode() end
 
@@ -760,6 +769,7 @@ function lsqlite3.Database:errmsg() end
 ---@param sql string
 ---@param func? fun(udata: Udata, cols: integer, values: string[], names: string[]): integer
 ---@param udata? Udata
+---@return lsqlite3.ResultCode rc `lsqlite3.OK` on success or else a numerical error code
 function lsqlite3.Database:exec(sql, func, udata) end
 
 --- This function causes any pending database operation to abort and return at
@@ -918,7 +928,7 @@ function lsqlite3.Database:urows(sql) end
 ---@param mode integer?
 ---@param name string?
 ---@return integer|nil nlog, integer nckpt
----@return integer? errno
+---@return lsqlite3.ResultCode? errno
 function lsqlite3.Database:wal_checkpoint(mode, name) end
 
 ---@generic Udata
@@ -961,7 +971,7 @@ function lsqlite3.Statement:bind_blob(n, blob) end
 ---@return integer
 function lsqlite3.Statement:bind_names(nametable) end
 
----@return any # the largest statement parameter index in prepared the statement.
+---@return integer parameter_count the largest statement parameter index in the prepared statement.
 ---@nodiscard
 --- When the statement parameters are of the forms `":AAA"` or `"?"`, then they are
 --- assigned sequentially increasing numbers beginning with one, so the value
@@ -998,25 +1008,26 @@ function lsqlite3.Statement:columns() end
 ---@return integer # If the statement was executed successfully, or not executed at all, then `lsqlite3.OK` is returned. If execution of the statement failed then an error code is returned.
 function lsqlite3.Statement:finalize() end
 
----@return any # the name of column n in the result set of statement. (The left-most column is number 0.)
+---@param n integer
+---@return string name the name of column n in the result set of statement. (The left-most column is number 0.)
 ---@nodiscard
 function lsqlite3.Statement:get_name(n) end
 
----@return table # the names and types of all columns in the result set of the statement.
+---@return string[] # the names and types of all columns in the result set of the statement.
 ---@nodiscard
 function lsqlite3.Statement:get_named_types() end
 
 --- Alias for `lsqlite3.Statement:get_named_types()`.
----@return table # the names and types of all columns in the result set of the statement.
+---@return string[] # the names and types of all columns in the result set of the statement.
 ---@nodiscard
 function lsqlite3.Statement:type() end
 
----@return table # the names and values of all columns in the current result row of a query.
+---@return (string|number?)[] # the names and values of all columns in the current result row of a query.
 ---@nodiscard
 function lsqlite3.Statement:get_named_values() end
 
 --- Alias for `lsqlite3.Statement:get_named_values()`.
----@return table # the names and values of all columns in the current result row of a query.
+---@return (string|number?)[] # the names and values of all columns in the current result row of a query.
 ---@nodiscard
 function lsqlite3.Statement:data() end
 
@@ -1029,43 +1040,43 @@ function lsqlite3.Statement:get_names() end
 ---@nodiscard
 function lsqlite3.Statement:inames() end
 
----@return any # the type of column n in the result set of statement. (The left-most column is number 0.)
----@nodiscard
+---@param n integer
+---@return string|nil # the declared type of column n in the result set of statement, or `nil` if the column has no declared type (e.g. an expression). (The left-most column is number 0.)
 ---@nodiscard
 function lsqlite3.Statement:get_type(n) end
 
----@return any[] # the types of all columns in the result set returned by the statement.
+---@return string[] # the declared types of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:get_types() end
 
 --- Alias for `lsqlite3.Statement:get_types()`.
----@return any[] # the types of all columns in the result set returned by the statement.
+---@return string[] # the declared types of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:itypes() end
 
----@return any[] unames the names of all columns in the result set returned by the statement.
+---@return string ... the names of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:get_unames() end
 
----@return any[] utypes the types of all columns in the result set returned by the statement.
+---@return string ... the declared types of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:get_utypes() end
 
----@return any[] uvalues the values of all columns in the current result row of a query.
+---@return string|number? ... the values of all columns in the current result row of a query.
 ---@nodiscard
 function lsqlite3.Statement:get_uvalues() end
 
----@param n any
----@return any value the value of column n in the result set of the statement. (The left-most column is number 0.)
+---@param n integer
+---@return string|number? value the value of column n in the result set of the statement. (The left-most column is number 0.)
 ---@nodiscard
 function lsqlite3.Statement:get_value(n) end
 
----@return any[] values the values of all columns in the result set returned by the statement.
+---@return (string|number?)[] values the values of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:get_values() end
 
 --- Alias for `lsqlite3.Statement:get_values()`.
----@return any[] values the values of all columns in the result set returned by the statement.
+---@return (string|number?)[] values the values of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:idata() end
 
@@ -1073,7 +1084,7 @@ function lsqlite3.Statement:idata() end
 ---@nodiscard
 function lsqlite3.Statement:isopen() end
 
----@return function iterator iterates over the names and values of the result set of the statement. Each iteration returns a table with the names and values for the current row. This is the prepared statement equivalent of `db:nrows()`.
+---@return fun(self: lsqlite3.VM): table<string, string|number> iterator iterates over the names and values of the result set of the statement. Each iteration returns a table with the names and values for the current row. This is the prepared statement equivalent of `db:nrows()`.
 ---@nodiscard
 function lsqlite3.Statement:nrows() end
 
@@ -1084,14 +1095,15 @@ function lsqlite3.Statement:nrows() end
 function lsqlite3.Statement:readonly() end
 
 --- This function resets the SQL statement, so that it is ready to be re-executed. Any statement variables that had values bound to them using the `stmt:bind*()` functions retain their values.
+---@return lsqlite3.ResultCode rc the error code of the last statement execution
 function lsqlite3.Statement:reset() end
 
----@return function iterator iterates over the values of the result set of statement `stmt`. Each iteration returns an array with the values for the current row. This is the prepared statement equivalent of `db:rows()`.
+---@return fun(self: lsqlite3.VM): (string|number|nil)[] iterator iterates over the values of the result set of statement `stmt`. Each iteration returns an array with the values for the current row. This is the prepared statement equivalent of `db:rows()`.
 ---@nodiscard
 function lsqlite3.Statement:rows() end
 
 --- This function must be called to evaluate the (next iteration of the) prepared statement.
----@return integer # one of the following values:
+---@return lsqlite3.ResultCode # one of the following values:
 --- - `lsqlite3.BUSY`: the engine was unable to acquire the locks needed.
 ---   If the statement is a COMMIT or occurs outside of an explicit transaction,
 ---   then you can retry the statement. If the statement is not a COMMIT and occurs
@@ -1114,13 +1126,13 @@ function lsqlite3.Statement:rows() end
 ---@nodiscard
 function lsqlite3.Statement:step() end
 
----@return function iterator iterates over the values of the result set of the statement.
+---@return fun(self: lsqlite3.VM): ...: string|number|nil iterator iterates over the values of the result set of the statement.
 --- Each iteration returns the values for the current row. This is the prepared
 --- statement equivalent of `db:urows()`.
 ---@nodiscard
 function lsqlite3.Statement:urows() end
 
----@return any row_id the rowid of the most recent `INSERT` into the database corresponding to this statement. See `db:last_insert_rowid()`.
+---@return integer rowid the rowid of the most recent `INSERT` into the database corresponding to this statement. See `db:last_insert_rowid()`.
 ---@nodiscard
 function lsqlite3.Statement:last_insert_rowid() end
 
@@ -1193,7 +1205,7 @@ function lsqlite3.VM:get_names() end
 function lsqlite3.VM:inames() end
 
 ---@param index integer
----@return string
+---@return string|nil # the declared type of the column, or `nil` if it has no declared type (e.g. an expression)
 ---@nodiscard
 function lsqlite3.VM:get_type(index) end
 
@@ -1241,7 +1253,7 @@ function lsqlite3.VM:isopen() end
 function lsqlite3.VM:last_insert_rowid() end
 
 ---@param sql string
----@return fun(self: lsqlite3.VM): { [string]: string|number } iterator, self
+---@return fun(self: lsqlite3.VM): table<string, string|number> iterator, self
 ---@nodiscard
 function lsqlite3.VM:nrows(sql) end
 
@@ -1251,7 +1263,7 @@ function lsqlite3.VM:nrows(sql) end
 ---@nodiscard
 function lsqlite3.VM:readonly() end
 
----@return integer errno
+---@return lsqlite3.ResultCode rc the error code of the last statement execution
 function lsqlite3.VM:reset() end
 
 ---@param sql string
@@ -1259,7 +1271,7 @@ function lsqlite3.VM:reset() end
 ---@nodiscard
 function lsqlite3.VM:rows(sql) end
 
----@return integer
+---@return lsqlite3.ResultCode
 function lsqlite3.VM:step() end
 
 ---@param sql string
@@ -1339,6 +1351,15 @@ re = {
     NOTEOL = 0x0200,
 }
 
+--- Bitmask of compilation flags accepted by `re.compile` and
+--- `re.search` (`re.BASIC`, `re.ICASE`, `re.NEWLINE`, `re.NOSUB`;
+--- masked in `tool/net/lre.c`).
+---@alias re.CompileFlag integer
+
+--- Bitmask of search-time flags accepted by `re.search` and
+--- `re.Regex:search` (`re.NOTBOL`, `re.NOTEOL`).
+---@alias re.SearchFlag integer
+
 ---@class re.Regex: userdata
 re.Regex = {}
 
@@ -1353,7 +1374,7 @@ re.Regex = {}
 --- of a line.
 ---
 ---@param str string
----@param flags? integer defaults to zero and may have any of:
+---@param flags? re.SearchFlag defaults to zero and may have any of:
 ---
 --- - `re.NOTBOL`
 --- - `re.NOTEOL`
@@ -1378,7 +1399,7 @@ function re.Regex:search(str, flags) end
 ---
 ---@param regex string
 ---@param text string
----@param flags integer? defaults to zero and may have any of:
+---@param flags (re.CompileFlag|re.SearchFlag)? defaults to zero and may have any of:
 ---
 --- - `re.BASIC`
 --- - `re.ICASE`
@@ -1399,7 +1420,7 @@ function re.search(regex, text, flags) end
 --- Compiles regular expression.
 ---
 ---@param regex string
----@param flags integer? defaults to zero and may have any of:
+---@param flags re.CompileFlag? defaults to zero and may have any of:
 ---
 --- - `re.BASIC`
 --- - `re.ICASE`
@@ -1912,7 +1933,7 @@ cosmo = {}
 ---
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function cosmo.Barf(filename, data, options) end
 
 ---@param ip uint32
@@ -2783,7 +2804,7 @@ function cosmo.Sha256(str) end
 ---@param j integer?
 ---@return string|nil data
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function cosmo.Slurp(filename, i, j) end
 
@@ -4011,6 +4032,18 @@ unix = {
     X_OK = nil
 }
 
+--- The numeric errno value carried as the third return of every
+--- fallible unix.* call (see LuaUnixSysretErrno in
+--- third_party/lua/lunix.c): always one of the exported E* constants
+--- (unix.EINTR, unix.ENOENT, ...). An alias rather than a checked
+--- enum: Teal enums are string-only.
+---@alias unix.Errno integer
+
+--- An `unix.F_*` command constant selecting the operation performed by
+--- `unix.fcntl` (`unix.F_GETFD`, `unix.F_SETFD`, `unix.F_GETFL`,
+--- `unix.F_SETFL`, `unix.F_SETLK`, `unix.F_SETLKW`, `unix.F_GETLK`, ...).
+---@alias unix.FcntlCmd integer
+
 --- Opens file.
 ---
 --- Returns a file descriptor integer that needs to be closed, e.g.
@@ -4071,7 +4104,7 @@ unix = {
 ---@param dirfd integer?
 ---@return integer|nil fd
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.open(path, flags, mode, dirfd) end
 
@@ -4099,7 +4132,7 @@ function unix.open(path, flags, mode, dirfd) end
 ---@param fd integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.close(fd) end
 
 --- Reads from file descriptor.
@@ -4112,7 +4145,7 @@ function unix.close(fd) end
 ---@param offset integer?
 ---@return string|nil data
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.read(fd, bufsiz, offset) end
 
 --- Writes to file descriptor.
@@ -4121,7 +4154,7 @@ function unix.read(fd, bufsiz, offset) end
 ---@param offset integer?
 ---@return integer|nil wrotebytes
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.write(fd, data, offset) end
 
 --- Invokes `_Exit(exitcode)` on the process. This will immediately
@@ -4163,7 +4196,7 @@ function unix.environ() end
 ---@param overwrite? boolean if false, won't overwrite existing variables (defaults to true)
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setenv(name, value, overwrite) end
 
 --- Unsets environment variable.
@@ -4174,7 +4207,7 @@ function unix.setenv(name, value, overwrite) end
 ---@param name string environment variable name to unset
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.unsetenv(name) end
 
 --- Clears all environment variables.
@@ -4184,7 +4217,7 @@ function unix.unsetenv(name) end
 ---
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.clearenv() end
 
 --- Gets login name of current user.
@@ -4194,7 +4227,7 @@ function unix.clearenv() end
 ---
 ---@return string|nil login name
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.getlogin() end
 
 --- Creates a new process mitosis style.
@@ -4265,7 +4298,7 @@ function unix.getlogin() end
 ---
 ---@return integer|0|nil childpid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.fork() end
 
 --- Performs `$PATH` lookup of executable.
@@ -4286,7 +4319,7 @@ function unix.fork() end
 ---@param prog string
 ---@return string|nil path
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.commandv(prog) end
 
 --- Exits current process, replacing it with a new instance of the
@@ -4325,7 +4358,7 @@ function unix.commandv(prog) end
 ---@param env string[]
 ---@return nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.execve(prog, args, env) end
 
 --- Executes program with PATH search.
@@ -4341,7 +4374,7 @@ function unix.execve(prog, args, env) end
 ---@param argv? string[]
 ---@return nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.execvp(prog, argv) end
 
 --- Executes program with PATH search and custom environment.
@@ -4359,7 +4392,7 @@ function unix.execvp(prog, argv) end
 ---@param envp? string[]
 ---@return nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.execvpe(prog, argv, envp) end
 
 --- Executes program from file descriptor.
@@ -4383,7 +4416,7 @@ function unix.execvpe(prog, argv, envp) end
 ---@param envp? string[]
 ---@return nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.fexecve(fd, argv, envp) end
 
 --- Spawns a new process.
@@ -4405,7 +4438,7 @@ function unix.fexecve(fd, argv, envp) end
 ---@param envp? string[]
 ---@return integer|nil pid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.spawn(prog, argv, envp) end
 
 --- Spawns a new process with PATH search.
@@ -4420,7 +4453,7 @@ function unix.spawn(prog, argv, envp) end
 ---@param envp? string[]
 ---@return integer|nil pid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.spawnp(prog, argv, envp) end
 
 --- Duplicates file descriptor.
@@ -4449,7 +4482,7 @@ function unix.spawnp(prog, argv, envp) end
 ---@param lowest integer?
 ---@return integer|nil newfd
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.dup(oldfd, newfd, flags, lowest) end
 
 --- Creates fifo which enables communication between processes.
@@ -4501,7 +4534,7 @@ function unix.dup(oldfd, newfd, flags, lowest) end
 ---
 ---@return integer|nil reader, integer writer
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.pipe(flags) end
 
@@ -4548,7 +4581,7 @@ function unix.pipe(flags) end
 ---@param options? integer
 ---@return integer|nil pid, integer wstatus, unix.Rusage rusage
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.wait(pid, options) end
 
 --- Returns `true` if process exited cleanly.
@@ -4618,7 +4651,7 @@ function unix.getppid() end
 ---@param sig integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.kill(pid, sig) end
 
 --- Sends signal to process group.
@@ -4635,7 +4668,7 @@ function unix.kill(pid, sig) end
 ---@param sig integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.killpg(pgrp, sig) end
 
 --- Triggers signal in current process.
@@ -4644,7 +4677,7 @@ function unix.killpg(pgrp, sig) end
 ---@param sig integer
 ---@return integer|nil rc
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.raise(sig) end
 
 --- Checks if effective user of current process has permission to access file.
@@ -4655,7 +4688,7 @@ function unix.raise(sig) end
 ---@param dirfd? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.access(path, how, flags, dirfd) end
 
 --- Makes directory.
@@ -4684,7 +4717,7 @@ function unix.access(path, how, flags, dirfd) end
 ---@param dirfd? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.mkdir(path, mode, dirfd) end
 
 --- Unlike mkdir() this convenience wrapper will automatically create
@@ -4700,7 +4733,7 @@ function unix.mkdir(path, mode, dirfd) end
 ---@param mode? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.makedirs(path, mode) end
 
 --- Creates a temporary directory with a unique name.
@@ -4718,7 +4751,7 @@ function unix.makedirs(path, mode) end
 ---@param template string template path ending in XXXXXX
 ---@return string|nil path
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.mkdtemp(template) end
 
 --- Creates a temporary file with a unique name.
@@ -4739,14 +4772,14 @@ function unix.mkdtemp(template) end
 ---@param template string template path ending in XXXXXX
 ---@return integer|nil fd, string path
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.mkstemp(template) end
 
 --- Changes current directory to `path`.
 ---@param path string
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.chdir(path) end
 
 --- Removes file at `path`.
@@ -4759,7 +4792,7 @@ function unix.chdir(path) end
 ---@param dirfd? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.unlink(path, dirfd) end
 
 --- Removes empty directory at `path`.
@@ -4771,7 +4804,7 @@ function unix.unlink(path, dirfd) end
 ---@param dirfd? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.rmdir(path, dirfd) end
 
 --- Renames file or directory.
@@ -4781,7 +4814,7 @@ function unix.rmdir(path, dirfd) end
 ---@param newdirfd integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(oldpath: string, newpath: string): true
 function unix.rename(oldpath, newpath, olddirfd, newdirfd) end
 
@@ -4793,7 +4826,7 @@ function unix.rename(oldpath, newpath, olddirfd, newdirfd) end
 ---@param newdirfd integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(existingpath: string, newpath: string, flags?: integer): true
 ---@overload fun(existingpath: string, newpath: string, flags: integer, olddirfd: integer, newdirfd: integer): true
 function unix.link(existingpath, newpath, flags, olddirfd, newdirfd) end
@@ -4808,7 +4841,7 @@ function unix.link(existingpath, newpath, flags, olddirfd, newdirfd) end
 ---@param newdirfd? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.symlink(target, linkpath, newdirfd) end
 
 --- Reads contents of symbolic link.
@@ -4825,7 +4858,7 @@ function unix.symlink(target, linkpath, newdirfd) end
 ---@param dirfd? integer
 ---@return string|nil content
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.readlink(path, dirfd) end
 
@@ -4834,7 +4867,7 @@ function unix.readlink(path, dirfd) end
 ---@param path string
 ---@return string|nil path
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.realpath(path) end
 
@@ -4878,7 +4911,7 @@ function unix.realpath(path) end
 ---@param flags? integer
 ---@return 0|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(path: string): 0
 function unix.utimensat(path, asecs, ananos, msecs, mnanos, dirfd, flags) end
 
@@ -4912,7 +4945,7 @@ function unix.utimensat(path, asecs, ananos, msecs, mnanos, dirfd, flags) end
 ---@param mnanos integer
 ---@return 0|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(fd: integer): 0
 function unix.futimens(fd, asecs, ananos, msecs, mnanos) end
 
@@ -4926,7 +4959,7 @@ function unix.futimens(fd, asecs, ananos, msecs, mnanos) end
 ---@param dirfd? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.chown(path, uid, gid, flags, dirfd) end
 
 --- Changes mode bits on file.
@@ -4939,7 +4972,7 @@ function unix.chown(path, uid, gid, flags, dirfd) end
 ---@param dirfd? integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.chmod(path, mode, flags, dirfd) end
 
 --- Returns current working directory.
@@ -4950,7 +4983,7 @@ function unix.chmod(path, mode, flags, dirfd) end
 --- to enabling one to exceed the traditional 260 character limit.
 ---@return string|nil path
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.getcwd() end
 
@@ -4963,7 +4996,7 @@ function unix.getcwd() end
 ---@param path string the file or directory path you wish to destroy.
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.rmrf(path) end
 
 --- Manipulates file descriptor.
@@ -5115,11 +5148,11 @@ function unix.rmrf(path) end
 ---   Returns `EBADF` if `fd` wasn't open.
 ---
 ---@param fd integer
----@param cmd integer
+---@param cmd unix.FcntlCmd
 ---@param ... any
 ---@return any|nil ...
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(fd: integer, unix.F_GETFD: integer): flags: integer
 ---@overload fun(fd: integer, unix.F_SETFD: integer, flags: integer): true
 ---@overload fun(fd: integer, unix.F_GETFL: integer): flags: integer
@@ -5134,21 +5167,21 @@ function unix.fcntl(fd, cmd, ...) end
 ---@param pid integer
 ---@return integer|nil sid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.getsid(pid) end
 
 --- Gets process group id.
 ---@return integer|nil pgid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.getpgrp() end
 
 --- Sets process group id. This is the same as `setpgid(0,0)`.
 ---@return integer|nil pgid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setpgrp() end
 
 --- Sets process group id the modern way.
@@ -5156,14 +5189,14 @@ function unix.setpgrp() end
 ---@param pgid integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setpgid(pid, pgid) end
 
 --- Gets process group id the modern way.
 ---@param pid integer
 ---@return integer|nil pgid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.getpgid(pid) end
 
 --- Sets session id.
@@ -5173,7 +5206,7 @@ function unix.getpgid(pid) end
 --- Fails with `ENOSYS` on Windows NT.
 ---@return integer|nil sid
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setsid() end
 
 --- Daemonizes the current process.
@@ -5195,7 +5228,7 @@ function unix.setsid() end
 ---@param noclose? boolean
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.daemon(nochdir, noclose) end
 
 --- Gets real user id.
@@ -5245,7 +5278,7 @@ function unix.getegid() end
 ---@param path string
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.chroot(path) end
 
 --- Sets user id.
@@ -5276,21 +5309,21 @@ function unix.chroot(path) end
 ---@param uid integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setuid(uid) end
 
 ---Sets user id for file system ops.
 ---@param uid integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setfsuid(uid) end
 
 ---Sets group id for file system ops.
 ---@param gid integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setfsgid(gid) end
 
 ---Sets group id.
@@ -5299,7 +5332,7 @@ function unix.setfsgid(gid) end
 ---@param gid integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setgid(gid) end
 
 ---Sets real, effective, and saved user ids.
@@ -5313,7 +5346,7 @@ function unix.setgid(gid) end
 ---@param saved integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setresuid(real, effective, saved) end
 
 --- Sets real, effective, and saved group ids.
@@ -5327,7 +5360,7 @@ function unix.setresuid(real, effective, saved) end
 ---@param saved integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setresgid(real, effective, saved) end
 
 --- Sets file permission mask and returns the old one.
@@ -5362,9 +5395,18 @@ function unix.umask(newmask) end
 ---@param name integer
 ---@return integer|nil value
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.sysconf(name) end
+
+--- Fields reported by uname(2).
+---@class unix.Uname
+---@field sysname string
+---@field nodename string
+---@field release string
+---@field version string
+---@field machine string
+---@field domainname string
 
 --- Returns identity of the current operating system.
 ---
@@ -5373,9 +5415,9 @@ function unix.sysconf(name) end
 ---     local u = assert(unix.uname())
 ---     print(u.sysname, u.release, u.machine)
 ---
----@return {|nil sysname: string, nodename: string, release: string, version: string, machine: string, domainname: string } uts
+---@return unix.Uname|nil uts
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.uname() end
 
@@ -5478,7 +5520,7 @@ function unix.syslog(priority, msg) end
 ---@param clock? integer
 ---@return integer|nil seconds, integer nanos
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.clock_gettime(clock) end
 
@@ -5489,7 +5531,7 @@ function unix.clock_gettime(clock) end
 ---@param nanos integer?
 ---@return integer|nil remseconds, integer remnanos
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.nanosleep(seconds, nanos) end
 
 --- These functions are used to make programs slower by asking the
@@ -5501,7 +5543,7 @@ function unix.sync() end
 ---@param fd integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.fsync(fd) end
 
 --- These functions are used to make programs slower by asking the
@@ -5509,7 +5551,7 @@ function unix.fsync(fd) end
 ---@param fd integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.fdatasync(fd) end
 
 --- Seeks to file position.
@@ -5526,7 +5568,7 @@ function unix.fdatasync(fd) end
 ---@param whence? integer
 ---@return integer|nil newposbytes
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.lseek(fd, offset, whence) end
 
 --- Reduces or extends underlying physical medium of file.
@@ -5535,7 +5577,7 @@ function unix.lseek(fd, offset, whence) end
 ---@param length? integer defaults to zero (`0`)
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.truncate(path, length) end
 
 --- Reduces or extends underlying physical medium of open file.
@@ -5544,7 +5586,7 @@ function unix.truncate(path, length) end
 ---@param length? integer defaults to zero (`0`)
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.ftruncate(fd, length) end
 
 ---@param family? integer defaults to `AF_INET` and can be:
@@ -5578,7 +5620,7 @@ function unix.ftruncate(fd, length) end
 ---
 ---@return integer|nil fd
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.socket(family, type, protocol) end
 
@@ -5599,7 +5641,7 @@ function unix.socket(family, type, protocol) end
 ---@param protocol? integer defaults to `0`.
 ---@return integer|nil fd1, integer fd2
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.socketpair(family, type, protocol) end
 
 ---  Binds socket.
@@ -5633,14 +5675,14 @@ function unix.socketpair(family, type, protocol) end
 ---@param port? uint16
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(fd: integer, unixpath: string): true
 function unix.bind(fd, ip, port) end
 
 ---Returns list of network adapter addresses.
 ---@return {|nil name: string, ip: integer, netmask: integer }[] addresses
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.siocgifconf() end
 
@@ -5752,7 +5794,7 @@ function unix.siocgifconf() end
 ---@param optname integer
 ---@return integer|nil value
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 ---@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_LINGER: integer): seconds: integer, enabled: boolean
 ---@overload fun(serverfd:integer, unix.SOL_TCP: integer, unix.TCP_SAVE_SYN: integer): syn_packet_bytes: string
@@ -5867,7 +5909,7 @@ function unix.getsockopt(fd, level, optname) end
 ---@param value boolean|integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_LINGER: integer, secs:integer, enabled:boolean): true
 ---@overload fun(serverfd:integer, unix.SOL_TCP: integer, unix.TCP_SAVE_SYN: integer, enabled:integer): true
 function unix.setsockopt(fd, level, optname, value) end
@@ -5901,14 +5943,14 @@ function unix.setsockopt(fd, level, optname, value) end
 --- event or an interrupt. If the timeout expires, an empty table is returned.
 ---@return table<integer,integer>|nil `{[fd:int]=revents:int, ...}`
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.poll(fds, timeoutms) end
 
 --- Returns hostname of system.
 ---@return string|nil host
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.gethostname() end
 
@@ -5919,7 +5961,7 @@ function unix.gethostname() end
 ---@param name string
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.sethostname(name) end
 
 --- Begins listening for incoming connections on a socket.
@@ -5927,7 +5969,7 @@ function unix.sethostname(name) end
 ---@param backlog integer?
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.listen(fd, backlog) end
 
 --- Accepts new client socket descriptor for a listening tcp socket.
@@ -5941,7 +5983,7 @@ function unix.listen(fd, backlog) end
 ---@param flags integer?
 ---@return integer|nil clientfd, uint32 ip, uint16 port
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 ---@overload fun(serverfd:integer, flags:integer?):clientfd:integer, unixpath:string
 function unix.accept(serverfd, flags) end
@@ -5956,7 +5998,7 @@ function unix.accept(serverfd, flags) end
 ---@param port uint16
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(fd:integer, unixpath:string): true
 function unix.connect(fd, ip, port) end
 
@@ -5964,7 +6006,7 @@ function unix.connect(fd, ip, port) end
 ---@param fd integer
 ---@return uint32|nil ip, uint16 port
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 ---@overload fun(fd: integer): unixpath:string
 function unix.getsockname(fd) end
@@ -5977,7 +6019,7 @@ function unix.getsockname(fd) end
 ---@param fd integer
 ---@return uint32|nil ip, uint16 port
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 ---@overload fun(fd: integer): unixpath:string
 function unix.getpeername(fd) end
@@ -5991,7 +6033,7 @@ function unix.getpeername(fd) end
 --- - `MSG_OOB`
 ---@return string|nil data
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.recv(fd, bufsiz, flags) end
 
@@ -6004,7 +6046,7 @@ function unix.recv(fd, bufsiz, flags) end
 --- - `MSG_OOB`
 ---@return string|nil data, integer ip, integer port
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 ---@overload fun(fd: integer, bufsiz?: integer, flags?: integer): data: string, unixpath: string
 function unix.recvfrom(fd, bufsiz, flags) end
@@ -6021,7 +6063,7 @@ function unix.recvfrom(fd, bufsiz, flags) end
 ---@param offset integer? byte offset into `data` at which to start sending
 ---@return integer|nil sent
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.send(fd, data, flags, offset) end
 
 --- This is useful for sending messages over UDP sockets to specific
@@ -6037,7 +6079,7 @@ function unix.send(fd, data, flags, offset) end
 --- - `MSG_NOSIGNAL`
 ---@return integer|nil sent
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(fd:integer, data:string, unixpath:string, flags?:integer): sent: integer
 function unix.sendto(fd, data, ip, port, flags) end
 
@@ -6055,7 +6097,7 @@ function unix.sendto(fd, data, ip, port, flags) end
 ---
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.shutdown(fd, how) end
 
 --- Manipulates bitset of signals blocked by process.
@@ -6079,7 +6121,7 @@ function unix.shutdown(fd, how) end
 ---@param newmask unix.Sigset
 ---@return unix.Sigset|nil oldmask
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.sigprocmask(how, newmask) end
 
 ---@param sig integer can be one of:
@@ -6168,7 +6210,7 @@ function unix.sigprocmask(how, newmask) end
 ---@param mask? unix.Sigset
 ---@return function|integer|nil oldhandler, integer flags, unix.Sigset mask
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.sigaction(sig, handler, flags, mask) end
 
 --- Waits for signal to be delivered.
@@ -6177,14 +6219,14 @@ function unix.sigaction(sig, handler, flags, mask) end
 ---@param mask? unix.Sigset specifies which signals should be blocked.
 ---@return nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.sigsuspend(mask) end
 
 --- Returns the set of signals pending delivery to the calling process
 --- that are currently blocked.
 ---@return unix.Sigset|nil mask
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.sigpending() end
 
 --- Causes `SIGALRM` signals to be generated at some point(s) in the
@@ -6214,7 +6256,7 @@ function unix.sigpending() end
 ---@param valuens integer needs to be on the interval `[0,1000000000)`
 ---@return integer|nil intervalsec, integer intervalns, integer valuesec, integer valuens
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(which: integer): intervalsec: integer, intervalns: integer, valuesec: integer, valuens: integer
 function unix.setitimer(which, intervalsec, intervalns, valuesec, valuens) end
 
@@ -6268,14 +6310,14 @@ function unix.strsignal(sig) end
 ---@param hard? integer defaults to whatever was specified in `soft`.
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setrlimit(resource, soft, hard) end
 
 --- Returns information about resource limits for current process.
 ---@param resource integer
 ---@return integer|nil soft, integer hard
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.getrlimit(resource) end
 
@@ -6293,7 +6335,7 @@ function unix.getrlimit(resource) end
 ---@param inc integer
 ---@return integer|nil priority
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.nice(inc) end
 
 --- Lowers the calling process to the lowest scheduling priority.
@@ -6318,7 +6360,7 @@ function unix.verynice() end
 ---@param who integer
 ---@return integer|nil priority
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.getpriority(which, who) end
 
 --- Sets the scheduling priority of a process, process group, or user.
@@ -6338,7 +6380,7 @@ function unix.getpriority(which, who) end
 ---@param prio integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setpriority(which, who, prio) end
 
 --- Returns information about resource usage for current process, e.g.
@@ -6355,7 +6397,7 @@ function unix.setpriority(which, who, prio) end
 ---
 ---@return unix.Rusage|nil # See `unix.Rusage` for details on returned fields.
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.getrusage(who) end
 
@@ -6539,7 +6581,7 @@ function unix.getrusage(who) end
 ---   Linux prefers to raise `unix.SIGSYS`.
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.pledge(promises, execpromises, mode) end
 
 --- Restricts filesystem operations, e.g.
@@ -6604,7 +6646,7 @@ function unix.pledge(promises, execpromises, mode) end
 ---
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@overload fun(path: nil, permissions: nil): true
 function unix.unveil(path, permissions) end
 
@@ -6622,7 +6664,7 @@ function unix.unveil(path, permissions) end
 ---@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
 ---@return string zone
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.gmtime(unixts) end
 
@@ -6670,7 +6712,7 @@ function unix.gmtime(unixts) end
 ---@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
 ---@return string zone
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.localtime(unixts) end
 
 --- Gets information about file or directory.
@@ -6680,7 +6722,7 @@ function unix.localtime(unixts) end
 ---@param dirfd? integer defaults to `unix.AT_FDCWD` and may optionally be set to a directory file descriptor to which `path` is relative.
 ---@return unix.Stat|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.stat(path, flags, dirfd) end
 
@@ -6739,7 +6781,7 @@ function unix.S_ISSOCK(mode) end
 ---
 ---@return unix.Stat|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.fstat(fd) end
 
@@ -6758,7 +6800,7 @@ function unix.fstat(fd) end
 ---@param path string
 ---@return unix.Dir|nil state
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.opendir(path) end
 
@@ -6770,7 +6812,7 @@ function unix.opendir(path) end
 ---
 ---@return unix.Dir|nil state
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.fdopendir(fd) end
 
@@ -6786,14 +6828,14 @@ function unix.fdopendir(fd) end
 ---@param fd integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.isatty(fd) end
 
 ---@param fd integer
 ---@return integer|nil rows, integer cols cellular dimensions of pseudoteletypewriter display.
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.tiocgwinsz(fd) end
 
@@ -6832,7 +6874,7 @@ function unix.tiocgwinsz(fd) end
 ---@param fd integer
 ---@return unix.Termios|nil termios
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.tcgetattr(fd) end
 
@@ -6855,7 +6897,7 @@ function unix.tcgetattr(fd) end
 ---@param termios unix.Termios
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.tcsetattr(fd, action, termios) end
 
 --- Returns file descriptor of open anonymous file.
@@ -6873,7 +6915,7 @@ function unix.tcsetattr(fd, action, termios) end
 --- asks the kernel to more aggressively cache and reduce i/o ops.
 ---@return integer|nil fd
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.tmpfd() end
 
 --- Relinquishes scheduled quantum.
@@ -6885,7 +6927,7 @@ function unix.sched_yield() end
 ---@param flags integer
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.unshare(flags) end
 
 --- Reassociates the calling thread with the namespace referenced by
@@ -6896,7 +6938,7 @@ function unix.unshare(flags) end
 ---@param nstype integer?
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.setns(fd, nstype) end
 
 --- Mounts a filesystem. `flags` is a bitwise OR of `unix.MS_*`
@@ -6908,7 +6950,7 @@ function unix.setns(fd, nstype) end
 ---@param data string?
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.mount(source, target, fstype, flags, data) end
 
 --- Unmounts a filesystem. On Linux this is the `umount2` syscall.
@@ -6918,7 +6960,7 @@ function unix.mount(source, target, fstype, flags, data) end
 ---@param flags integer?
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.unmount(target, flags) end
 
 --- Moves the root filesystem of the current mount namespace to
@@ -6928,7 +6970,7 @@ function unix.unmount(target, flags) end
 ---@param put_old string
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.pivot_root(new_root, put_old) end
 
 --- Performs an operation on the calling process. `option` is one of
@@ -6941,7 +6983,7 @@ function unix.pivot_root(new_root, put_old) end
 ---@param arg5 integer?
 ---@return integer|nil rc
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.prctl(option, arg2, arg3, arg4, arg5) end
 
 --- Returns the calling thread's (or `pid`'s) capability sets as
@@ -6950,7 +6992,7 @@ function unix.prctl(option, arg2, arg3, arg4, arg5) end
 ---@param pid integer?
 ---@return integer|nil effective, integer permitted, integer inheritable
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.capget(pid) end
 
 --- Sets the calling thread's (or `pid`'s) capability sets. Each
@@ -6961,7 +7003,7 @@ function unix.capget(pid) end
 ---@param pid integer?
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.capset(effective, permitted, inheritable, pid) end
 
 --- Generic device control. When `arg` is nil or absent, the ioctl is
@@ -6974,7 +7016,7 @@ function unix.capset(effective, permitted, inheritable, pid) end
 ---@param arg (integer | string)?
 ---@return (true|nil | string) result
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.ioctl(fd, request, arg) end
 
 --- Landlock: create ruleset. With no args, returns the kernel's
@@ -6985,7 +7027,7 @@ function unix.ioctl(fd, request, arg) end
 ---@param flags integer?
 ---@return integer|nil fd_or_abi
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.landlock_create_ruleset(handled_access_fs, flags) end
 
 --- Landlock: add a PATH_BENEATH rule granting `allowed` access to the
@@ -6997,7 +7039,7 @@ function unix.landlock_create_ruleset(handled_access_fs, flags) end
 ---@param flags integer?
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.landlock_add_rule(ruleset_fd, parent_fd, allowed, flags) end
 
 --- Landlock: apply the ruleset to the current thread (and its future
@@ -7007,7 +7049,7 @@ function unix.landlock_add_rule(ruleset_fd, parent_fd, allowed, flags) end
 ---@param flags integer?
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.landlock_restrict_self(ruleset_fd, flags) end
 
 --- Creates interprocess shared memory mapping.
@@ -7250,7 +7292,7 @@ function unix.Memory:fetch_xor(word_index, value) end
 ---
 ---@return 0|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---
 --- `EINTR` if a signal is delivered while waiting on deadline. Callers
 --- should use futexes inside a loop that is able to cope with spurious
@@ -7294,7 +7336,7 @@ unix.Dir = {}
 --- This may be called multiple times.
 ---@return true|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 function unix.Dir:close() end
 
 --- Reads entry from directory stream.
@@ -7322,14 +7364,14 @@ function unix.Dir:read() end
 
 ---@return integer|nil fd file descriptor of open directory object.
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 --- Returns `EOPNOTSUPP` if using a `/zip/...` path or if using Windows NT.
 function unix.Dir:fd() end
 
 ---@return integer|nil off current arbitrary offset into stream.
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.Dir:tell() end
 
@@ -7695,7 +7737,7 @@ function unix.Statfs:fstypename() end
 ---@param path string
 ---@return unix.Statfs|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.statfs(path) end
 
@@ -7703,7 +7745,7 @@ function unix.statfs(path) end
 ---@param fd integer
 ---@return unix.Statfs|nil
 ---@return string? error
----@return integer? errno
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.fstatfs(fd) end
 

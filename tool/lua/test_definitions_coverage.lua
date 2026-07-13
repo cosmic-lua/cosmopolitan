@@ -688,8 +688,6 @@ local QALLOW_PARAM = set({
   "cosmo.EncodeLua",
   "lsqlite3.Context:result_error",
   "lsqlite3.Context:set_aggregate_data",
-  "lsqlite3.Statement:get_name",
-  "lsqlite3.Statement:get_type",
 })
 
 local QALLOW_NORETURN = set({
@@ -709,12 +707,10 @@ local QALLOW_NORETURN = set({
   "lsqlite3.Database:commit_hook",
   "lsqlite3.Database:create_collation",
   "lsqlite3.Database:deserialize",
-  "lsqlite3.Database:exec",
   "lsqlite3.Database:interrupt",
   "lsqlite3.Database:rollback_hook",
   "lsqlite3.Database:update_hook",
   "lsqlite3.Database:wal_hook",
-  "lsqlite3.Statement:reset",
   "repl.start",
   "unix.Dir:rewind",
   "unix.Memory:store",
@@ -735,10 +731,8 @@ local QALLOW_NORETURN = set({
 
 local QALLOW_INLINE = set({
   "cosmo.ParseParams",
-  "lsqlite3.VM:nrows",
   "unix.poll",
   "unix.siocgifconf",
-  "unix.uname",
 })
 
 local QALLOW_BARE = set({
@@ -747,22 +741,6 @@ local QALLOW_BARE = set({
   "lsqlite3.Database:create_aggregate",
   "lsqlite3.Database:create_function",
   "lsqlite3.Statement:bind_names",
-  "lsqlite3.Statement:bind_parameter_count",
-  "lsqlite3.Statement:data",
-  "lsqlite3.Statement:get_name",
-  "lsqlite3.Statement:get_named_types",
-  "lsqlite3.Statement:get_named_values",
-  "lsqlite3.Statement:get_type",
-  "lsqlite3.Statement:get_types",
-  "lsqlite3.Statement:get_unames",
-  "lsqlite3.Statement:get_utypes",
-  "lsqlite3.Statement:get_uvalues",
-  "lsqlite3.Statement:get_value",
-  "lsqlite3.Statement:get_values",
-  "lsqlite3.Statement:idata",
-  "lsqlite3.Statement:itypes",
-  "lsqlite3.Statement:last_insert_rowid",
-  "lsqlite3.Statement:type",
   "lsqlite3.config",
   "unix.fcntl",
 })
