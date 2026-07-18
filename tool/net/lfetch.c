@@ -48,13 +48,13 @@
 #include "net/http/url.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
-#include "third_party/mbedtls/ctr_drbg.h"
-#include "third_party/mbedtls/error.h"
-#include "third_party/mbedtls/ssl.h"
-#include "third_party/mbedtls/x509.h"
-#include "third_party/mbedtls/net_sockets.h"
+#include "third_party/mbedtls3/include/mbedtls/ctr_drbg.h"
+#include "third_party/mbedtls3/include/mbedtls/error.h"
+#include "third_party/mbedtls3/include/mbedtls/ssl.h"
+#include "third_party/mbedtls3/include/mbedtls/x509.h"
+#include "third_party/mbedtls3/include/mbedtls/net_sockets.h"
 #include "third_party/musl/netdb.h"
-#include "net/https/https.h"
+#include "net/https3/https3.h"
 
 // Global state for SSL client (config is shared, contexts are per-connection)
 static pthread_mutex_t g_ssl_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -268,6 +268,10 @@ static void TlsInit(void) {
   mbedtls_ssl_conf_ca_chain(&confcli, GetSslRoots(), 0);
   mbedtls_ssl_conf_authmode(&confcli, MBEDTLS_SSL_VERIFY_REQUIRED);
   mbedtls_ssl_conf_rng(&confcli, mbedtls_ctr_drbg_random, &rngcli);
+  // behavior parity with the previous Mbed TLS 2.26 client, and some
+  // TLS 1.2 servers (including redbean's) reject Mbed TLS 3.6's
+  // TLS 1.3 hybrid hello; enabling 1.3 is a deliberate follow-up
+  mbedtls_ssl_conf_max_tls_version(&confcli, MBEDTLS_SSL_VERSION_TLS1_2);
 
   sslinitialized = true;
   pthread_mutex_unlock(&g_ssl_mu);
@@ -1402,7 +1406,7 @@ StreamCleanupError:
 StreamVerifyFailed:
   LockInc(&shared->c.sslverifyfailed);
   {
-    uint32_t verify_result = sslctx->session_negotiate->verify_result;
+    uint32_t verify_result = mbedtls_ssl_get_verify_result(sslctx);
     free(bio);
     mbedtls_ssl_free(sslctx);
     free(sslctx);

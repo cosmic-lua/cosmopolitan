@@ -4,7 +4,9 @@
 PKGS += TOOL_NET
 
 TOOL_NET_FILES := $(wildcard tool/net/*)
-TOOL_NET_SRCS = $(filter %.c,$(TOOL_NET_FILES))
+# lfetch.c is compiled against Mbed TLS 3.6 and linked only into the
+# lua binary (see tool/lua/BUILD.mk); redbean uses fetch.inc directly
+TOOL_NET_SRCS = $(filter-out tool/net/lfetch.c,$(filter %.c,$(TOOL_NET_FILES)))
 TOOL_NET_HDRS = $(filter %.h,$(TOOL_NET_FILES))
 TOOL_NET_INCS = $(filter %.inc,$(TOOL_NET_FILES))
 

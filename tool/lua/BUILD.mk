@@ -25,7 +25,7 @@ TOOL_LUA_CHECKS =							\
 
 TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/lua/lcosmo.o					\
-	o/$(MODE)/tool/net/lfuncs.o					\
+	o/$(MODE)/tool/lua/lfuncs3.o					\
 	o/$(MODE)/tool/net/lpath.o					\
 	o/$(MODE)/tool/net/lre.o					\
 	o/$(MODE)/tool/net/ljson.o					\
@@ -54,7 +54,7 @@ TOOL_LUA_DIRECTDEPS =							\
 	LIBC_TINYMATH							\
 	LIBC_X								\
 	NET_HTTP							\
-	NET_HTTPS							\
+	NET_HTTPS3							\
 	THIRD_PARTY_ARGON2						\
 	THIRD_PARTY_COMPILER_RT						\
 	THIRD_PARTY_GDTOA						\
@@ -62,7 +62,7 @@ TOOL_LUA_DIRECTDEPS =							\
 	THIRD_PARTY_LINENOISE						\
 	THIRD_PARTY_LUA							\
 	THIRD_PARTY_LUA_UNIX						\
-	THIRD_PARTY_MBEDTLS						\
+	THIRD_PARTY_MBEDTLS3						\
 	THIRD_PARTY_MUSL						\
 	THIRD_PARTY_REGEX						\
 	THIRD_PARTY_SQLITE3						\

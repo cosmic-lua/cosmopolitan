@@ -18,12 +18,29 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/assert.h"
 #include "libc/bsdstdlib.h"
+#include "libc/cosmo.h"
+#include "libc/runtime/runtime.h"
 #include "libc/stdio/rand.h"
+#include "third_party/mbedtls3/include/psa/crypto.h"
 #include "net/https3/https3.h"
 #include "third_party/mbedtls3/include/mbedtls/ctr_drbg.h"
 
+static cosmo_once_t g_psa_once;
+
+static void FreePsaCrypto(void) {
+  mbedtls_psa_crypto_free();
+}
+
+// TLS 1.3 in Mbed TLS 3.6 uses PSA crypto internally and requires
+// psa_crypto_init() before the handshake
+static void InitPsaCrypto(void) {
+  npassert(psa_crypto_init() == PSA_SUCCESS);
+  atexit(FreePsaCrypto);
+}
+
 void InitializeRng(mbedtls_ctr_drbg_context *r) {
   unsigned char b[64];
+  cosmo_once(&g_psa_once, InitPsaCrypto);
   mbedtls_ctr_drbg_init(r);
   arc4random_buf(b, 64);
   npassert(!mbedtls_ctr_drbg_seed(r, GetEntropy, 0, b, 64));
