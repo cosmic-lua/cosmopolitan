@@ -68,6 +68,7 @@
 #include "third_party/lua/luaconf.h"
 #include "third_party/lua/lunix.h"
 #ifdef USE_MBEDTLS3
+#include "libc/str/blake2.h"
 #include "third_party/mbedtls3/include/mbedtls/md.h"
 #include "third_party/mbedtls3/include/mbedtls/md5.h"
 #include "third_party/mbedtls3/include/mbedtls/platform_util.h"
@@ -658,6 +659,55 @@ int LuaGetHttpReason(lua_State *L) {
   return 1;
 }
 
+#ifdef USE_MBEDTLS3
+// Mbed TLS 3.6 matches digest names exactly against an uppercase table
+// and has no BLAKE2b, but the GetCryptoHash contract (definitions.lua)
+// predates it: the 2.26 fork matched names with strcasecmp and wired
+// libc's BLAKE2B256 into its md layer. Restore both behaviors here so
+// the two builds agree at the Lua boundary.
+static const mbedtls_md_info_t *GetMdInfoFromAnyCase(const char *name,
+                                                     size_t n) {
+  size_t i;
+  char b[16];
+  if (!n || n >= sizeof(b)) return 0;
+  for (i = 0; i < n; ++i) {
+    b[i] = 'a' <= name[i] && name[i] <= 'z' ? name[i] - ('a' - 'A') : name[i];
+  }
+  b[n] = 0;
+  return mbedtls_md_info_from_string(b);
+}
+
+// generic hmac (rfc 2104) over libc's BLAKE2B256 with the 128-byte
+// block size the 2.26 fork's md layer used, so tags match old binaries
+static void Blake2b256Hmac(const uint8_t *k, size_t kl, const void *p,
+                           size_t pl, uint8_t d[BLAKE2B256_DIGEST_LENGTH]) {
+  size_t i;
+  struct Blake2b b2;
+  uint8_t pad[BLAKE2B_CBLOCK];
+  uint8_t sum[BLAKE2B256_DIGEST_LENGTH];
+  if (kl > BLAKE2B_CBLOCK) {
+    BLAKE2B256(k, kl, sum);
+    k = sum;
+    kl = BLAKE2B256_DIGEST_LENGTH;
+  }
+  memset(pad, 0x36, sizeof(pad));
+  for (i = 0; i < kl; ++i) pad[i] ^= k[i];
+  BLAKE2B256_Init(&b2);
+  BLAKE2B256_Update(&b2, pad, sizeof(pad));
+  BLAKE2B256_Update(&b2, p, pl);
+  BLAKE2B256_Final(&b2, d);
+  memset(pad, 0x5c, sizeof(pad));
+  for (i = 0; i < kl; ++i) pad[i] ^= k[i];
+  BLAKE2B256_Init(&b2);
+  BLAKE2B256_Update(&b2, pad, sizeof(pad));
+  BLAKE2B256_Update(&b2, d, BLAKE2B256_DIGEST_LENGTH);
+  BLAKE2B256_Final(&b2, d);
+  mbedtls_platform_zeroize(pad, sizeof(pad));
+  mbedtls_platform_zeroize(sum, sizeof(sum));
+  mbedtls_platform_zeroize(&b2, sizeof(b2));
+}
+#endif
+
 int LuaGetCryptoHash(lua_State *L) {
   size_t hl, pl, kl;
   uint8_t d[64];
@@ -665,7 +715,22 @@ int LuaGetCryptoHash(lua_State *L) {
   const void *h = luaL_checklstring(L, 1, &hl);
   const void *p = luaL_checklstring(L, 2, &pl);
   const void *k = luaL_optlstring(L, 3, "", &kl);
+#ifdef USE_MBEDTLS3
+  const mbedtls_md_info_t *digest;
+  if (hl == 10 && !strcasecmp(h, "BLAKE2B256")) {
+    if (kl == 0) {
+      BLAKE2B256(p, pl, d);
+    } else {
+      Blake2b256Hmac(k, kl, p, pl, d);
+    }
+    lua_pushlstring(L, (void *)d, BLAKE2B256_DIGEST_LENGTH);
+    mbedtls_platform_zeroize(d, sizeof(d));
+    return 1;
+  }
+  digest = GetMdInfoFromAnyCase(h, hl);
+#else
   const mbedtls_md_info_t *digest = mbedtls_md_info_from_string(h);
+#endif
   if (!digest) {
     lua_pushnil(L);
     lua_pushfstring(L, "unknown hash type: %s", (const char *)h);

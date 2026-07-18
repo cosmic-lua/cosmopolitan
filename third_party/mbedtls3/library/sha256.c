@@ -63,6 +63,11 @@
 
 #include "third_party/mbedtls3/include/mbedtls/platform.h"
 
+/* cosmo: dispatch to the SHA-NI / AVX2 kernels in libc/nexgen32e on
+ * x86 (X86_HAVE compiles to 0 elsewhere); see patches/0001. */
+#include "libc/nexgen32e/sha.h"
+#include "libc/nexgen32e/x86feature.h"
+
 #if defined(MBEDTLS_ARCH_IS_ARMV8_A)
 
 #  if defined(MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_IF_PRESENT) || \
@@ -502,6 +507,15 @@ int mbedtls_internal_sha256_process_c(mbedtls_sha256_context *ctx,
 
     unsigned int i;
 
+    if (X86_HAVE(SHA) && X86_HAVE(SSE2) && X86_HAVE(SSSE3)) {
+        sha256_transform_ni(ctx->state, data, 1);
+        return 0;
+    }
+    if (X86_HAVE(BMI2) && X86_HAVE(AVX) && X86_HAVE(AVX2)) {
+        sha256_transform_rorx(ctx->state, data, 1);
+        return 0;
+    }
+
     for (i = 0; i < 8; i++) {
         local.A[i] = ctx->state[i];
     }
@@ -586,6 +600,18 @@ static size_t mbedtls_internal_sha256_process_many_c(
     mbedtls_sha256_context *ctx, const uint8_t *data, size_t len)
 {
     size_t processed = 0;
+
+    if (len >= SHA256_BLOCK_SIZE) {
+        size_t blocks = len / SHA256_BLOCK_SIZE;
+        if (X86_HAVE(SHA) && X86_HAVE(SSE2) && X86_HAVE(SSSE3)) {
+            sha256_transform_ni(ctx->state, data, blocks);
+            return blocks * SHA256_BLOCK_SIZE;
+        }
+        if (X86_HAVE(BMI2) && X86_HAVE(AVX) && X86_HAVE(AVX2)) {
+            sha256_transform_rorx(ctx->state, data, blocks);
+            return blocks * SHA256_BLOCK_SIZE;
+        }
+    }
 
     while (len >= SHA256_BLOCK_SIZE) {
         if (mbedtls_internal_sha256_process_c(ctx, data) != 0) {

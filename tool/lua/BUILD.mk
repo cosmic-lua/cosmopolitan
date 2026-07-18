@@ -161,6 +161,10 @@ o/$(MODE)/tool/lua/test_uuid.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_uuid.l
 	$< tool/lua/test_uuid.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_crypto_hash.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_crypto_hash.lua
+	$< tool/lua/test_crypto_hash.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_signal.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_signal.lua
 	$< tool/lua/test_signal.lua
 	@touch $@
@@ -205,6 +209,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_unix_proc.ok				\
 	o/$(MODE)/tool/lua/test_unix_errno.ok				\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
+	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
 	o/$(MODE)/tool/lua/test_shm.ok					\
 	o/$(MODE)/tool/lua/test_isatty.ok				\
