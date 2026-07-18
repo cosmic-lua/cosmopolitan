@@ -8,3 +8,4 @@
 /usr/share/terminfo/*/*      binary
 /usr/share/zoneinfo/*        binary
 /usr/share/zoneinfo/*/*      binary
+/third_party/sqlite3/**      merge=ours
