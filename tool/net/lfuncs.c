@@ -67,11 +67,18 @@
 #include "third_party/lua/lua.h"
 #include "third_party/lua/luaconf.h"
 #include "third_party/lua/lunix.h"
+#ifdef USE_MBEDTLS3
+#include "third_party/mbedtls3/include/mbedtls/md.h"
+#include "third_party/mbedtls3/include/mbedtls/md5.h"
+#include "third_party/mbedtls3/include/mbedtls/platform_util.h"
+#include "third_party/mbedtls3/include/mbedtls/sha256.h"
+#else
 #include "third_party/mbedtls/everest.h"
 #include "third_party/mbedtls/md.h"
 #include "third_party/mbedtls/md5.h"
 #include "third_party/mbedtls/platform.h"
 #include "third_party/mbedtls/sha256.h"
+#endif
 #include "third_party/musl/netdb.h"
 #include "third_party/zlib/zlib.h"
 
@@ -666,7 +673,7 @@ int LuaGetCryptoHash(lua_State *L) {
   }
   if (kl == 0) {
     // no key provided, run generic hash function
-    if ((digest->f_md)(p, pl, d)) {
+    if (mbedtls_md(digest, p, pl, d)) {
       mbedtls_platform_zeroize(d, sizeof(d));
       lua_pushnil(L);
       lua_pushliteral(L, "bad input data");
@@ -678,7 +685,7 @@ int LuaGetCryptoHash(lua_State *L) {
     lua_pushliteral(L, "bad input data");
     return 2;
   }
-  lua_pushlstring(L, (void *)d, digest->size);
+  lua_pushlstring(L, (void *)d, mbedtls_md_get_size(digest));
   mbedtls_platform_zeroize(d, sizeof(d));
   return 1;
 }
@@ -926,8 +933,18 @@ static dontinline int LuaHasher(lua_State *L, size_t k,
   return LuaHasherImpl(L, k, H);
 }
 
+#ifdef USE_MBEDTLS3
+static int Mbedtls3Sha256(const void *p, size_t n, uint8_t *d) {
+  return mbedtls_sha256(p, n, d, 0);
+}
+#endif
+
 int LuaSha256(lua_State *L) {
+#ifdef USE_MBEDTLS3
+  return LuaHasher(L, 32, Mbedtls3Sha256);
+#else
   return LuaHasher(L, 32, mbedtls_sha256_ret_256);
+#endif
 }
 
 void LuaPushUrlView(lua_State *L, struct UrlView *v) {

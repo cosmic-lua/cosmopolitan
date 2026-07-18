@@ -652,7 +652,8 @@ int LuaFetch(lua_State *L) {
   for (i = 0; i < requestlen; i += rc) {
 #ifndef UNSECURE
     if (usingssl) {
-      rc = mbedtls_ssl_write(&sslctx, request + i, requestlen - i);
+      rc = mbedtls_ssl_write(&sslctx, (const unsigned char *)request + i,
+                             requestlen - i);
       if (rc <= 0) {
         if (rc == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)
           goto VerifyFailed;
@@ -710,7 +711,7 @@ int LuaFetch(lua_State *L) {
     NOISEF("(ftch) client reading");
 #ifndef UNSECURE
     if (usingssl) {
-      if ((rc = mbedtls_ssl_read(&sslctx, inbuf.p + inbuf.n,
+      if ((rc = mbedtls_ssl_read(&sslctx, (unsigned char *)inbuf.p + inbuf.n,
                                  inbuf.c - inbuf.n)) < 0) {
         if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
           rc = 0;
@@ -1010,7 +1011,7 @@ VerifyFailed:
   LockInc(&shared->c.sslverifyfailed);
   {
     // Must capture verify_result before freeing SSL context
-    uint32_t verify_result = sslctx.session_negotiate->verify_result;
+    uint32_t verify_result = mbedtls_ssl_get_verify_result(&sslctx);
     mbedtls_ssl_free(&sslctx);
     close(sock);
     return LuaFetchTlsError(L, "tls", gc(DescribeSslVerifyFailure(verify_result)),
