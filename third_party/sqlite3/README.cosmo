@@ -5,19 +5,49 @@ DESCRIPTION
 
 ORIGIN
 
-    https://www.sqlite.org/2022/sqlite-preprocessed-3400000.zip
+    https://www.sqlite.org/2022/sqlite-amalgamation-3400000.zip
+    sha256 7c23eb51409315738c930a222cf7cd41518ae5823c41e60a81b93a07070ef22a
+
+    https://www.sqlite.org/2022/sqlite-src-3400000.zip
+    sha256 48550828142051293e179ffc6a8520f6fbfd82e1cdca78b93792f766cc89b8e2
+    (only ext/misc/zipfile.c, linked into the library for the lua
+    zipfile() binding)
+
+    version 3.40.0 (2022-11-16)
 
 LICENSE
 
     Public Domain or MIT
 
+VENDORING
+
+    the upstream two-file amalgamation (sqlite3.c + sqlite3.h) plus
+    shell.c is vendored verbatim, with mechanical include rewrites and
+    a numbered patch stack applied on top; run update.sh to bump the
+    version (it re-fetches, re-rewrites, and re-applies patches/).
+    sqlite3.shell.c recompiles the amalgamation with the shell's larger
+    feature define set. extensions.h is a handcrafted declaration for
+    the zipfile extension consumed by tool/net/lsqlite3.c.
+
 LOCAL CHANGES
 
-  - Added `/zip/.args` file support to SQLite shell
-  - See [jart] comments in os_unix.c regarding f2fs support
-  - Added `--strace` system call tracing flag to SQLite shell
-  - Added `--strace` function call logging flag to SQLite shell
-  - Configured fsync() using runtime magnums rather than ifdefs
-  - Added msync() call to unixSync() for FlushViewOfFile() call
-  - Modify preprocessor macro for enabling pread() and pwrite()
-  - Save and restore errno in some places to avoid log pollution
+    mechanical (update.sh):
+  - Rewrote includes of vendored deps (sqlite3.h, zlib, linenoise) to
+    full repo paths for the build's dependency scanner
+  - Replaced quoted includes of never-vendored files (windows sdk, tcl
+    test harness, autoconf config header) with #error
+
+    patches/0001 (sqlite3.c):
+  - Enabled pread()/pwrite() and mmap I/O under __COSMOPOLITAN__
+  - F2FS batch atomic writes use linux/f2fs.h magnums, runtime
+    IsLinux() dispatch, and the correct ABORT_ATOMIC_WRITE ioctl
+  - Use cosmo_mremap() for the portable mremap syscall pointer
+  - Use arc4random_buf() so randomness works without /dev/urandom
+  - Added msync() call to unixSync() for FlushViewOfFile() parity
+  - Save and restore errno in some places to avoid strace pollution
+
+    patches/0002 (shell.c):
+  - Added /zip/.args file support to SQLite shell for white labeling
+  - Load the symbol table when --strace is on so %t is symbolic
+  - Clear errno after sqliterc processing
+  - shell_stifle_history is a no-op (not in cosmo linenoise)

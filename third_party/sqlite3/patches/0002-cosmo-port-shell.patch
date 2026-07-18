@@ -1,0 +1,58 @@
+# cosmo port of the sqlite shell: /zip/.args support for white
+# labeling, symbolic %t strace logging, errno hygiene after sqliterc,
+# and a no-op shell_stifle_history since cosmo linenoise has no
+# linenoiseHistorySetMaxLen.
+diff --git a/third_party/sqlite3/shell.c b/third_party/sqlite3/shell.c
+index 53cf375b..1177c263 100644
+--- a/third_party/sqlite3/shell.c
++++ b/third_party/sqlite3/shell.c
+@@ -118,6 +118,9 @@ typedef unsigned short int u16;
+ #include <stdio.h>
+ #include <assert.h>
+ #include "third_party/sqlite3/sqlite3.h"
++#include "libc/cosmo.h"                     /* [jart] LoadZipArgs() */
++#include "libc/runtime/runtime.h"           /* [jart] __strace */
++#include "libc/runtime/symbols.internal.h"  /* [jart] GetSymbolTable() */
+ typedef sqlite3_int64 i64;
+ typedef sqlite3_uint64 u64;
+ typedef unsigned char u8;
+@@ -172,7 +175,7 @@ typedef unsigned char u8;
+ # define shell_add_history(X) linenoiseHistoryAdd(X)
+ # define shell_read_history(X) linenoiseHistoryLoad(X)
+ # define shell_write_history(X) linenoiseHistorySave(X)
+-# define shell_stifle_history(X) linenoiseHistorySetMaxLen(X)
++# define shell_stifle_history(X) /* [jart] not in cosmo linenoise */
+ # define shell_readline(X) linenoise(X)
+ 
+ #else
+@@ -18178,6 +18181,7 @@ static int expertFinish(
+ 
+       if( bVerbose ){
+         const char *zCand = sqlite3_expert_report(p,0,EXPERT_REPORT_CANDIDATES);
++        if( zCand==0 ) zCand = ""; /* [cosmo] gcc -Wformat-overflow */
+         raw_printf(out, "-- Candidates -----------------------------\n");
+         raw_printf(out, "%s\n", zCand);
+       }
+@@ -25694,6 +25698,7 @@ static void process_sqliterc(
+   p->in = inSaved;
+   p->lineno = savedLineno;
+   sqlite3_free(zBuf);
++  errno = 0; /* [jart] clear error */
+ }
+ 
+ /*
+@@ -25882,6 +25887,14 @@ int SQLITE_CDECL wmain(int argc, wchar_t **wargv){
+   int argcToFree = 0;
+ #endif
+ 
++  /* [jart] ensure %t symbols in strace log are symbolic */
++  if( __strace > 0 ){
++    GetSymbolTable();
++  }
++
++  /* [jart] support /zip/.args file for white labeling */
++  LoadZipArgs(&argc, &argv);
++
+   setBinaryMode(stdin, 0);
+   setvbuf(stderr, 0, _IONBF, 0); /* Make sure stderr is unbuffered */
+ #ifdef SQLITE_SHELL_FIDDLE
