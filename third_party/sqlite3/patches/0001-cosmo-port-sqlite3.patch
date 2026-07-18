@@ -3,11 +3,9 @@
 # arc4random_buf randomness, msync in unixSync, errno hygiene for
 # --strace logs. regenerate by diffing against the pristine rewritten
 # amalgamation (run update.sh with patches/ moved aside).
-diff --git a/third_party/sqlite3/sqlite3.c b/third_party/sqlite3/sqlite3.c
-index 584489db..3dc9fd16 100644
 --- a/third_party/sqlite3/sqlite3.c
 +++ b/third_party/sqlite3/sqlite3.c
-@@ -14497,7 +14497,8 @@ typedef INT16_TYPE LogEst;
+@@ -16133,7 +16133,8 @@
    || (defined(__APPLE__) && defined(__MACH__)) \
    || defined(__sun) \
    || defined(__FreeBSD__) \
@@ -17,16 +15,16 @@ index 584489db..3dc9fd16 100644
  #   define SQLITE_MAX_MMAP_SIZE 0x7fff0000  /* 2147418112 */
  # else
  #   define SQLITE_MAX_MMAP_SIZE 0
-@@ -36724,7 +36725,7 @@ SQLITE_PRIVATE int sqlite3KvvfsInit(void){
+@@ -40269,7 +40270,7 @@
  #endif
  
  /* Use pread() and pwrite() if they are available */
--#if defined(__APPLE__)
-+#if defined(__APPLE__) || defined(__COSMOPOLITAN__) /* [jart] */
+-#if defined(__APPLE__) || defined(__linux__)
++#if defined(__APPLE__) || defined(__linux__) || defined(__COSMOPOLITAN__) /* [jart] */
  # define HAVE_PREAD 1
  # define HAVE_PWRITE 1
  #endif
-@@ -36747,6 +36748,10 @@ SQLITE_PRIVATE int sqlite3KvvfsInit(void){
+@@ -40292,6 +40293,10 @@
  /* #include <time.h> */
  #include <sys/time.h>    /* amalgamator: keep */
  #include <errno.h>
@@ -34,10 +32,10 @@ index 584489db..3dc9fd16 100644
 +#include "libc/dce.h"                /* [jart] IsLinux() runtime os detection */
 +#include "libc/runtime/runtime.h"    /* [jart] cosmo_mremap() */
 +#include "libc/bsdstdlib.h"          /* [jart] arc4random_buf() */
- #if !defined(SQLITE_OMIT_WAL) || SQLITE_MAX_MMAP_SIZE>0
+ #if (!defined(SQLITE_OMIT_WAL) || SQLITE_MAX_MMAP_SIZE>0) \
+   && !defined(SQLITE_WASI)
  # include <sys/mman.h>
- #endif
-@@ -36997,18 +37002,8 @@ static pid_t randomnessPid = 0;
+@@ -40581,18 +40586,8 @@
  # define lseek lseek64
  #endif
  
@@ -57,7 +55,7 @@ index 584489db..3dc9fd16 100644
  
  
  /*
-@@ -37160,7 +37155,7 @@ static struct unix_syscall {
+@@ -40751,7 +40746,7 @@
  #define osMunmap ((int(*)(void*,size_t))aSyscall[23].pCurrent)
  
  #if HAVE_MREMAP && (!defined(SQLITE_OMIT_WAL) || SQLITE_MAX_MMAP_SIZE>0)
@@ -66,7 +64,7 @@ index 584489db..3dc9fd16 100644
  #else
    { "mremap",       (sqlite3_syscall_ptr)0,               0 },
  #endif
-@@ -37187,7 +37182,7 @@ static struct unix_syscall {
+@@ -40778,7 +40773,7 @@
  #endif
  #define osLstat      ((int(*)(const char*,struct stat*))aSyscall[27].pCurrent)
  
@@ -75,7 +73,7 @@ index 584489db..3dc9fd16 100644
  # ifdef __ANDROID__
    { "ioctl", (sqlite3_syscall_ptr)(int(*)(int, int, ...))ioctl, 0 },
  #define osIoctl ((int(*)(int,int,...))aSyscall[28].pCurrent)
-@@ -40401,6 +40396,24 @@ static int unixSync(sqlite3_file *id, int flags){
+@@ -44122,6 +44117,24 @@
    */
    SimulateDiskfullError( return SQLITE_FULL );
  
@@ -100,7 +98,7 @@ index 584489db..3dc9fd16 100644
    assert( pFile );
    OSTRACE(("SYNC    %-3d\n", pFile->h));
    rc = full_fsync(pFile->h, isFullsync, isDataOnly);
-@@ -40613,20 +40626,27 @@ static int unixGetTempname(int nBuf, char *zBuf);
+@@ -44338,20 +44351,27 @@
  static int unixFileControl(sqlite3_file *id, int op, void *pArg){
    unixFile *pFile = (unixFile*)id;
    switch( op ){
@@ -131,25 +129,26 @@ index 584489db..3dc9fd16 100644
 -#endif /* __linux__ && SQLITE_ENABLE_BATCH_ATOMIC_WRITE */
 +#endif /* SQLITE_ENABLE_BATCH_ATOMIC_WRITE */
  
-     case SQLITE_FCNTL_LOCKSTATE: {
-       *(int*)pArg = pFile->eFileLock;
-@@ -40748,16 +40768,19 @@ static int unixFileControl(sqlite3_file *id, int op, void *pArg){
+     case SQLITE_FCNTL_NULL_IO: {
+       osClose(pFile->h);
+@@ -44550,16 +44570,19 @@
  static void setDeviceCharacteristics(unixFile *pFd){
    assert( pFd->deviceCharacteristics==0 || pFd->sectorSize!=0 );
    if( pFd->sectorSize==0 ){
 -#if defined(__linux__) && defined(SQLITE_ENABLE_BATCH_ATOMIC_WRITE)
 -    int res;
 -    u32 f = 0;
+-
+-    /* Check for support for F2FS atomic batch writes. */
+-    res = osIoctl(pFd->h, F2FS_IOC_GET_FEATURES, &f);
+-    if( res==0 && (f & F2FS_FEATURE_ATOMIC_WRITE) ){
+-      pFd->deviceCharacteristics = SQLITE_IOCAP_BATCH_ATOMIC;
 +#if defined(SQLITE_ENABLE_BATCH_ATOMIC_WRITE)
 +    /* [jart] important modifications here for runtime dispatching */
 +    if( IsLinux() ){
 +      int res;
 +      u32 f = 0;
- 
--    /* Check for support for F2FS atomic batch writes. */
--    res = osIoctl(pFd->h, F2FS_IOC_GET_FEATURES, &f);
--    if( res==0 && (f & F2FS_FEATURE_ATOMIC_WRITE) ){
--      pFd->deviceCharacteristics = SQLITE_IOCAP_BATCH_ATOMIC;
++
 +      /* Check for support for F2FS atomic batch writes. */
 +      res = osIoctl(pFd->h, F2FS_IOC_GET_FEATURES, &f);
 +      if( res==0 && (f & F2FS_FEATURE_ATOMIC_WRITE) ){
@@ -161,7 +160,7 @@ index 584489db..3dc9fd16 100644
  
      /* Set the POWERSAFE_OVERWRITE flag if requested. */
      if( pFd->ctrlFlags & UNIXFILE_PSOW ){
-@@ -42508,6 +42531,7 @@ static int unixGetTempname(int nBuf, char *zBuf){
+@@ -46508,6 +46531,7 @@
    const char *zDir;
    int iLimit = 0;
    int rc = SQLITE_OK;
@@ -169,7 +168,7 @@ index 584489db..3dc9fd16 100644
  
    /* It's odd to simulate an io-error here, but really this is just
    ** using the io-error infrastructure to test that SQLite handles this
-@@ -42535,6 +42559,7 @@ static int unixGetTempname(int nBuf, char *zBuf){
+@@ -46535,6 +46559,7 @@
      }while( osAccess(zBuf,0)==0 );
    }
    sqlite3_mutex_leave(sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_TEMPDIR));
@@ -177,7 +176,7 @@ index 584489db..3dc9fd16 100644
    return rc;
  }
  
-@@ -43075,8 +43100,10 @@ static int unixAccess(
+@@ -47091,8 +47116,10 @@
  
    if( flags==SQLITE_ACCESS_EXISTS ){
      struct stat buf;
@@ -188,7 +187,7 @@ index 584489db..3dc9fd16 100644
    }else{
      *pResOut = osAccess(zPath, W_OK|R_OK)==0;
    }
-@@ -43299,21 +43326,8 @@ static int unixRandomness(sqlite3_vfs *NotUsed, int nBuf, char *zBuf){
+@@ -47313,21 +47340,8 @@
    memset(zBuf, 0, nBuf);
    randomnessPid = osGetpid(0);
  #if !defined(SQLITE_TEST) && !defined(SQLITE_OMIT_RANDOMNESS)
@@ -212,11 +211,3 @@ index 584489db..3dc9fd16 100644
  #endif
    return nBuf;
  }
-@@ -215326,6 +215340,7 @@ static int sessionPreupdateEqual(
-         rc = pSession->hook.xOld(pSession->hook.pCtx, iCol, &pVal);
-       }
-       assert( rc==SQLITE_OK );
-+      (void)rc; /* [jart] rc is only used by the assert under NDEBUG */
-       if( sqlite3_value_type(pVal)!=eType ) return 0;
- 
-       /* A SessionChange object never has a NULL value in a PK column */

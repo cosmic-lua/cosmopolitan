@@ -5,15 +5,15 @@ DESCRIPTION
 
 ORIGIN
 
-    https://www.sqlite.org/2022/sqlite-amalgamation-3400000.zip
-    sha256 7c23eb51409315738c930a222cf7cd41518ae5823c41e60a81b93a07070ef22a
+    https://www.sqlite.org/2026/sqlite-amalgamation-3530300.zip
+    sha256 646421e12aac110282ef8cc68f1a62d4bb15fc7b8f09da0b53e29ee690500431
 
-    https://www.sqlite.org/2022/sqlite-src-3400000.zip
-    sha256 48550828142051293e179ffc6a8520f6fbfd82e1cdca78b93792f766cc89b8e2
+    https://www.sqlite.org/2026/sqlite-src-3530300.zip
+    sha256 bb80bf8a3bffc19241ce8aba5a4bc74e9c3980013cb0b5f0f0976a99516942af
     (only ext/misc/zipfile.c, linked into the library for the lua
     zipfile() binding)
 
-    version 3.40.0 (2022-11-16)
+    version 3.53.3 (2026-06-26)
 
 LICENSE
 
