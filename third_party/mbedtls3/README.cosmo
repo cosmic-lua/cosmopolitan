@@ -1,0 +1,54 @@
+DESCRIPTION
+
+  Mbed TLS 3.6 LTS is the currently supported upstream branch of the
+  Mbed TLS cryptography and TLS library. This package vendors it
+  PRISTINE (no source modifications) so that point-release updates
+  are mechanical.
+
+  It exists alongside third_party/mbedtls, which is the heavily
+  modified 2.26.0 fork inherited from jart/cosmopolitan and still
+  used by redbean. The two packages must NEVER be linked into the
+  same binary: they define the same mbedtls_* symbols with different
+  struct layouts. THIRD_PARTY_MBEDTLS3 is consumed via NET_HTTPS3;
+  the lua binary is being cut over to it while redbean stays on
+  THIRD_PARTY_MBEDTLS.
+
+ORIGIN
+
+  https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-3.6.6
+
+  obtained as Debian's unmodified orig tarball (GitHub artifact
+  downloads are unavailable in some build environments):
+
+  https://deb.debian.org/debian/pool/main/m/mbedtls/mbedtls_3.6.6.orig.tar.bz2
+  sha256: 8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a
+
+  vendored subset: library/, include/, LICENSE. Tests, programs,
+  docs, cmake, and 3rdparty/ (everest, p256-m — disabled in the
+  default config) are omitted.
+
+LICENSE
+
+  Apache-2.0 OR GPL-2.0-or-later (we use it under Apache-2.0)
+
+LOCAL CHANGES
+
+  No semantic changes. update.sh applies two mechanical transforms
+  that the hermetic build requires (see the script for the exact sed
+  expressions):
+
+  - include paths are rewritten to full repo paths so that the
+    dependency scanner (build/bootstrap/mkdeps) can resolve them
+  - three includes of un-vendored 3rdparty/test code (everest,
+    p256-m, psa test drivers -- all disabled in the default config)
+    are replaced with #error directives
+
+  The default config (include/mbedtls/mbedtls_config.h) is used
+  unmodified. Any future deviation must be checked into patches/ as
+  a numbered patch and applied by update.sh so that version bumps
+  stay mechanical.
+
+UPDATING
+
+  run third_party/mbedtls3/update.sh <version>, then rebuild and run
+  make o//test/net/https3 and make o//tool/lua/test.

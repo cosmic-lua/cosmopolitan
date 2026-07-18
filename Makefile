@@ -296,6 +296,7 @@ include dsp/audio/BUILD.mk			# │
 include dsp/BUILD.mk				# │
 include third_party/stb/BUILD.mk		# │
 include third_party/mbedtls/BUILD.mk		# │
+include third_party/mbedtls3/BUILD.mk		# │
 include third_party/ncurses/BUILD.mk		# │
 include third_party/readline/BUILD.mk		# │
 include third_party/libcxxabi/BUILD.mk		# |
@@ -307,7 +308,8 @@ include third_party/libcxx/BUILD.mk		# │
 include third_party/openmp/BUILD.mk		# │
 include third_party/pcre/BUILD.mk		# │
 include third_party/less/BUILD.mk		# │
-include net/https/BUILD.mk			#─┘
+include net/https/BUILD.mk			# │
+include net/https3/BUILD.mk			#─┘
 include third_party/tidy/BUILD.mk
 include third_party/BUILD.mk
 include third_party/nsync/testing/BUILD.mk
@@ -387,6 +389,7 @@ include test/libc/system/BUILD.mk
 include test/libc/BUILD.mk
 include test/net/http/BUILD.mk
 include test/net/https/BUILD.mk
+include test/net/https3/BUILD.mk
 include test/net/finger/BUILD.mk
 include test/net/BUILD.mk
 include test/tool/build/lib/BUILD.mk
