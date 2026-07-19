@@ -64,21 +64,43 @@ arg = nil
 --- `net/http/getipcategoryname.c` tests them.
 ---@alias cosmo.IpCategory "MULTICAST"|"LOOPBACK"|"PRIVATE"|"TESTNET"|"AFRINIC"|"LACNIC"|"APNIC"|"ARIN"|"RIPE"|"DOD"|"AT&T"|"APPLE"|"FORD"|"COGENT"|"PRUDENTIAL"|"USPS"|"COMCAST"|"FUTURE"|"ANONYMOUS"
 
+--- The only accepted `nan` mode in `EncodeJson` options: serialize NaN
+--- and Infinity as `null` (the v8 behavior) instead of failing.
+---@alias cosmo.JsonNanMode "null"
+
+--- Framing of a compressed stream produced by `Deflate`.
+---@alias cosmo.CompressFormat "raw"|"zlib"|"gzip"
+
+--- Framing accepted by `Inflate`; `"auto"` detects zlib or gzip framing
+--- from the stream header (but cannot detect `"raw"`).
+---@alias cosmo.UncompressFormat "raw"|"zlib"|"gzip"|"auto"
+
+--- Hash function names accepted by `GetCryptoHash`, exactly the set
+--- `tool/lua/test_crypto_hash.lua` verifies against the C.
+---@alias cosmo.CryptoHashName "MD5"|"SHA1"|"SHA224"|"SHA256"|"SHA384"|"SHA512"|"BLAKE2B256"
+
+--- Host instruction set architecture names returned by `GetHostIsa`.
+---@alias cosmo.HostIsa "X86_64"|"AARCH64"|"POWERPC64"|"S390X"
+
+--- Host OS names returned by `GetHostOs` (nil when unrecognized stays at
+--- the call site's return annotation).
+---@alias cosmo.HostOs "LINUX"|"METAL"|"WINDOWS"|"XNU"|"NETBSD"|"FREEBSD"|"OPENBSD"
+
 ---@class cosmo.EncoderOptions
 ---@field useoutput boolean? defaults to `false`. Encodes the result directly to the output buffer and returns `nil` value. This option is ignored if used outside of request handling code.
 ---@field sorted boolean? defaults to `true`. Lua uses hash tables so the order of object keys is lost in a Lua table. So, by default, we use strcmp to impose a deterministic output order. If you don't care about ordering then setting sorted=false should yield a performance boost in serialization.
 ---@field pretty boolean? defaults to `false`. Setting this option to true will cause tables with more than one entry to be formatted across multiple lines for readability.
 ---@field indent string? defaults to " ". This option controls the indentation of pretty formatting. This field is ignored if pretty isn't true.
 ---@field maxdepth integer? defaults to 64. This option controls the maximum amount of recursion the serializer is allowed to perform. The max is 32767. You might not be able to set it that high if there isn't enough C stack memory. Your serializer checks for this and will return an error rather than crashing.
----@field nan "null"? `EncodeJson` only: encode NaN and Infinity as `null` (the v8 behavior) instead of failing with `nil, error`.
+---@field nan cosmo.JsonNanMode? `EncodeJson` only: encode NaN and Infinity as `null` (the v8 behavior) instead of failing with `nil, error`.
 
 ---@class cosmo.DeflateOptions
 ---@field level integer? compression level `-1`..`9`; defaults to `-1`, the zlib default (currently 6). `0` stores without compressing; higher levels are slower but compress better.
----@field format "raw"|"zlib"|"gzip"? framing of the compressed stream; defaults to `"raw"` (headerless DEFLATE, as used inside ZIP files).
+---@field format cosmo.CompressFormat? framing of the compressed stream; defaults to `"raw"` (headerless DEFLATE, as used inside ZIP files).
 
 ---@class cosmo.InflateOptions
 ---@field maxsize integer? cap on the decompressed size in bytes; defaults to 64 MiB. Decompression streams into a growing buffer and fails with `nil, error` once the cap is exceeded, so no attacker-controlled length is ever trusted as an allocation size.
----@field format "raw"|"zlib"|"gzip"|"auto"? framing of the compressed stream; defaults to `"raw"`. `"auto"` detects zlib or gzip framing from the stream header (but cannot detect `"raw"`).
+---@field format cosmo.UncompressFormat? framing of the compressed stream; defaults to `"raw"`. `"auto"` detects zlib or gzip framing from the stream header (but cannot detect `"raw"`).
 
 ---@class cosmo.FetchOptions
 ---@field headers table<string,string>? request headers to send.
@@ -2478,7 +2500,7 @@ function cosmo.FormatHttpDateTime(seconds) end
 ---@nodiscard
 function cosmo.FormatIp(uint32) end
 
----@param name "MD5"|"SHA1"|"SHA224"|"SHA256"|"SHA384"|"SHA512"|"BLAKE2B256"
+---@param name cosmo.CryptoHashName
 ---@param payload string
 ---@param key string? If the key is provided, then HMAC value of the same function is returned.
 ---@return string|nil # value of the specified cryptographic hash function.
@@ -2494,11 +2516,11 @@ function cosmo.GetCryptoHash(name, payload, key) end
 --- - `"AARCH64"` for ARM64, M1, and Raspberry Pi systems
 --- - `"POWERPC64"` for OpenPOWER Raptor Computing Systems
 --- - `"S390X"` for IBM System/390 systems
----@return "X86_64"|"AARCH64"|"POWERPC64"|"S390X"
+---@return cosmo.HostIsa
 ---@nodiscard
 function cosmo.GetHostIsa() end
 
----@return "LINUX"|"METAL"|"WINDOWS"|"XNU"|"NETBSD"|"FREEBSD"|"OPENBSD"|nil osname string that describes the host OS, or nil if the host OS is unrecognized.
+---@return cosmo.HostOs|nil osname string that describes the host OS, or nil if the host OS is unrecognized.
 ---@nodiscard
 function cosmo.GetHostOs() end
 
