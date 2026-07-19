@@ -2795,11 +2795,20 @@ function cosmo.Rand64() end
 --- If no IP address could be found, then `nil` is returned alongside a string of
 --- unspecified format describing the error. Calls to this function may be wrapped
 --- in `assert()` if an exception is desired.
+---
+--- When `timeout_ms` is given and non-negative, the DNS lookup is bounded:
+--- past the deadline `nil` is returned with a "DNS lookup timed out" error
+--- instead of blocking for the resolver's full internal budget. The lookup
+--- runs on a disowned worker thread past the deadline, so a slow resolver
+--- costs a bounded background thread, never the caller's time. Literal IP
+--- inputs parse immediately and never wait. Omit `timeout_ms` (or pass a
+--- negative value) for the unbounded blocking behavior.
 ---@param hostname string
+---@param timeout_ms? integer
 ---@return uint32|nil ip uint32
 ---@return string? error
 ---@nodiscard
-function cosmo.ResolveIp(hostname) end
+function cosmo.ResolveIp(hostname, timeout_ms) end
 
 --- Computes SHA256 checksum, returning 32 bytes of binary.
 ---@param str string
@@ -5708,6 +5717,27 @@ function unix.bind(fd, ip, port) end
 ---@return unix.Errno? errno
 ---@nodiscard
 function unix.siocgifconf() end
+
+--- Reads the IFF_* flag bitmask of the named network interface
+--- (SIOCGIFFLAGS). The `struct ifreq` ABI lives in C, so callers pass
+--- the interface name instead of hand-packing kernel structs.
+---@param ifname string interface name, e.g. `"lo"` (max 15 bytes)
+---@return integer|nil flags IFF_* bitmask
+---@return string? error
+---@return unix.Errno? errno
+---@nodiscard
+function unix.siocgifflags(ifname) end
+
+--- Writes the IFF_* flag bitmask of the named network interface
+--- (SIOCSIFFLAGS). Typically requires privilege (or a user namespace
+--- that grants it, e.g. for bringing loopback up in a fresh netns).
+--- Read-modify-write with `unix.siocgifflags` to change single bits.
+---@param ifname string interface name, e.g. `"lo"` (max 15 bytes)
+---@param flags integer IFF_* bitmask to write
+---@return true|nil
+---@return string? error
+---@return unix.Errno? errno
+function unix.siocsifflags(ifname, flags) end
 
 --- Tunes networking parameters.
 ---

@@ -2121,6 +2121,58 @@ static int LuaUnixSiocgifconf(lua_State *L) {
   return 1;
 }
 
+// Shared plumbing for the SIOCGIFFLAGS/SIOCSIFFLAGS ifreq ioctls: puts
+// the struct ifreq ABI layout in C so Lua callers pass interface names
+// and flag integers instead of hand-packing kernel structs.
+static int LuaUnixIfreqFlagsIoctl(lua_State *L, const char *call,
+                                  unsigned long request, struct ifreq *ifr) {
+  size_t len;
+  const char *name;
+  int rc, fd, olderr = errno;
+  name = luaL_checklstring(L, 1, &len);
+  if (len >= IFNAMSIZ) {
+    einval();
+    return LuaUnixSysretErrno(L, call, olderr);
+  }
+  memcpy(ifr->ifr_name, name, len);
+  if ((fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_IP)) == -1) {
+    return LuaUnixSysretErrno(L, call, olderr);
+  }
+  rc = ioctl(fd, request, ifr);
+  close(fd);
+  if (rc == -1) {
+    return LuaUnixSysretErrno(L, call, olderr);
+  }
+  return 0;
+}
+
+// unix.siocgifflags(ifname:str)
+//     ├─→ flags:int
+//     └─→ nil, error:str, errno:int
+static int LuaUnixSiocgifflags(lua_State *L) {
+  int rc;
+  struct ifreq ifr = {0};
+  if ((rc = LuaUnixIfreqFlagsIoctl(L, "siocgifflags", SIOCGIFFLAGS, &ifr))) {
+    return rc;
+  }
+  lua_pushinteger(L, (uint16_t)ifr.ifr_flags);
+  return 1;
+}
+
+// unix.siocsifflags(ifname:str, flags:int)
+//     ├─→ true
+//     └─→ nil, error:str, errno:int
+static int LuaUnixSiocsifflags(lua_State *L) {
+  int rc;
+  struct ifreq ifr = {0};
+  ifr.ifr_flags = (uint16_t)luaL_checkinteger(L, 2);
+  if ((rc = LuaUnixIfreqFlagsIoctl(L, "siocsifflags", SIOCSIFFLAGS, &ifr))) {
+    return rc;
+  }
+  lua_pushboolean(L, true);
+  return 1;
+}
+
 // sandbox.pledge([promises:str[, execpromises:str[, mode:int]]])
 //     ├─→ true
 //     └─→ nil, error:str, errno:int
@@ -4270,6 +4322,8 @@ static const luaL_Reg kLuaUnix[] = {
     {"sigprocmask", LuaUnixSigprocmask},  // change signal mask
     {"sigsuspend", LuaUnixSigsuspend},    // wait for signal
     {"siocgifconf", LuaUnixSiocgifconf},  // get list of network interfaces
+    {"siocgifflags", LuaUnixSiocgifflags},  // get IFF_* flags of interface
+    {"siocsifflags", LuaUnixSiocsifflags},  // set IFF_* flags of interface
     {"socket", LuaUnixSocket},            // create network communication fd
     {"socketpair", LuaUnixSocketpair},    // create bidirectional pipe
     {"spawn", LuaUnixSpawn},              // spawn process

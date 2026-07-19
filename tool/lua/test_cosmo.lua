@@ -98,4 +98,26 @@ assert(db.error_message == nil, "db:error_message alias should be removed")
 assert(db.create_session == nil, "db:create_session (session surface) removed")
 db:close()
 
+-- cosmo.ResolveIp: literal IPs parse immediately, with or without the
+-- optional timeout_ms bound. (The bounded path returning "DNS lookup
+-- timed out" at the deadline was verified against a genuinely
+-- tarpitted nameserver during development; a hermetic in-suite tarpit
+-- would need to own /etc/resolv.conf, which a test must not.)
+assert(cosmo.ResolveIp("127.0.0.1") == 0x7f000001, "literal, unbounded")
+assert(cosmo.ResolveIp("1.2.3.4", 100) == 0x01020304, "literal, bounded")
+assert(cosmo.ResolveIp("255.255.255.255", 0) == 0xffffffff,
+       "literal never waits, even with a zero deadline")
+
+-- localhost resolves through the hosts file on the bounded (worker
+-- thread) path.
+assert(cosmo.ResolveIp("localhost", 30000) == 0x7f000001,
+       "localhost via hosts file on the bounded path")
+
+-- A bounded lookup of an unresolvable name returns nil plus a string
+-- error: the resolver's own failure or "DNS lookup timed out",
+-- whichever the host's DNS environment produces first.
+local rip, rerr = cosmo.ResolveIp("cosmo-test-name.invalid", 2000)
+assert(rip == nil, "unresolvable name should fail")
+assert(type(rerr) == "string", "failure should carry a string error")
+
 print("all tests passed")
