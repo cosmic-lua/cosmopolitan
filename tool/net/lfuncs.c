@@ -56,6 +56,7 @@
 #include "libc/sysv/consts/rusage.h"
 #include "libc/sysv/consts/sock.h"
 #include "libc/thread/thread.h"
+#include "libc/thread/thread2.h"
 #include "libc/time.h"
 #include "libc/x/x.h"
 #include "net/http/escape.h"
@@ -491,17 +492,142 @@ int LuaBarf(lua_State *L) {
   return 1;
 }
 
+// State shared between LuaResolveIp and its worker thread when a
+// timeout is requested. Exactly one side frees the job: the waiter if
+// the worker finished in time, else the worker finds `abandoned` set
+// and cleans up after itself when the (internally bounded) lookup
+// eventually returns.
+struct ResolveIpJob {
+  pthread_mutex_t mu;
+  pthread_cond_t cv;
+  bool done;
+  bool abandoned;
+  int rc;
+  uint32_t ip;
+  char *host;
+};
+
+static void FreeResolveIpJob(struct ResolveIpJob *job) {
+  pthread_mutex_destroy(&job->mu);
+  pthread_cond_destroy(&job->cv);
+  free(job->host);
+  free(job);
+}
+
+static void *ResolveIpWorker(void *arg) {
+  int rc;
+  uint32_t ip = 0;
+  struct addrinfo *ai = NULL;
+  struct ResolveIpJob *job = arg;
+  struct addrinfo hint = {AI_NUMERICSERV, AF_INET, SOCK_STREAM, IPPROTO_TCP};
+  rc = getaddrinfo(job->host, "0", &hint, &ai);
+  if (rc == 0) {
+    ip = ntohl(((struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr);
+    freeaddrinfo(ai);
+  }
+  pthread_mutex_lock(&job->mu);
+  if (job->abandoned) {
+    pthread_mutex_unlock(&job->mu);
+    FreeResolveIpJob(job);
+    return 0;
+  }
+  job->rc = rc;
+  job->ip = ip;
+  job->done = true;
+  pthread_cond_signal(&job->cv);
+  pthread_mutex_unlock(&job->mu);
+  return 0;
+}
+
+static int LuaResolveIpResult(lua_State *L, const char *host, int rc,
+                              uint32_t ip) {
+  if (rc == 0) {
+    lua_pushinteger(L, ip);
+    return 1;
+  }
+  lua_pushnil(L);
+  lua_pushfstring(L, "%s: DNS lookup failed: EAI_%s", host, gai_strerror(rc));
+  return 2;
+}
+
+// Bounded resolve: getaddrinfo offers no deadline parameter, so the
+// lookup runs on a detached thread and the caller waits at most
+// timeout_ms on a monotonic-clock condvar. On timeout the worker is
+// disowned (the resolver's own resolv.conf budget bounds its lifetime)
+// so a tarpitting DNS server cannot wedge the caller.
+static int LuaResolveIpTimeout(lua_State *L, const char *host,
+                               lua_Integer timeout_ms) {
+  int rc;
+  uint32_t ip;
+  pthread_t th;
+  pthread_attr_t attr;
+  pthread_condattr_t cattr;
+  struct timespec deadline;
+  struct ResolveIpJob *job;
+  if (!(job = calloc(1, sizeof(*job))) || !(job->host = strdup(host))) {
+    free(job);
+    lua_pushnil(L);
+    lua_pushfstring(L, "%s: DNS lookup failed: out of memory", host);
+    return 2;
+  }
+  pthread_mutex_init(&job->mu, 0);
+  pthread_condattr_init(&cattr);
+  pthread_condattr_setclock(&cattr, CLOCK_MONOTONIC);
+  pthread_cond_init(&job->cv, &cattr);
+  pthread_condattr_destroy(&cattr);
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  rc = pthread_create(&th, &attr, ResolveIpWorker, job);
+  pthread_attr_destroy(&attr);
+  if (rc) {
+    FreeResolveIpJob(job);
+    lua_pushnil(L);
+    lua_pushfstring(L, "%s: DNS lookup failed: thread create: %s", host,
+                    strerror(rc));
+    return 2;
+  }
+  clock_gettime(CLOCK_MONOTONIC, &deadline);
+  deadline.tv_sec += timeout_ms / 1000;
+  deadline.tv_nsec += (timeout_ms % 1000) * 1000000;
+  if (deadline.tv_nsec >= 1000000000) {
+    deadline.tv_sec += 1;
+    deadline.tv_nsec -= 1000000000;
+  }
+  pthread_mutex_lock(&job->mu);
+  while (!job->done) {
+    if (pthread_cond_timedwait(&job->cv, &job->mu, &deadline) == ETIMEDOUT &&
+        !job->done) {
+      job->abandoned = true;
+      pthread_mutex_unlock(&job->mu);
+      lua_pushnil(L);
+      lua_pushfstring(L, "%s: DNS lookup timed out", host);
+      return 2;
+    }
+  }
+  rc = job->rc;
+  ip = job->ip;
+  pthread_mutex_unlock(&job->mu);
+  FreeResolveIpJob(job);
+  return LuaResolveIpResult(L, host, rc, ip);
+}
+
 int LuaResolveIp(lua_State *L) {
   ssize_t rc;
   int64_t ip;
   const char *host;
+  lua_Integer timeout_ms;
   struct addrinfo *ai = NULL;
   struct addrinfo hint = {AI_NUMERICSERV, AF_INET, SOCK_STREAM, IPPROTO_TCP};
   host = luaL_checkstring(L, 1);
+  timeout_ms = luaL_optinteger(L, 2, -1);
   if ((ip = ParseIp(host, -1)) != -1) {
     lua_pushinteger(L, ip);
     return 1;
-  } else if ((rc = getaddrinfo(host, "0", &hint, &ai)) == 0) {
+  }
+  if (timeout_ms >= 0) {
+    return LuaResolveIpTimeout(L, host, timeout_ms);
+  }
+  if ((rc = getaddrinfo(host, "0", &hint, &ai)) == 0) {
     lua_pushinteger(
         L, ntohl(((struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr));
     freeaddrinfo(ai);
