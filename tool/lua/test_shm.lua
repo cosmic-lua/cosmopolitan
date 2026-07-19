@@ -49,4 +49,22 @@ local rc, e = m:wait(0, 12345)  -- 0 != 12345, so this never blocks
 assert(rc == 0 or (rc == nil and e ~= nil),
   "an int32 word that differs from expect must not error the guard path")
 
+
+-- unmap: deterministic release instead of waiting on the GC (filed from
+-- cosmic #493). Idempotent; every other method on an unmapped object
+-- must raise instead of touching freed memory (the process-shared lock
+-- lives inside the mapping, so a stale access would use a freed mutex).
+local u = assert(unix.mapshared(64))
+u:store(0, 7)
+assert(u:load(0) == 7)
+assert(u:unmap() == true, "first unmap releases the mapping")
+assert(u:unmap() == false, "second unmap is a no-op and says so")
+assert(not pcall(function() return u:load(0) end), "load after unmap must error")
+assert(not pcall(function() return u:store(0, 1) end), "store after unmap must error")
+assert(not pcall(function() return u:read(0, 8) end), "read after unmap must error")
+assert(not pcall(function() return u:write(0, "x") end), "write after unmap must error")
+assert(not pcall(function() return u:wait(0, 0) end), "wait after unmap must error")
+assert(not pcall(function() return u:wake(0) end), "wake after unmap must error")
+assert(tostring(u):find("unix.Memory", 1, true), "tostring stays safe after unmap")
+
 print("PASS")

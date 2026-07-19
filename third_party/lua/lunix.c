@@ -3489,6 +3489,19 @@ struct Memory {
   pthread_mutex_t *lock;
 };
 
+// Fetches the userdata and refuses an already-unmapped region, so no
+// method can touch freed memory — or the process-shared lock, which
+// lives inside the mapping — after an explicit :unmap().
+static struct Memory *GetMemory(lua_State *L) {
+  struct Memory *m;
+  m = luaL_checkudata(L, 1, "unix.Memory");
+  if (!m->u.bytes) {
+    luaL_error(L, "unix.Memory already unmapped");
+    __builtin_unreachable();
+  }
+  return m;
+}
+
 // unix.Memory:read([offset:int[, bytes:int]])
 //     └─→ str
 static int LuaUnixMemoryRead(lua_State *L) {
@@ -3496,7 +3509,7 @@ static int LuaUnixMemoryRead(lua_State *L) {
   size_t i, n;
   luaL_Buffer buf;
   struct Memory *m;
-  m = luaL_checkudata(L, 1, "unix.Memory");
+  m = GetMemory(L);
   i = luaL_optinteger(L, 2, 0);
   if (lua_isnoneornil(L, 3)) {
     // unix.Memory:read([offset:int])
@@ -3536,7 +3549,7 @@ static int LuaUnixMemoryWrite(lua_State *L) {
   const char *s;
   size_t i, n, j;
   struct Memory *m;
-  m = luaL_checkudata(L, 1, "unix.Memory");
+  m = GetMemory(L);
   if (!lua_isnumber(L, 2)) {
     // unix.Memory:write(data:str[, bytes:int])
     i = 0;
@@ -3587,7 +3600,7 @@ static int LuaUnixMemoryWrite(lua_State *L) {
 static atomic_long *GetWord(lua_State *L) {
   size_t i;
   struct Memory *m;
-  m = luaL_checkudata(L, 1, "unix.Memory");
+  m = GetMemory(L);
   i = luaL_checkinteger(L, 2);
   if (i >= m->size / sizeof(*m->u.words)) {
     luaL_error(L, "out of range");
@@ -3729,6 +3742,27 @@ static int LuaUnixMemoryGc(lua_State *L) {
   return 0;
 }
 
+// unix.Memory:unmap()
+//     └─→ unmapped:bool
+//
+// Releases the mapping now instead of waiting for the garbage
+// collector. Idempotent: returns true when this call released the
+// mapping, false when it was already unmapped. After unmap, every
+// other method on this object raises an error (see GetMemory) rather
+// than touching freed memory.
+static int LuaUnixMemoryUnmap(lua_State *L) {
+  struct Memory *m;
+  m = luaL_checkudata(L, 1, "unix.Memory");
+  if (m->u.bytes) {
+    npassert(!munmap(m->map, m->mapsize));
+    m->u.bytes = 0;
+    lua_pushboolean(L, true);
+  } else {
+    lua_pushboolean(L, false);
+  }
+  return 1;
+}
+
 static const luaL_Reg kLuaUnixMemoryMeth[] = {
     {"read", LuaUnixMemoryRead},        //
     {"write", LuaUnixMemoryWrite},      //
@@ -3742,6 +3776,7 @@ static const luaL_Reg kLuaUnixMemoryMeth[] = {
     {"fetch_xor", LuaUnixMemoryXor},    //
     {"wait", LuaUnixMemoryWait},        //
     {"wake", LuaUnixMemoryWake},        //
+    {"unmap", LuaUnixMemoryUnmap},      //
     {0},                                //
 };
 
