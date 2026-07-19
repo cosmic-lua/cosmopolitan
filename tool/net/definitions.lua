@@ -7350,6 +7350,7 @@ function unix.Memory:wake(index, count) end
 --- for the garbage collector to do it. Idempotent: repeat calls are
 --- no-ops. After unmap, calling any other method on this object raises
 --- an error rather than touching the freed memory.
+---@return boolean unmapped true when this call released the mapping, false when it was already unmapped
 function unix.Memory:unmap() end
 
 ---@class unix.Dir: userdata

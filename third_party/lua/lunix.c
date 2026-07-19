@@ -3743,13 +3743,24 @@ static int LuaUnixMemoryGc(lua_State *L) {
 }
 
 // unix.Memory:unmap()
+//     └─→ unmapped:bool
 //
 // Releases the mapping now instead of waiting for the garbage
-// collector. Idempotent: repeat calls are no-ops. After unmap, every
+// collector. Idempotent: returns true when this call released the
+// mapping, false when it was already unmapped. After unmap, every
 // other method on this object raises an error (see GetMemory) rather
 // than touching freed memory.
 static int LuaUnixMemoryUnmap(lua_State *L) {
-  return LuaUnixMemoryGc(L);
+  struct Memory *m;
+  m = luaL_checkudata(L, 1, "unix.Memory");
+  if (m->u.bytes) {
+    npassert(!munmap(m->map, m->mapsize));
+    m->u.bytes = 0;
+    lua_pushboolean(L, true);
+  } else {
+    lua_pushboolean(L, false);
+  }
+  return 1;
 }
 
 static const luaL_Reg kLuaUnixMemoryMeth[] = {

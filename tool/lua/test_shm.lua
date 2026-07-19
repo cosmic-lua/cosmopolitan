@@ -57,8 +57,8 @@ assert(rc == 0 or (rc == nil and e ~= nil),
 local u = assert(unix.mapshared(64))
 u:store(0, 7)
 assert(u:load(0) == 7)
-u:unmap()
-u:unmap()  -- idempotent: second call is a no-op
+assert(u:unmap() == true, "first unmap releases the mapping")
+assert(u:unmap() == false, "second unmap is a no-op and says so")
 assert(not pcall(function() return u:load(0) end), "load after unmap must error")
 assert(not pcall(function() return u:store(0, 1) end), "store after unmap must error")
 assert(not pcall(function() return u:read(0, 8) end), "read after unmap must error")
