@@ -948,8 +948,9 @@ static const uint16_t kPledgeProtExec[] = {
 };
 
 static const uint16_t kPledgeExec[] = {
-    __NR_linux_execve,    //
-    __NR_linux_execveat,  //
+    __NR_linux_execve,        //
+    __NR_linux_execveat,      //
+    __NR_linux_memfd_create,  // fexecve() memfd path for zipos / cloexec fds
 };
 
 static const uint16_t kPledgeUnveil[] = {
@@ -1011,14 +1012,34 @@ static const struct sock_filter kPledgeStart[] = {
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
     // each filter assumes ordinal is already loaded into accumulator
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(nr)),
+};
+
+// forbid some system calls with ENOSYS (rather than EPERM) so code
+// that probes for them falls back to older system calls
+static const struct sock_filter kFilterEnosys[] = {
 #ifdef __NR_linux_memfd_secret
-    // forbid some system calls with ENOSYS (rather than EPERM)
     BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __NR_linux_memfd_secret, 3, 0),
 #else
     BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __NR_linux_landlock_restrict_self + 1,
              3, 0),
 #endif
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_memfd_create, 2, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_openat2, 1, 0),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_clone3, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (Enosys & SECCOMP_RET_DATA)),
+};
+
+// same as kFilterEnosys except memfd_create falls through to the
+// promise allowlists; used when "exec" is pledged, since fexecve()'s
+// memfd path (fd_to_mem_fd) for zipos and cloexec APE fds calls
+// memfd_create with no fallback
+static const struct sock_filter kFilterEnosysExec[] = {
+#ifdef __NR_linux_memfd_secret
+    BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __NR_linux_memfd_secret, 2, 0),
+#else
+    BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, __NR_linux_landlock_restrict_self + 1,
+             2, 0),
+#endif
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_openat2, 1, 0),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_clone3, 0, 1),
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (Enosys & SECCOMP_RET_DATA)),
@@ -1467,13 +1488,19 @@ __privileged static void AllowIoctlStdio(struct Filter *f) {
 
 // The second argument of ioctl() must be one of:
 //
-//   - SIOCATMARK (0x8905)
+//   - SIOCATMARK    (0x8905)
+//   - SIOCGIFCONF   (0x8912)
+//   - SIOCGIFFLAGS  (0x8913)
+//   - SIOCGIFNETMASK (0x891b)
 //
 __privileged static void AllowIoctlInet(struct Filter *f) {
   static const struct sock_filter fragment[] = {
-      /*L0*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_ioctl, 0, 4),
+      /*L0*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linux_ioctl, 0, 7),
       /*L1*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(args[1])),
-      /*L5*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x8905, 0, 1),
+      /*L2*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x8905, 3, 0),
+      /*L3*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x8912, 2, 0),
+      /*L4*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x8913, 1, 0),
+      /*L5*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x891b, 0, 1),
       /*L6*/ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
       /*L7*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(nr)),
       /*L8*/ /* next filter */
@@ -1588,6 +1615,7 @@ __privileged static void AllowSetsockoptRestrict(struct Filter *f) {
 //
 // The optname argument of getsockopt() must be one of:
 //
+//   - TCP_NODELAY  (0x01)
 //   - SO_TYPE      (0x03)
 //   - SO_ERROR     (0x04)
 //   - SO_REUSEPORT (0x0f)
@@ -1599,21 +1627,22 @@ __privileged static void AllowSetsockoptRestrict(struct Filter *f) {
 __privileged static void AllowGetsockoptRestrict(struct Filter *f) {
   static const int nr = __NR_linux_getsockopt;
   static const struct sock_filter fragment[] = {
-      /* L0*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr, 0, 13),
+      /* L0*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr, 0, 14),
       /* L1*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(args[1])),
       /* L2*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 1, 1, 0),
-      /* L3*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 6, 0, 9),
+      /* L3*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 6, 0, 10),
       /* L4*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(args[2])),
-      /* L5*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x03, 6, 0),
-      /* L6*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x04, 5, 0),
-      /* L7*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x0f, 4, 0),
-      /* L8*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x02, 3, 0),
-      /* L9*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x09, 2, 0),
-      /*L10*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x14, 1, 0),
-      /*L11*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x15, 0, 1),
-      /*L12*/ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-      /*L13*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(nr)),
-      /*L14*/ /* next filter */
+      /* L5*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x01, 7, 0),
+      /* L6*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x03, 6, 0),
+      /* L7*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x04, 5, 0),
+      /* L8*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x0f, 4, 0),
+      /* L9*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x02, 3, 0),
+      /*L10*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x09, 2, 0),
+      /*L11*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x14, 1, 0),
+      /*L12*/ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x15, 0, 1),
+      /*L13*/ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+      /*L14*/ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, OFF(nr)),
+      /*L15*/ /* next filter */
   };
   AppendFilter(f, PLEDGE(fragment));
 }
@@ -2327,6 +2356,11 @@ __privileged int sys_pledge_linux(unsigned long ipromises, int mode) {
 
   // set up the seccomp filter
   AppendFilter(&f, PLEDGE(kPledgeStart));
+  if (~ipromises & (1ul << PROMISE_EXEC)) {
+    AppendFilter(&f, PLEDGE(kFilterEnosysExec));
+  } else {
+    AppendFilter(&f, PLEDGE(kFilterEnosys));
+  }
   if (ipromises == -1) {
     // if we're pledging empty string, then avoid triggering a sigsys
     // when _Exit() gets called since we need to fallback to _Exit1()

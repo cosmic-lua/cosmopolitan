@@ -35,6 +35,7 @@
 #include "libc/runtime/internal.h"
 #include "libc/runtime/runtime.h"
 #include "libc/sock/sock.h"
+#include "libc/sock/struct/ifconf.h"
 #include "libc/sock/struct/sockaddr.h"
 #include "libc/sock/struct/sockaddr6.h"
 #include "libc/stdio/internal.h"
@@ -50,9 +51,11 @@
 #include "libc/sysv/consts/pr.h"
 #include "libc/sysv/consts/prot.h"
 #include "libc/sysv/consts/sig.h"
+#include "libc/sysv/consts/sio.h"
 #include "libc/sysv/consts/so.h"
 #include "libc/sysv/consts/sock.h"
 #include "libc/sysv/consts/sol.h"
+#include "libc/sysv/consts/tcp.h"
 #include "libc/testlib/ezbench.h"
 #include "libc/testlib/subprocess.h"
 #include "libc/testlib/testlib.h"
@@ -403,6 +406,70 @@ TEST(pledge, anet_forbidsUdpSocketsAndConnect) {
   }
   EXPECT_NE(-1, wait(&ws));
   EXPECT_EQ(0, ws);
+}
+
+TEST(pledge, inet_allowsInterfaceListing) {
+  if (IsOpenbsd())
+    return;  // b/c testing linux bpf
+  int ws, pid;
+  ASSERT_NE(-1, (pid = fork()));
+  if (!pid) {
+    char buf[4096];
+    struct ifconf conf = {.ifc_len = sizeof(buf), .ifc_ifcu.ifcu_buf = buf};
+    ASSERT_SYS(0, 0, pledge("stdio inet", 0));
+    ASSERT_SYS(0, 3, socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+    ASSERT_SYS(0, 0, ioctl(3, SIOCGIFCONF, &conf));
+    _Exit(0);
+  }
+  EXPECT_NE(-1, wait(&ws));
+  EXPECT_TRUE(WIFEXITED(ws) && !WEXITSTATUS(ws));
+}
+
+TEST(pledge, inet_getsockoptTcpNodelay) {
+  if (IsOpenbsd())
+    return;  // b/c testing linux bpf
+  int ws, pid;
+  ASSERT_NE(-1, (pid = fork()));
+  if (!pid) {
+    int yes = 1, got = 0;
+    uint32_t sz = sizeof(got);
+    ASSERT_SYS(0, 0, pledge("stdio inet", 0));
+    ASSERT_SYS(0, 3, socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+    ASSERT_SYS(0, 0, setsockopt(3, SOL_TCP, TCP_NODELAY, &yes, sizeof(yes)));
+    ASSERT_SYS(0, 0, getsockopt(3, SOL_TCP, TCP_NODELAY, &got, &sz));
+    ASSERT_NE(0, got);
+    _Exit(0);
+  }
+  EXPECT_NE(-1, wait(&ws));
+  EXPECT_TRUE(WIFEXITED(ws) && !WEXITSTATUS(ws));
+}
+
+TEST(pledge, memfdCreate_isEnosysWithoutExec) {
+  if (IsOpenbsd())
+    return;  // b/c testing linux bpf
+  int ws, pid;
+  ASSERT_NE(-1, (pid = fork()));
+  if (!pid) {
+    ASSERT_SYS(0, 0, pledge("stdio", 0));
+    ASSERT_SYS(ENOSYS, -1, sys_memfd_create("pledge", 0));
+    _Exit(0);
+  }
+  EXPECT_NE(-1, wait(&ws));
+  EXPECT_TRUE(WIFEXITED(ws) && !WEXITSTATUS(ws));
+}
+
+TEST(pledge, exec_allowsMemfdCreate) {
+  if (IsOpenbsd())
+    return;  // b/c testing linux bpf
+  int ws, pid;
+  ASSERT_NE(-1, (pid = fork()));
+  if (!pid) {
+    ASSERT_SYS(0, 0, pledge("stdio exec", 0));
+    ASSERT_SYS(0, 3, sys_memfd_create("pledge", 0));
+    _Exit(0);
+  }
+  EXPECT_NE(-1, wait(&ws));
+  EXPECT_TRUE(WIFEXITED(ws) && !WEXITSTATUS(ws));
 }
 
 TEST(pledge, mmap) {

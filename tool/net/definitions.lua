@@ -6533,7 +6533,10 @@ function unix.getrusage(who) end
 --- ### inet
 ---
 --- Allows socket (AF_INET), listen, bind, connect, accept,
---- getpeername, getsockname, setsockopt, getsockopt.
+--- getpeername, getsockname, setsockopt, getsockopt, plus the
+--- read-only interface ioctls used by siocgifconf() and
+--- siocgifflags() (SIOCGIFCONF, SIOCGIFFLAGS, SIOCGIFNETMASK) on
+--- Linux.
 ---
 --- ### unix
 ---
@@ -6572,7 +6575,9 @@ function unix.getrusage(who) end
 ---
 --- ### exec
 ---
---- Allows execve.
+--- Allows execve, and on Linux memfd_create, which is needed to spawn
+--- programs embedded in the zip filesystem (e.g.
+--- `unix.execve("/zip/foo.com", ...)`).
 ---
 --- If the executable in question needs a loader, then you will need
 --- "rpath prot_exec" too. With APE, security is strongest when you
