@@ -664,6 +664,15 @@ unveil_or_die (const char *path, const char *perm)
   char *buf;
   char permprefix[5];
 
+  /* A null path with permissions has nothing to unveil — e.g. the tty
+     promise unveils ttyname(0), which is null when stdin isn't a
+     terminal (CI runners).  Passing it through would make unveil()
+     fail with EINVAL on Landlock-capable hosts, and the error path
+     dies dereferencing the null path.  Only unveil_or_die(0, 0), the
+     sandbox commit, may pass a null path.  */
+  if (!path && perm)
+    return;
+
   if (path)
     {
       /* if path is like `rwcx:o/tmp` then `rwcx` will override perm */
