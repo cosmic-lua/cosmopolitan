@@ -2597,9 +2597,17 @@ child_execute_job (struct childbase *child, int good_stdin,
     }
 
   {
-    /* The child may clobber environ so remember ours and restore it.  */
+    /* The child may clobber environ so remember ours and restore it.
+       Sandboxed children must fork(): the unveil()/pledge() setup below
+       runs between here and exec, and cosmo's unveil keeps its Landlock
+       ruleset state in _Thread_local statics — under vfork the child
+       shares the parent's memory, so a child that dies mid-setup (e.g.
+       unveil_or_die's _Exit on an unexpected errno) poisons that state
+       inside make itself, corrupting every later child's sandbox
+       (whilp/cosmopolitan#200: intermittent lost grants observed under
+       parallel bursts of freshly sandboxed rules).  */
     char **parent_env = environ;
-    pid = vfork ();
+    pid = sandboxed ? fork () : vfork ();
     if (pid != 0)
       {
         environ = parent_env;
