@@ -142,10 +142,14 @@
  *   utimensat.
  *
  * - "inet" allows socket(AF_INET), listen, bind, connect, accept,
- *   accept4, getpeername, getsockname, setsockopt, getsockopt, sendto.
+ *   accept4, getpeername, getsockname, setsockopt, getsockopt, sendto,
+ *   ioctl(SIOCATMARK), ioctl(SIOCGIFCONF), ioctl(SIOCGIFFLAGS),
+ *   ioctl(SIOCGIFNETMASK).
  *
  * - "anet" allows socket(AF_INET), listen, bind, accept,
- *   accept4, getpeername, getsockname, setsockopt, getsockopt, sendto.
+ *   accept4, getpeername, getsockname, setsockopt, getsockopt, sendto,
+ *   ioctl(SIOCATMARK), ioctl(SIOCGIFCONF), ioctl(SIOCGIFFLAGS),
+ *   ioctl(SIOCGIFNETMASK).
  *
  * - "unix" allows socket(AF_UNIX), listen, bind, connect, accept,
  *   accept4, getpeername, getsockname, setsockopt, getsockopt.
@@ -161,7 +165,11 @@
  *
  * - "settime" allows settimeofday and clock_adjtime.
  *
- * - "exec" allows execve, execveat. Note that `exec` alone might not be
+ * - "exec" allows execve, execveat, and (on Linux) memfd_create, which
+ *   fexecve() needs to launch zip filesystem and close-on-exec APE
+ *   file descriptors. Without "exec", memfd_create raises ENOSYS so
+ *   code that probes for it falls back to older system calls. Note
+ *   that `exec` alone might not be
  *   enough by itself to let your executable be executed. For dynamic,
  *   interpreted, and ape binaries, you'll usually want `rpath` and
  *   `prot_exec` too. With APE it's possible to work around this
