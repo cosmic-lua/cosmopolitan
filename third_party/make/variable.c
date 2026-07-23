@@ -575,6 +575,20 @@ lookup_variable_in_set (const char *name, size_t length,
 
   return hash_find_item ((struct hash_table *) &set->table, &var_key);
 }
+
+/* [jart] Lookup a variable in the global variable set only, ignoring
+   current_variable_set_list.  The sandbox setup in job.c runs in a
+   forked child that inherits whatever variable context the parent was
+   in mid-traversal ($(shell) reaps can start a recipe's next command
+   line from inside another file's pattern-variable scope), so a plain
+   lookup_variable() there can resolve a scoped .UNVEIL/.PLEDGE value
+   instead of the global one, silently dropping the global grants.  */
+
+struct variable *
+lookup_variable_global (const char *name, size_t length)
+{
+  return lookup_variable_in_set (name, length, &global_variable_set);
+}
 
 /* Initialize FILE's variable set list.  If FILE already has a variable set
    list, the topmost variable set is left intact, but the the rest of the

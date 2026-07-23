@@ -624,7 +624,7 @@ get_target_variable (const char *name,
         (file->pat_variables &&
          (var = lookup_variable_in_set (name, length,
                                         file->pat_variables->set))))) ||
-      (var = lookup_variable (name, length)))
+      (var = lookup_variable_global (name, length)))
     return var->value;
   else
     return dflt;
@@ -2591,7 +2591,7 @@ child_execute_job (struct childbase *child, int good_stdin,
                 strlcat (promises, var->value, 200);
               }
         }
-      if ((var = lookup_variable (STRING_SIZE_TUPLE (".PLEDGE"))))
+      if ((var = lookup_variable_global (STRING_SIZE_TUPLE (".PLEDGE"))))
         {
           promises = buf;
           strlcat (promises, " ", 200);
@@ -2805,7 +2805,7 @@ child_execute_job (struct childbase *child, int good_stdin,
         }
 
       /* Unveil explicit .UNVEIL entries.  */
-      unveil_variable (lookup_variable (STRING_SIZE_TUPLE (".UNVEIL")));
+      unveil_variable (lookup_variable_global (STRING_SIZE_TUPLE (".UNVEIL")));
       unveil_variable (lookup_variable_in_set (STRING_SIZE_TUPLE (".UNVEIL"),
                                                c->file->variables->set));
       if (c->file->pat_variables)
