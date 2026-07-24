@@ -22,6 +22,11 @@
 #                unveil() is a no-op the denials are SKIPPED, loudly,
 #                rather than passing vacuously.
 #
+# Set REQUIRE_ENFORCEMENT=1 to make that skip a FAILURE.  CI does: the
+# runner is known to have Landlock, so a skip there would mean the half
+# of this gate that needs a kernel silently stopped running — which is
+# not something anyone would notice in a green build log.
+#
 # usage: test/tool/build/make_sandbox_test.sh [MAKE] [CP] [TOUCH]
 #
 # The recipe programs are static APE binaries on purpose: a dynamically
@@ -61,7 +66,17 @@ echo based >"$t/tree/base/ok.txt"
 rc=0
 ok() { printf '\033[32mok\033[0m %s\n' "$1"; }
 no() { printf '\033[31mfailed\033[0m %s\n' "$1"; rc=1; }
-skip() { printf '\033[33mskip\033[0m %s\n' "$1"; }
+
+# A skipped enforcement layer is a hole in the gate wherever Landlock is
+# supposed to exist, so REQUIRE_ENFORCEMENT turns the skip into a
+# failure instead of a line in a log nobody reads.
+skip() {
+  if [ "${REQUIRE_ENFORCEMENT:-0}" = 1 ]; then
+    no "$1 [REQUIRE_ENFORCEMENT=1]"
+  else
+    printf '\033[33mskip\033[0m %s\n' "$1"
+  fi
+}
 
 # Every fixture shares this prologue.  .RECIPEPREFIX keeps recipes free
 # of significant tabs; the promises are the smallest set that lets the
@@ -223,12 +238,14 @@ out/canary.txt:
 EOF
 } >"$t/canary.mk"
 rm -rf "$t/tree/out"
+enforced=0
 if [ "$livable" = 0 ]; then
   skip "enforcement layer (derived set is not livable here)"
 elif run "$t/canary.mk"; then
   skip "enforcement layer (unveil() does not enforce on this host)"
   echo "$0: Landlock unavailable — derivation checked, denials not" >&2
 else
+  enforced=1
   ok "undeclared path is denied"
 
   # Declaring it as an extra is the only way through.
@@ -267,6 +284,18 @@ EOF
   else
     ok "cwd target write is denied"
   fi
+fi
+
+# Verdict line: a truncated log still says which layers ran.
+if [ "$enforced" = 1 ]; then
+  layers="derivation+enforcement"
+else
+  layers="derivation only"
+fi
+if [ $rc = 0 ]; then
+  echo "make_sandbox_test: PASS ($layers)"
+else
+  echo "make_sandbox_test: FAIL ($layers)"
 fi
 
 exit $rc

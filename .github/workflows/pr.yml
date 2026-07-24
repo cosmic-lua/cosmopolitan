@@ -31,6 +31,8 @@ jobs:
             o/x86_64/tool/build/touch.dbg
 
       - name: Test landlock-make sandbox derivation
+        env:
+          REQUIRE_ENFORCEMENT: 1
         run: |
           test/tool/build/make_sandbox_test.sh \
             o/x86_64/third_party/make/make.dbg \
