@@ -27,3 +27,6 @@ LOCAL CHANGES
   - .FSIZE variable which tunes max file size, e.g. 1g
   - .NPROC variable which tunes fork() / clone() limit
   - .NOFILE variable which tunes file descriptor limit
+  - .ENV variable which clamps a build rule's environment to the named
+    variables (plus the MAKEFLAGS family make itself needs); an empty
+    .ENV clamps to the protocol set only
