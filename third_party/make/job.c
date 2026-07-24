@@ -2521,6 +2521,64 @@ child_execute_job (struct childbase *child, int good_stdin, char **argv)
 
 #elif !defined (_AMIGA) && !defined (__MSDOS__) && !defined (VMS)
 
+/* [whilp] Environment variables make itself needs across the .ENV
+   clamp: the MAKEFLAGS family carries the jobserver handshake and
+   recursion state, so filtering it away would wedge nested makes.  */
+static const char *const env_always_kept[] = {
+  "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKELEVEL",
+  "MAKE_TERMOUT", "MAKE_TERMERR",
+};
+
+/* Does the "NAME=value" entry name a variable of length LEN equal to
+   NAME?  */
+static int
+env_name_matches (const char *entry, const char *name, size_t len)
+{
+  return !strncmp (entry, name, len) && entry[len] == '=';
+}
+
+/* Is the "NAME=value" entry allowed by the space-separated .ENV
+   allowlist SPEC (or by the always-kept make protocol set)?  */
+static int
+env_entry_allowed (const char *entry, const char *spec)
+{
+  size_t i;
+  const char *p = spec;
+  for (i = 0; i < sizeof env_always_kept / sizeof *env_always_kept; i++)
+    if (env_name_matches (entry, env_always_kept[i],
+                          strlen (env_always_kept[i])))
+      return 1;
+  while (*p)
+    {
+      const char *e;
+      p += strspn (p, " \t");
+      e = p + strcspn (p, " \t");
+      if (e > p && env_name_matches (entry, p, (size_t) (e - p)))
+        return 1;
+      p = e;
+    }
+  return 0;
+}
+
+/* [whilp] Build a malloc'd environment vector holding only the
+   .ENV-allowed entries of ENVP.  Entry strings are shared with ENVP;
+   only the vector itself is freed by the caller.  Runs in the PARENT
+   (safe under vfork); an empty .ENV clamps to the protocol set only.  */
+static char **
+filter_environment (const char *spec, char **envp)
+{
+  size_t n = 0, m = 0, i;
+  char **out;
+  while (envp[n])
+    n++;
+  out = xmalloc ((n + 1) * sizeof *out);
+  for (i = 0; i < n; i++)
+    if (env_entry_allowed (envp[i], spec))
+      out[m++] = envp[i];
+  out[m] = NULL;
+  return out;
+}
+
 /* POSIX:
    Create a child process executing the command in ARGV.
    Returns the PID or -1.  */
@@ -2605,6 +2663,23 @@ child_execute_job (struct childbase *child, int good_stdin,
         }
     }
 
+  /* [whilp] .ENV allowlist: when a build rule (or the global scope)
+     declares .ENV, the child environment is cleared to the named
+     variables plus make's own protocol set (env_always_kept above).
+     Values still come from make's normal environment construction, so
+     a rule grants `export VAR := x` and lists VAR in .ENV.  Built in
+     the parent so it is safe under vfork; freed after the fork
+     returns.  Deliberately scoped to build rules — $(shell) is
+     parse-time apparatus, not a recipe.  */
+  char **filtered_env = NULL;
+  if (c && child->environment)
+    {
+      const char *envspec = get_target_variable (STRING_SIZE_TUPLE (".ENV"),
+                                                 c->file, NULL);
+      if (envspec)
+        filtered_env = filter_environment (envspec, child->environment);
+    }
+
   {
     /* The child may clobber environ so remember ours and restore it.
        Sandboxed children must fork(): the unveil()/pledge() setup below
@@ -2620,6 +2695,7 @@ child_execute_job (struct childbase *child, int good_stdin,
     if (pid != 0)
       {
         environ = parent_env;
+        free (filtered_env);
         return pid;
       }
   }
@@ -2838,7 +2914,7 @@ child_execute_job (struct childbase *child, int good_stdin,
     }
 
   /* Run the command.  */
-  exec_command (argv, child->environment);
+  exec_command (argv, filtered_env ? filtered_env : child->environment);
   _Exit (127);
 
 #else /* USE_POSIX_SPAWN */
