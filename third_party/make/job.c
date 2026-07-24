@@ -2816,10 +2816,16 @@ child_execute_job (struct childbase *child, int good_stdin,
       /* [whilp] Grants derived from the graph (#210): a rule's recipe
          by definition writes its target — and often siblings in the
          same directory (.tmp/rename dances, capture files) — so the
-         target's directory is writable without a hand grant.  Targets
-         with no directory component are skipped: deriving rwc on "."
-         would implicitly open the whole working tree; those rules
-         declare their grants explicitly.  */
+         target's directory is writable without a hand grant.  The
+         directory must EXIST before unveil (a nonexistent path is
+         silently skipped), and on a cold tree it usually does not yet
+         — create it first, exactly as the recipe's own mkdir -p would
+         moments later (witnessed: every compile in a cold CI tree
+         denied once Landlock was real, whilp/cosmic#766).  Sandboxed
+         children fork(), so makedirs' allocation is safe here.
+         Targets with no directory component are skipped: deriving rwc
+         on "." would implicitly open the whole working tree; those
+         rules declare their grants explicitly.  */
       {
         const char *slash = strrchr (c->file->name, '/');
         if (slash && slash != c->file->name)
@@ -2830,6 +2836,7 @@ child_execute_job (struct childbase *child, int good_stdin,
               n = PATH_MAX - 1;
             memcpy (dirbuf, c->file->name, n);
             dirbuf[n] = '\0';
+            makedirs (dirbuf, 0755);
             unveil_or_die (dirbuf, "rwc");
           }
       }
