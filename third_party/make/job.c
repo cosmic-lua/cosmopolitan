@@ -2813,6 +2813,27 @@ child_execute_job (struct childbase *child, int good_stdin,
       /* Unveil executable.  */
       unveil_or_die (argv[0], "rx");
 
+      /* [whilp] Grants derived from the graph (#210): a rule's recipe
+         by definition writes its target — and often siblings in the
+         same directory (.tmp/rename dances, capture files) — so the
+         target's directory is writable without a hand grant.  Targets
+         with no directory component are skipped: deriving rwc on "."
+         would implicitly open the whole working tree; those rules
+         declare their grants explicitly.  */
+      {
+        const char *slash = strrchr (c->file->name, '/');
+        if (slash && slash != c->file->name)
+          {
+            char *dirbuf = alloca (PATH_MAX);
+            size_t n = (size_t) (slash - c->file->name);
+            if (n >= PATH_MAX)
+              n = PATH_MAX - 1;
+            memcpy (dirbuf, c->file->name, n);
+            dirbuf[n] = '\0';
+            unveil_or_die (dirbuf, "rwc");
+          }
+      }
+
       /* Unveil .PLEDGE = vminfo.  */
       if (~ipromises & (1ul << PROMISE_VMINFO))
         {
