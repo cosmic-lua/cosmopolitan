@@ -195,4 +195,52 @@ local pv, perr = probe("cosmo.ParseIp", cosmo.ParseIp, "not.an.ip.addr")
 assert(pv == -1 or (pv == nil and type(perr) == "string"),
   "ParseIp failure shape changed: " .. tostring(pv) .. ", " .. tostring(perr))
 
+-- === constants ===========================================================
+-- Every ALL-CAPS entry in a module table reaches Lua through LuaSetIntField
+-- / LoadMagnums / SC(), and definitions.lua declares them `integer`
+-- (test_definitions_coverage.lua's Q5 ratchets that). Downstream renders
+-- them as Teal `integer` on the strength of that declaration, so prove it
+-- is truthful: a constant arriving as a float would make the generated type
+-- a lie, and the bit-op call sites that consume these are exactly where it
+-- would surface (whilp/cosmopolitan#142).
+
+local CONST_MODULES = {
+  { name = "unix", t = unix },
+  { name = "re", t = require("cosmo.re") },
+  { name = "lsqlite3", t = require("cosmo.lsqlite3") },
+}
+
+-- Annotated but registered under a `#ifdef` the build does not satisfy, so
+-- absent at runtime. A RATCHET: an entry may only be removed. Anything else
+-- that goes missing is a binding that silently vanished, and fails below.
+local CONST_ABSENT = {
+  ["unix.WCONTINUED"] = "#ifdef WCONTINUED in third_party/lua/lunix.c",
+}
+
+local nconst, nabsent = 0, 0
+for _, m in ipairs(CONST_MODULES) do
+  local body = assert(D:match("\n" .. m.name .. " = {(.-)\n}"),
+    "could not locate the `" .. m.name .. " = {` module table")
+  for name in body:gmatch("\n%s*([%u][%w_]*)%s*=") do
+    local disp = m.name .. "." .. name
+    local v = m.t[name]
+    if v == nil then
+      assert(CONST_ABSENT[disp], disp ..
+        " is annotated but missing at runtime (the C no longer registers " ..
+        "it, or it is newly conditional -- fix the binding or, if the " ..
+        "condition is deliberate, note it in CONST_ABSENT)")
+      nabsent = nabsent + 1
+    else
+      assert(not CONST_ABSENT[disp], "stale CONST_ABSENT entry (present " ..
+        "at runtime now, remove it): " .. disp)
+      assert(math.type(v) == "integer", string.format(
+        "%s declared integer, got %s (%s)", disp,
+        tostring(math.type(v) or type(v)), tostring(v)))
+      nconst = nconst + 1
+    end
+  end
+end
+print("constants: " .. nconst .. " checked integer across " ..
+  #CONST_MODULES .. " modules; " .. nabsent .. " conditionally absent")
+
 print("PASS")

@@ -1179,8 +1179,8 @@ function lsqlite3.VM:bind_names(names) end
 ---@nodiscard
 function lsqlite3.VM:bind_parameter_count() end
 
----@param index number
----@return string parameter_name
+---@param index integer
+---@return string? parameter_name nil for a positional (`?`) parameter, which has no name.
 ---@nodiscard
 function lsqlite3.VM:bind_parameter_name(index) end
 
@@ -3055,7 +3055,6 @@ unix = {
     --- Raised by connect, listen, recv.
     ECONNREFUSED = nil,
     --- @type integer Connection reset by client. Raised by `send`.
-
     ECONNRESET = nil,
     --- @type integer Resource deadlock avoided.
     ---
@@ -3111,7 +3110,6 @@ unix = {
     --- `symlink`, `sync_file_range`, `truncate`, `unlink`, `write`.
     EIO = nil,
     --- @type integer Socket is connected. Raised by `connect`, `send`.
-
     EISCONN = nil,
     --- @type integer Is a directory.
     ---
