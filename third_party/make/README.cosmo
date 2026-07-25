@@ -29,7 +29,8 @@ LOCAL CHANGES
   - .NOFILE variable which tunes file descriptor limit
   - .ENV variable which clamps a build rule's environment to the named
     variables (plus the MAKEFLAGS family make itself needs); an empty
-    .ENV clamps to the protocol set only
+    .ENV clamps to the protocol set only, gated by
+    test/tool/build/make_env_test.sh
   - sandboxed rules automatically unveil rwc on the target's directory
     (grants derived from the graph; targets with no directory component
     still need explicit grants), gated by

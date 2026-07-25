@@ -28,7 +28,8 @@ jobs:
             o/x86_64/third_party/zip/zip.dbg \
             o/x86_64/third_party/unzip/unzip.dbg \
             o/x86_64/tool/build/cp.dbg \
-            o/x86_64/tool/build/touch.dbg
+            o/x86_64/tool/build/touch.dbg \
+            o/x86_64/examples/env.dbg
 
       - name: Test landlock-make sandbox derivation
         env:
@@ -38,6 +39,12 @@ jobs:
             o/x86_64/third_party/make/make.dbg \
             o/x86_64/tool/build/cp.dbg \
             o/x86_64/tool/build/touch.dbg
+
+      - name: Test landlock-make environment clamp
+        run: |
+          test/tool/build/make_env_test.sh \
+            o/x86_64/third_party/make/make.dbg \
+            o/x86_64/examples/env.dbg
 
       - name: Build aarch64 binaries
         run: |
