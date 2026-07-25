@@ -1402,6 +1402,32 @@ static int LuaUnixPipe(lua_State *L) {
   }
 }
 
+// unix.openpty()
+//     ├─→ mfd:int, sfd:int, name:str
+//     └─→ nil, error:str, errno:int
+static int LuaUnixOpenpty(lua_State *L) {
+  int mfd, sfd, olderr = errno;
+  // openpty() strcpy()s the subordinate path out of a char[16] field, so
+  // the name it writes is at most 16 bytes including the NUL.
+  char name[32];
+  if (!openpty(&mfd, &sfd, name, 0, 0)) {
+    lua_pushinteger(L, mfd);
+    lua_pushinteger(L, sfd);
+    lua_pushstring(L, name);
+    return 3;
+  } else {
+    return LuaUnixSysretErrno(L, "openpty", olderr);
+  }
+}
+
+// unix.login_tty(fd:int)
+//     ├─→ true
+//     └─→ nil, error:str, errno:int
+static int LuaUnixLoginTty(lua_State *L) {
+  int olderr = errno;
+  return SysretBool(L, "login_tty", olderr, login_tty(luaL_checkinteger(L, 1)));
+}
+
 // unix.getsid(pid:int)
 //     ├─→ sid:int
 //     └─→ nil, error:str, errno:int
@@ -4271,6 +4297,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"link", LuaUnixLink},                // create hard link
     {"listen", LuaUnixListen},            // begin listening for clients
     {"localtime", LuaUnixLocaltime},      // localize unix timestamp
+    {"login_tty", LuaUnixLoginTty},     // make fd the controlling tty
     {"lseek", LuaUnixLseek},              // seek in file
     {"major", LuaUnixMajor},              // extract device info
     {"makedirs", LuaUnixMakedirs},        // make directory and parents too
@@ -4283,6 +4310,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"nanosleep", LuaUnixNanosleep},      // sleep w/ nano precision
     {"nice", LuaUnixNice},                // adjust process priority
     {"open", LuaUnixOpen},                // open file fd at lowest slot
+    {"openpty", LuaUnixOpenpty},         // open new pseudoteletypewriter
     {"opendir", LuaUnixOpendir},          // read directory entry list
     {"pipe", LuaUnixPipe},                // create two anon fifo fds
     {"pivot_root", LuaUnixPivotRoot},     // replace root fs of namespace
