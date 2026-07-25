@@ -132,6 +132,58 @@ local function ann_consts(mod)
   return names
 end
 
+-- The type each constant in a `<mod> = {` table declares, as a caller reads
+-- it. Three ways a constant gets one:
+--
+--   1. an integer literal value                    `DETACH = 26,`
+--   2. its own `@type` annotation block            `--- @type integer`
+--                                                  `OPEN_URI = nil,`
+--   3. the `@type` group heading it sits under -- this file annotates a run
+--      of related constants once and lets the rest inherit:
+--
+--        --- @type integer termios input mode flags (Termios.iflag)
+--        BRKINT = nil,
+--        ICRNL = nil,     <- inherits `integer` from the heading above
+--
+-- A heading carries only across bare constant lines: a blank line, any other
+-- content, or a `---` block of its own that declares no `@type` detaches the
+-- constants below it. Returns name -> declared type string, or nil when the
+-- constant ends up with no declaration at all.
+local function ann_const_types(mod)
+  local body = assert(
+    D:match("\n" .. mod .. " = {(.-)\n}"),
+    "could not locate the `" .. mod .. " = {` module table")
+  local types = {}
+  local heading, in_block, block_typed = nil, false, false
+  for line in (body .. "\n"):gmatch("([^\n]*)\n") do
+    if line:match("^%s*%-%-%-") then
+      if not in_block then
+        in_block, block_typed = true, false
+      end
+      -- Both `---@type` and `--- @type` spellings appear in this file.
+      local t = line:match("^%s*%-%-%-%s*@type%s+(%S+)")
+      if t then
+        heading, block_typed = t, true
+      end
+    else
+      local name, value = line:match("^%s*([%u][%w_]*)%s*=%s*(.-),?%s*$")
+      if name then
+        if value:match("^%-?%d+$") or value:match("^%-?0[xX]%x+$") then
+          types[name] = "integer"
+        elseif not (in_block and not block_typed) then
+          -- No own block, or one that declares a type: the heading applies.
+          types[name] = heading
+        end
+      else
+        -- Anything that is not a constant ends the run the heading covers.
+        heading = nil
+      end
+      in_block = false
+    end
+  end
+  return types
+end
+
 -- ===== per-module registered surfaces =====
 
 local C_unix = slurp("third_party/lua/lunix.c")
@@ -667,7 +719,7 @@ end
 
 -- ===== annotation quality ratchet (shrink-only allowlists) =====
 --
--- The checks above enforce that every binding is annotated at all. These four
+-- The checks above enforce that every binding is annotated at all. These five
 -- raise the floor on annotation QUALITY, so cosmic's generated Teal keeps
 -- improving with zero generator changes as entries are burned down:
 --   Q1: every declared parameter of a module function/method has a matching
@@ -680,6 +732,13 @@ end
 --       `---@overload` -- name the shape as a `---@class` (e.g.
 --       cosmo.EncoderOptions, cosmo.FetchOptions) so it type-checks.
 --   Q4: no bare `any`/`table` parameter or return types.
+--   Q5: every module-table constant declares `integer`. Constants reach Lua
+--       only through LuaSetIntField / LoadMagnums / SC(), so every one of
+--       them IS a C int -- but a constant whose integer-ness is left
+--       undeclared (or, worse, declared `number`) renders downstream as
+--       Teal `number`, and every bit-op call site on it then needs an
+--       `as integer` cast (whilp/cosmopolitan#142). Declaring it here is
+--       what keeps cosmic's generated `integer` honest.
 -- Each QALLOW_* is a RATCHET seeded at today's counts: an entry may only be
 -- removed (by improving the annotation), never added. A newly-violating
 -- binding, or a stale entry that no longer violates, fails this test.
@@ -745,6 +804,10 @@ local QALLOW_BARE = set({
   "unix.fcntl",
 })
 
+-- Q5: the whole constant surface declares `integer` today, so this list is
+-- empty and must stay that way. Do not seed it -- annotate the constant.
+local QALLOW_CONSTTYPE = set({})
+
 -- Collect module function/method declarations paired with the contiguous run
 -- of `---` annotation lines that immediately precedes each.
 local qdecls = {}
@@ -787,7 +850,7 @@ local function qbare(t)
   return false
 end
 
-local qvio = { param = {}, noreturn = {}, inline = {}, bare = {} }
+local qvio = { param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {} }
 for _, d in ipairs(qdecls) do
   for p in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
     p = p:gsub("%s", "")
@@ -813,6 +876,20 @@ for _, d in ipairs(qdecls) do
   end
 end
 
+for _, m in ipairs(MODULES) do
+  if m.consts then
+    -- Walk the NAME set, not the type map: an undeclared constant maps to
+    -- nil, which pairs() over the type map cannot see, and undeclared is
+    -- itself the violation.
+    local declared = ann_const_types(m.name)
+    for _, name in ipairs(sorted_keys(ann_consts(m.name))) do
+      if declared[name] ~= "integer" then
+        qvio.consttype[m.name .. "." .. name] = true
+      end
+    end
+  end
+end
+
 local function ratchet(viol, allow, label)
   for _, disp in ipairs(sorted_keys(viol)) do
     if not allow[disp] then
@@ -831,6 +908,7 @@ ratchet(qvio.param, QALLOW_PARAM, "declared param without @param")
 ratchet(qvio.noreturn, QALLOW_NORETURN, "no @return/@overload")
 ratchet(qvio.inline, QALLOW_INLINE, "inline { } table type")
 ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
+ratchet(qvio.consttype, QALLOW_CONSTTYPE, "constant not declared integer")
 
 assert(#failures == 0,
   "definitions.lua coverage failures (annotate the binding or fix the " ..
@@ -838,7 +916,7 @@ assert(#failures == 0,
   table.concat(failures, "\n  "))
 
 local qallowed = count(QALLOW_PARAM) + count(QALLOW_NORETURN) +
-  count(QALLOW_INLINE) + count(QALLOW_BARE)
+  count(QALLOW_INLINE) + count(QALLOW_BARE) + count(QALLOW_CONSTTYPE)
 print("definitions coverage: " .. nfns .. " functions, " .. nmethods ..
   " methods, " .. nconsts .. " constants checked across " ..
   #MODULES .. " modules; " .. count(ALLOW) .. " allowlisted")
