@@ -7242,10 +7242,15 @@ function unix.Memory:read(offset, bytes) end
 
 --- Writes bytes to memory region.
 ---
+---@param offset integer
+--- `offset` is the starting byte index to which memory is copied.
+--- When the first argument is a string rather than an integer, the
+--- write starts at offset zero: `m:write(data)` and
+--- `m:write(data, bytes)` are the offset-less forms (the C
+--- implementation dispatches on the first argument's type, so the
+--- offset comes FIRST when present, never after `data`).
+---
 ---@param data string
----@param offset integer?
---- `offset` is the starting byte index to which memory is copied,
---- which defaults to zero.
 ---
 ---@param bytes integer?
 --- If `bytes` is none or nil, then an implicit nil-terminator
@@ -7255,7 +7260,8 @@ function unix.Memory:read(offset, bytes) end
 --- This operation happens atomically. Each shared mapping has a
 --- single lock which is used to synchronize reads and writes to
 --- that specific map. To make it scale, create additional maps.
-function unix.Memory:write(data, offset, bytes) end
+---@overload fun(self: unix.Memory, data: string, bytes?: integer)
+function unix.Memory:write(offset, data, bytes) end
 
 --- Loads word from memory region.
 ---
