@@ -773,7 +773,6 @@ local QALLOW_NORETURN = set({
   "repl.start",
   "unix.Dir:rewind",
   "unix.Memory:store",
-  "unix.Memory:write",
   "unix.Sigset:add",
   "unix.Sigset:clear",
   "unix.Sigset:fill",
