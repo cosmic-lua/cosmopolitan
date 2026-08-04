@@ -53,6 +53,7 @@ int LuaPath(lua_State *);
 int LuaRe(lua_State *);
 int LuaGetopt(lua_State *);
 int LuaZip(lua_State *);
+int LuaCov(lua_State *);
 int luaopen_argon2(lua_State *);
 int luaopen_lsqlite3(lua_State *);
 #endif
@@ -349,6 +350,8 @@ static int pmain (lua_State *L) {
   lua_setfield(L, -2, "cosmo.getopt");
   lua_pushcfunction(L, LuaZip);
   lua_setfield(L, -2, "cosmo.zip");
+  lua_pushcfunction(L, LuaCov);
+  lua_setfield(L, -2, "cosmo.cov");
   lua_pushcfunction(L, luaopen_argon2);
   lua_setfield(L, -2, "cosmo.argon2");
   lua_pushcfunction(L, luaopen_lsqlite3);

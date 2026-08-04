@@ -1910,6 +1910,67 @@ function zip.Appender:remove(name) end
 --- Closes the ZIP archive and writes the updated central directory.
 function zip.Appender:close() end
 
+--- ### COVERAGE
+---
+--- The cov module is a line-hit coverage collector: a C line hook that
+--- counts executed (chunk source, line) pairs, the same accounting a
+--- Lua `debug.sethook` collector performs at a small fraction of the
+--- per-line cost. This module is available as `require("cosmo.cov")`.
+---
+--- Counts are process-global and shared by every armed thread. Hooks
+--- are per-coroutine, but new threads inherit a C hook from their
+--- creator, so a coroutine created while collection runs counts
+--- automatically; `arm` opts in one created before `start`.
+---
+---     local cov = require("cosmo.cov")
+---     cov.start()
+---     do_work()
+---     cov.stop()
+---     for src, lines in pairs(cov.snapshot()) do
+---       for line, hits in pairs(lines) do
+---         print(src, line, hits)
+---       end
+---     end
+---
+cov = {}
+
+--- Arms line-hit collection on the calling thread. Counting starts (or
+--- resumes) immediately; counts accumulate into process-global state
+--- shared with every other armed thread. Installs a Lua debug hook, so
+--- it replaces any hook already set on the thread (and a later
+--- `debug.sethook` replaces this one, ending collection there).
+function cov.start() end
+
+--- Disarms collection on the calling thread. A hook installed by
+--- something other than this collector is left alone. Collected counts
+--- are kept; use `reset` to discard them.
+function cov.stop() end
+
+--- Reports whether the calling thread's debug hook is this collector's
+--- line hook.
+---@return boolean running `true` when collection is armed on this thread
+---@nodiscard
+function cov.running() end
+
+--- Arms line-hit collection on another thread (a coroutine), which
+--- counts into the same process-global state. A coroutine created
+--- while collection runs inherits the hook already; this opts in one
+--- that existed before `start`.
+---@param thread thread The coroutine to arm
+function cov.arm(thread) end
+
+--- Returns a fresh copy of the collected counts, keyed by chunk source
+--- as reported by `debug.getinfo` (e.g. `"@o/main.lua"`), each value
+--- mapping line number to hit count. Collection state is unchanged;
+--- zero-hit chunks are never present.
+---@return table<string, table<integer, integer>> hits Executed line counts by chunk source
+---@nodiscard
+function cov.snapshot() end
+
+--- Discards all collected counts. Armed hooks stay armed and keep
+--- counting into the now-empty state.
+function cov.reset() end
+
 --- The repl module provides programmatic access to the same interactive
 --- read-eval-print-loop that the lua binary runs in interactive mode.
 repl = {}
@@ -1927,9 +1988,9 @@ function repl.start() end
 --- globals: hashing, encoding, compression, URL and HTTP parsing, an
 --- HTTP client, and various system introspection helpers. Submodules
 --- (`cosmo.unix`, `cosmo.path`, `cosmo.re`, `cosmo.argon2`,
---- `cosmo.lsqlite3`, `cosmo.getopt`, `cosmo.zip`, `cosmo.repl`) are
---- registered in `package.loaded` and may be required directly, e.g.
---- `require("cosmo.unix")`.
+--- `cosmo.lsqlite3`, `cosmo.getopt`, `cosmo.zip`, `cosmo.cov`,
+--- `cosmo.repl`) are registered in `package.loaded` and may be
+--- required directly, e.g. `require("cosmo.unix")`.
 cosmo = {}
 
 ---@class cosmo.BarfOptions
