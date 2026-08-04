@@ -17,6 +17,7 @@
 --   * lsqlite3   tool/net/lsqlite3.c          sqlitelib[] + constants + methods
 --   * getopt     tool/net/lgetopt.c           kLuaGetopt[]
 --   * zip        tool/net/lzip.c              kLuaZip[] + Reader/Writer/Appender
+--   * cov        tool/net/lcov.c              kLuaCov[]
 --   * repl       third_party/lua/lreplmod.c   kReplFuncs[]
 --
 -- unix constants are registered two ways, both covered here:
@@ -198,6 +199,7 @@ local C_sqlite = (slurp("tool/net/lsqlite3.c")
   :gsub("#ifdef SQLITE_ENABLE_SESSION.-\n#endif\n", ""))
 local C_getopt = slurp("tool/net/lgetopt.c")
 local C_zip = slurp("tool/net/lzip.c")
+local C_cov = slurp("tool/net/lcov.c")
 local C_repl = slurp("third_party/lua/lreplmod.c")
 local C_cosmo = slurp("tool/lua/lcosmo.c")
 
@@ -302,6 +304,10 @@ local MODULES = {
       { class = "Writer", reg = reg_table(C_zip, "kLuaZipWriterMethods") },
       { class = "Appender", reg = reg_table(C_zip, "kLuaZipAppenderMethods") },
     },
+  },
+  {
+    name = "cov",
+    fns = reg_table(C_cov, "kLuaCov"),
   },
   {
     name = "repl",

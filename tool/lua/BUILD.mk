@@ -33,7 +33,8 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/net/largon2.o					\
 	o/$(MODE)/tool/net/lfetch.o					\
 	o/$(MODE)/tool/net/lgetopt.o					\
-	o/$(MODE)/tool/net/lzip.o
+	o/$(MODE)/tool/net/lzip.o					\
+	o/$(MODE)/tool/net/lcov.o
 
 TOOL_LUA_DIRECTDEPS =							\
 	DSP_SCALE							\
@@ -141,6 +142,10 @@ o/$(MODE)/tool/lua/test_zip.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip.lua
 	$< tool/lua/test_zip.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_cov.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_cov.lua
+	$< tool/lua/test_cov.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_zip_append.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip_append.lua
 	$< tool/lua/test_zip_append.lua
 	@touch $@
@@ -189,7 +194,7 @@ o/$(MODE)/tool/lua/test_fetch_local.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test
 	$< tool/lua/test_fetch_local.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua tool/net/definitions.lua tool/lua/lcosmo.c third_party/lua/lunix.c third_party/lua/lreplmod.c tool/net/lpath.c tool/net/lre.c tool/net/largon2.c tool/net/lsqlite3.c tool/net/lgetopt.c tool/net/lzip.c libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
+o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua tool/net/definitions.lua tool/lua/lcosmo.c third_party/lua/lunix.c third_party/lua/lreplmod.c tool/net/lpath.c tool/net/lre.c tool/net/largon2.c tool/net/lsqlite3.c tool/net/lgetopt.c tool/net/lzip.c tool/net/lcov.c libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
 	$< tool/lua/test_definitions_coverage.lua
 	@touch $@
 
@@ -212,6 +217,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_slurp_barf.ok				\
 	o/$(MODE)/tool/lua/test_strftime.ok				\
 	o/$(MODE)/tool/lua/test_zip.ok					\
+	o/$(MODE)/tool/lua/test_cov.ok					\
 	o/$(MODE)/tool/lua/test_zip_append.ok				\
 	o/$(MODE)/tool/lua/test_zip_security.ok				\
 	o/$(MODE)/tool/lua/test_unix_proc.ok				\
