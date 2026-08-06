@@ -44,45 +44,14 @@ releases ship; build in default mode unless you have a reason not to.
 
 ## Performance work
 
-cosmic's benchmark harness is the measurement tool for this repo's hot
-paths — its ~25 end-to-end scenarios (JSON, SQLite, fs, startup, spawn,
-...) each validate their own output, and its comparison gate is
-noise-aware. The loop is documented in cosmic at
-`_perf/OPTIMIZE.md`, with the C-layer specifics (how a locally built
-`lua` from THIS checkout becomes the runtime a measurable cosmic binary
-is built onto, and the guardrails) in
-`_perf/optimize/cosmopolitan.md`. Open, evidence-backed hypotheses
-targeting this repo are tracked as GitHub issues labeled `perf` in
-whilp/cosmopolitan:
+Performance work on this repo is measured and driven from a cosmic
+checkout — its benchmark harness exercises these bindings end to end,
+and its `optimize` skill holds the whole loop, including the C-layer
+chapter for working from a locally built `lua`. Nothing about that loop
+is documented here. What lives here is the backlog: open,
+evidence-backed hypotheses targeting this repo are GitHub issues
+labeled `perf` in whilp/cosmopolitan:
 `gh issue list --repo whilp/cosmopolitan --label perf --state open`.
-
-Short version, run from a cosmic checkout:
-
-```bash
-make -C ~/cosmopolitan -j$(nproc) o//tool/lua/lua
-
-# A cosmic is its payload embedded onto a RUNTIME, and the runtime is
-# whatever sits at o/3p/cosmos/lua. Stand your build there; the next
-# build embeds onto it. There is no wrap step and no knob.
-cp o/3p/cosmos/lua o/3p/cosmos/lua.pinned
-cp ~/cosmopolitan/o/tool/lua/lua o/3p/cosmos/lua
-bin/cosmic --make build
-
-BENCH=$(ls _perf/bench/*_bench.tl | sed 's|/|.|g;s|\.tl$||')
-o/bin/cosmic -- o/_perf/run.lua --out o/perf/baseline.json $BENCH
-# ...edit C here, rebuild, cp into o/3p/cosmos/lua, --make build again...
-o/bin/cosmic -- o/_perf/run.lua --out o/perf/current.json $BENCH
-o/bin/cosmic -- o/_perf/gate.lua compare \
-  o/perf/baseline.json o/perf/current.json o/perf/selfb.json
-```
-
-`cp o/3p/cosmos/lua.pinned o/3p/cosmos/lua && bin/cosmic --make build`
-puts the pinned runtime back. Check which one you are holding before
-you trust a number.
-
-Always A/B two local builds that differ only by your change; never
-judge a change by comparing a local build against the pinned release.
-Quote the compare gate's lines in your PR.
 
 ## Conventions
 
