@@ -28,6 +28,7 @@ char *EscapeFragment(const char *, size_t, size_t *) libcesque;
 char *EscapeSegment(const char *, size_t, size_t *) libcesque;
 char *EscapeJsStringLiteral(char **, size_t *, const char *, size_t,
                             size_t *) libcesque;
+size_t JsStringLiteralSpan(const char *, size_t) libcesque;
 
 ssize_t HasControlCodes(const char *, size_t, int) libcesque;
 char *Underlong(const char *, size_t, size_t *) libcesque;

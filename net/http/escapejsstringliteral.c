@@ -157,3 +157,31 @@ char *EscapeJsStringLiteral(char **r, size_t *y, const char *p, size_t n,
   }
   return *r;
 }
+
+/**
+ * Returns length of longest prefix of p that EscapeJsStringLiteral()
+ * emits verbatim.
+ *
+ * A byte passes through the escaper unchanged exactly when it is ascii
+ * and its kEscapeLiteral class is zero; every other byte (controls,
+ * quotes, html-entity characters, backslash, del, and all non-ascii,
+ * which takes the utf-8 decode path) is rewritten. A return value of n
+ * therefore proves EscapeJsStringLiteral(p, n) would be a byte-for-byte
+ * copy, letting serializers skip the scratch buffer and second copy for
+ * the common clean string. Lives beside kEscapeLiteral so the two can
+ * never drift.
+ *
+ * @param p is input value
+ * @param n is byte length of `p`
+ * @return number of leading bytes the escaper would pass through
+ */
+size_t JsStringLiteralSpan(const char *p, size_t n) {
+  size_t i = 0;
+  while (i < n) {
+    unsigned char c = p[i];
+    if (c >= 128 || kEscapeLiteral[c])
+      break;
+    ++i;
+  }
+  return i;
+}
