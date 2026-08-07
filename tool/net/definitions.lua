@@ -1409,6 +1409,36 @@ re.Regex = {}
 ---@nodiscard
 function re.Regex:search(str, flags) end
 
+--- Executes precompiled regular expression, reporting where the match
+--- is. Like `re.Regex:search`, but instead of the matched substring it
+--- returns the match's absolute 1-based inclusive start and end offsets
+--- into `str`, plus the table of parenthesized capture groups (an empty
+--- table when the pattern has no groups; `""` for a group that did not
+--- participate). The matched text is `str:sub(start, stop)`.
+---
+--- `init` (1-based, defaults to 1) starts the search at that offset:
+--- the pattern is matched against the tail of `str`, and the returned
+--- offsets are still absolute. This is what makes iterating every match
+--- O(𝑛) overall: advance `init` past each match instead of taking an
+--- O(𝑛) `str:sub` per step. When `init > 1` the engine sees the tail as
+--- the whole subject, so pass `re.NOTBOL` if `^` should not match at
+--- `init`. An `init` past the end of `str` reports no match.
+---
+--- A no-match is not an error: it returns a single bare `nil`. Only a
+--- genuine regex engine failure returns `nil, err`. Like
+--- `re.Regex:search`, matching stops at the first NUL byte in `str`.
+---@param str string
+---@param flags? re.SearchFlag defaults to zero and may have any of:
+---
+--- - `re.NOTBOL`
+--- - `re.NOTEOL`
+---@param init? integer 1-based offset to start searching at (defaults to 1)
+---@return integer|nil start absolute 1-based offset of the first matched character
+---@return integer|string|nil stop absolute 1-based offset of the last matched character (an error string when start is nil)
+---@return {string} captures the parenthesized capture groups, in order
+---@nodiscard
+function re.Regex:find(str, flags, init) end
+
 --- Searches for regular expression match in text.
 ---
 --- This is a shorthand notation roughly equivalent to:
