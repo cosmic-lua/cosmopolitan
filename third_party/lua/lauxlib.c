@@ -1092,11 +1092,12 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
     lf.buff[lf.n++] = '\n';  /* add newline to correct line numbers */
   if (c == LUA_SIGNATURE[0]) {  /* binary file? */
     lf.n = 0;  /* remove possible newline */
-    if (filename) {  /* "real" file? */
-    lf.f = freopen(filename, "rb", lf.f);  /* reopen in binary mode */
-    if (lf.f == NULL) return errfile(L, "reopen", fnameindex);
-      skipcomment(lf.f, &c);  /* re-read initial portion */
-    }
+    /* cosmo's stdio ignores the 'b' mode flag on every platform
+       (fopenflags.c), so the stream is already binary-clean and
+       positioned right after 'c'; the ISO C freopen(...,"rb") dance
+       for text-mode systems would only reopen the file to arrive at
+       this exact state, which costs an extra open per bytecode chunk
+       (every module load on a zipos bytecode payload). */
   }
   if (c != EOF)
     lf.buff[lf.n++] = c;  /* 'c' is the first character of the stream */
