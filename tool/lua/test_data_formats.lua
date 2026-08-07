@@ -139,4 +139,41 @@ assert(v == nil and type(err) == "string", "zero maxsize -> nil,err")
 -- empty input round-trips
 assert(cosmo.Inflate(assert(cosmo.Deflate(""))) == "", "empty round-trip")
 
+--------------------------------------------------------------------------------
+-- 4. IsBase64: the strict structural validator complementing the
+--    permissive DecodeBase64 (issue #227)
+--------------------------------------------------------------------------------
+
+-- valid standard base64, padded and unpadded
+assert(cosmo.IsBase64("aGVsbG8="), "padded standard base64")
+assert(cosmo.IsBase64("aGVsbG8"), "unpadded input is valid")
+assert(cosmo.IsBase64("TQ=="), "two padding chars")
+assert(cosmo.IsBase64(""), "empty string is valid")
+assert(cosmo.IsBase64("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"),
+  "whole standard alphabet")
+
+-- padding rules: only at the end, at most two
+assert(not cosmo.IsBase64("TQ==="), "three padding chars rejected")
+assert(not cosmo.IsBase64("T=Q"), "padding in the middle rejected")
+assert(not cosmo.IsBase64("===="), "padding-only run of four rejected")
+assert(cosmo.IsBase64("=="), "bare two-char padding is structurally valid")
+
+-- character-set violations DecodeBase64 would silently skip
+assert(not cosmo.IsBase64("aGVs bG8="), "whitespace rejected")
+assert(not cosmo.IsBase64("aGVs\nbG8="), "newline rejected")
+assert(not cosmo.IsBase64("aGVsbG8=\255"), "high byte rejected")
+
+-- alphabets don't cross: url-safe chars fail standard validation and
+-- vice versa, even though DecodeBase64 accepts the union
+assert(not cosmo.IsBase64("a-b_c"), "url-safe chars rejected in standard mode")
+assert(cosmo.IsBase64("a-b_c", true), "url-safe chars accepted in urlsafe mode")
+assert(not cosmo.IsBase64("a+b/c", true), "standard chars rejected in urlsafe mode")
+assert(cosmo.IsBase64("a+b/c"), "standard chars accepted in standard mode")
+
+-- validated input decodes to the same bytes the permissive decoder gives
+local payload = cosmo.EncodeBase64("The quick brown fox jumps over the lazy dog")
+assert(cosmo.IsBase64(payload), "EncodeBase64 output validates")
+assert(cosmo.DecodeBase64(payload) ==
+  "The quick brown fox jumps over the lazy dog", "gated decode round-trips")
+
 print("test_data_formats: PASS")

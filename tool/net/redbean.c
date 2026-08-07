@@ -5116,6 +5116,7 @@ static const luaL_Reg kLuaFuncs[] = {
     {"IsAcceptablePath", LuaIsAcceptablePath},                  //
     {"IsAcceptablePort", LuaIsAcceptablePort},                  //
     {"IsAssetCompressed", LuaIsAssetCompressed},                //
+    {"IsBase64", LuaIsBase64},                                  //
     {"IsClientUsingSsl", LuaIsClientUsingSsl},                  //
     {"IsDaemon", LuaIsDaemon},                                  //
     {"IsHiddenPath", LuaIsHiddenPath},                          //

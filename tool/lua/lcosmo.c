@@ -234,6 +234,7 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"IsAcceptableHost", LuaIsAcceptableHost},
     {"IsAcceptablePath", LuaIsAcceptablePath},
     {"IsAcceptablePort", LuaIsAcceptablePort},
+    {"IsBase64", LuaIsBase64},
     {"IsLoopbackIp", LuaIsLoopbackIp},
     {"is_main", LuaIsMain},
     {"IsPrivateIp", LuaIsPrivateIp},

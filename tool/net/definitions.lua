@@ -2694,6 +2694,24 @@ function cosmo.IsAcceptablePath(str) end
 ---@nodiscard
 function cosmo.IsAcceptablePort(str) end
 
+--- Returns `true` if `ascii` is structurally valid base64: zero or more
+--- characters from one alphabet, then at most two `=` padding
+--- characters, then the end of the string. The empty string is valid,
+--- and unpadded input is valid. The alphabet is the standard
+--- `A-Za-z0-9+/` (RFC 4648 §4), or the url-safe `A-Za-z0-9-_`
+--- (RFC 4648 §5) when `urlsafe` is true.
+---
+--- This is the strict complement to `DecodeBase64`, which is permissive
+--- by design (it skips characters outside its alphabet and accepts both
+--- alphabets interchangeably). Callers that must reject malformed or
+--- cross-alphabet input can gate the decode on this one C-speed scan
+--- instead of validating in Lua. See `isbase64.c`.
+---@param ascii string
+---@param urlsafe boolean? validate the url-safe alphabet instead (defaults to false)
+---@return boolean
+---@nodiscard
+function cosmo.IsBase64(ascii, urlsafe) end
+
 ---@param uint32 integer
 ---@return boolean # true if IP address is part of the localhost network (127.0.0.0/8).
 ---@nodiscard

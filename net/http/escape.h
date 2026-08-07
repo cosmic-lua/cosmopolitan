@@ -42,6 +42,7 @@ char *DecodeBase32(const char *, size_t, const char *, size_t,
                    size_t *) libcesque;
 char *EncodeBase64(const void *, size_t, size_t *) libcesque;
 char *DecodeBase64(const char *, size_t, size_t *) libcesque;
+bool32 IsBase64(const char *, size_t, bool32) libcesque;
 
 COSMOPOLITAN_C_END_
 #endif /* COSMOPOLITAN_NET_HTTP_ESCAPE_H_ */

@@ -44,6 +44,7 @@ int LuaHasControlCodes(lua_State *);
 int LuaInflate(lua_State *);
 int LuaIsAcceptableHost(lua_State *);
 int LuaIsAcceptablePath(lua_State *);
+int LuaIsBase64(lua_State *);
 int LuaIsAcceptablePort(lua_State *);
 int LuaIsLoopbackIp(lua_State *);
 int LuaIsPrivateIp(lua_State *);
