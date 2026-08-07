@@ -3012,6 +3012,24 @@ function cosmo.UuidV7() end
 ---@return string? error error message on failure
 function cosmo.StreamReader:read() end
 
+--- Reads the response body up to the next occurrence of `delim`.
+---
+--- Buffers arriving chunks internally (in C) and returns the bytes
+--- before the delimiter, consuming the delimiter itself, which may be
+--- multiple bytes and is never included in the result. With `"\n"` this
+--- is a line reader whose cost does not scale with how the peer's
+--- writes happened to be paced. At end of stream an unterminated
+--- remainder is returned once; after that (or for an empty body) it
+--- returns `nil` with no error, like `read`. Returns `nil` plus an
+--- error message string on the same failures as `read`. Mixing `read`
+--- and `read_until` on one reader is safe: `read` drains any buffered
+--- carry-over before touching the connection, so bytes are never
+--- reordered or dropped.
+---@param delim string non-empty delimiter to scan for
+---@return string? data bytes before the delimiter (or the final remainder), or nil on EOF
+---@return string? error error message on failure
+function cosmo.StreamReader:read_until(delim) end
+
 --- Closes the reader and releases the connection, buffer, and TLS
 --- state. Idempotent: closing an already-closed reader is a no-op.
 --- Returns nothing.

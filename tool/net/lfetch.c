@@ -317,6 +317,8 @@ typedef struct FetchReader {
   struct HttpUnchunker u;   // chunked encoding state
   struct Buffer buf;        // read buffer
   size_t buf_pos;           // current read position in buffer (body data)
+  struct Buffer line;       // read_until() carry-over of undelivered bytes
+  size_t line_pos;          // consumed prefix of the carry-over buffer
 #ifndef UNSECURE
   mbedtls_ssl_context *sslctx;  // heap-allocated, owned by reader
   struct TlsBio *bio;
@@ -349,30 +351,36 @@ static void FetchReaderClose(FetchReader *r) {
   r->buf.p = NULL;
   r->buf.n = 0;
   r->buf.c = 0;
+  free(r->line.p);
+  r->line.p = NULL;
+  r->line.n = 0;
+  r->line.c = 0;
+  r->line_pos = 0;
 }
 
-// reader:read() -> string (chunk), or nil on EOF, or nil,err on error
-static int LuaFetchReaderRead(lua_State *L) {
-  FetchReader *r = CheckFetchReader(L);
+// Produces the next decoded body span. This is the read() logic of
+// old, factored out so read() and read_until() share one copy of the
+// buffered-overshoot, unchunk, length-clamp, EOF, and error handling
+// (and their exact state transitions and error strings). Returns 1
+// with *data/*len set (pointing into r->buf or scratch, valid until
+// the next call), 0 on EOF, or -1 with *err set (a string literal, or
+// errbuf which the caller provides for formatted messages). Loops
+// internally so chunk framing arriving without payload never surfaces
+// as an empty span.
+static int FetchReaderNext(FetchReader *r, char *scratch, size_t scratchn,
+                           char *errbuf, size_t errbufn, const char **data,
+                           size_t *len, const char **err) {
   ssize_t rc;
 
-  if (r->closed) {
-    lua_pushnil(L);
-    lua_pushliteral(L, "reader closed");
-    return 2;
-  }
-
-  // Check if stream was already completed (return EOF)
+  // Check if stream was already completed (EOF)
   if (r->stream_complete) {
-    lua_pushnil(L);
-    return 1;
+    return 0;
   }
 
   // For lengthed bodies, check if we already got everything
   if (r->body_state == kHttpClientStateBodyLengthed &&
       r->bytes_read >= r->content_length) {
-    lua_pushnil(L);
-    return 1;
+    return 0;
   }
 
   // First, serve any data already in the buffer from header overshoot
@@ -386,9 +394,8 @@ static int LuaFetchReaderRead(lua_State *L) {
       size_t paylen = 0;
       int uc = Unchunk(&r->u, r->buf.p + r->buf_pos, avail, &paylen);
       if (uc == -1) {
-        lua_pushnil(L);
-        lua_pushliteral(L, "unchunk error");
-        return 2;
+        *err = "unchunk error";
+        return -1;
       }
       // Unchunk writes decoded data in-place; u.j has decoded byte count.
       // paylen is only set when uc>0 (complete), so use u.j always.
@@ -397,19 +404,20 @@ static int LuaFetchReaderRead(lua_State *L) {
         // Chunked encoding complete - mark stream as done
         r->stream_complete = true;
         if (decoded > 0) {
-          // Return the decoded data; next read will return EOF
-          lua_pushlstring(L, r->buf.p + r->buf_pos, decoded);
+          // Return the decoded data; next call reports EOF
+          *data = r->buf.p + r->buf_pos;
+          *len = decoded;
           r->bytes_read += decoded;
           r->buf_pos = r->buf.n;
           return 1;
         }
-        // No data in final chunk, return EOF immediately
+        // No data in final chunk, report EOF immediately
         r->buf_pos = r->buf.n;
-        lua_pushnil(L);
-        return 1;
+        return 0;
       }
       if (decoded > 0) {
-        lua_pushlstring(L, r->buf.p + r->buf_pos, decoded);
+        *data = r->buf.p + r->buf_pos;
+        *len = decoded;
         r->bytes_read += decoded;
         r->buf_pos = r->buf.n;
         return 1;
@@ -422,7 +430,8 @@ static int LuaFetchReaderRead(lua_State *L) {
         size_t remaining = r->content_length - r->bytes_read;
         if (avail > remaining) avail = remaining;
       }
-      lua_pushlstring(L, r->buf.p + r->buf_pos, avail);
+      *data = r->buf.p + r->buf_pos;
+      *len = avail;
       r->buf_pos += avail;
       r->bytes_read += avail;
       return 1;
@@ -431,48 +440,39 @@ static int LuaFetchReaderRead(lua_State *L) {
 
   // Read from socket. Loops so that chunk framing arriving without any
   // payload (e.g. a chunk-size line in its own packet) never surfaces as
-  // an empty-string chunk: keep reading until payload, EOF, or error.
-  char readbuf[16384];
+  // an empty span: keep reading until payload, EOF, or error.
   for (;;) {
 #ifndef UNSECURE
     if (r->usingssl) {
-      rc = mbedtls_ssl_read(r->sslctx, (unsigned char *)readbuf,
-                            sizeof(readbuf));
+      rc = mbedtls_ssl_read(r->sslctx, (unsigned char *)scratch, scratchn);
       if (rc == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || rc == 0) {
         // EOF
         if (r->body_state == kHttpClientStateBody) {
-          lua_pushnil(L);
-          return 1;
+          return 0;
         }
-        lua_pushnil(L);
-        lua_pushliteral(L, "unexpected EOF");
-        return 2;
+        *err = "unexpected EOF";
+        return -1;
       }
       if (rc < 0) {
-        char errbuf[300];
-        mbedtls_strerror(rc, errbuf, sizeof(errbuf));
-        lua_pushnil(L);
-        lua_pushstring(L, errbuf);
-        return 2;
+        mbedtls_strerror(rc, errbuf, errbufn);
+        *err = errbuf;
+        return -1;
       }
     } else
 #endif
     {
-      rc = READ(r->sock, readbuf, sizeof(readbuf));
+      rc = READ(r->sock, scratch, scratchn);
       if (rc == 0) {
         // EOF
         if (r->body_state == kHttpClientStateBody) {
-          lua_pushnil(L);
-          return 1;
+          return 0;
         }
-        lua_pushnil(L);
-        lua_pushliteral(L, "unexpected EOF");
-        return 2;
+        *err = "unexpected EOF";
+        return -1;
       }
       if (rc == -1) {
-        lua_pushnil(L);
-        lua_pushstring(L, strerror(errno));
-        return 2;
+        *err = strerror(errno);
+        return -1;
       }
     }
 
@@ -482,11 +482,10 @@ static int LuaFetchReaderRead(lua_State *L) {
       r->u.i = 0;
       r->u.j = 0;
       size_t paylen = 0;
-      int uc = Unchunk(&r->u, readbuf, rc, &paylen);
+      int uc = Unchunk(&r->u, scratch, rc, &paylen);
       if (uc == -1) {
-        lua_pushnil(L);
-        lua_pushliteral(L, "unchunk error");
-        return 2;
+        *err = "unchunk error";
+        return -1;
       }
       // Unchunk writes decoded data in-place; u.j has decoded byte count.
       // paylen is only set when uc>0 (complete), so use u.j always.
@@ -495,17 +494,18 @@ static int LuaFetchReaderRead(lua_State *L) {
         // Chunked encoding complete (final chunk + trailers received)
         r->stream_complete = true;
         if (decoded > 0) {
-          // Return the decoded data; next read will return EOF
-          lua_pushlstring(L, readbuf, decoded);
+          // Return the decoded data; next call reports EOF
+          *data = scratch;
+          *len = decoded;
           r->bytes_read += decoded;
           return 1;
         }
-        // No data in final chunk, return EOF immediately
-        lua_pushnil(L);
-        return 1;
+        // No data in final chunk, report EOF immediately
+        return 0;
       }
       if (decoded > 0) {
-        lua_pushlstring(L, readbuf, decoded);
+        *data = scratch;
+        *len = decoded;
         r->bytes_read += decoded;
         return 1;
       }
@@ -514,18 +514,145 @@ static int LuaFetchReaderRead(lua_State *L) {
     }
 
     // Non-chunked body
-    size_t len = rc;
+    size_t n = rc;
     if (r->body_state == kHttpClientStateBodyLengthed) {
       size_t remaining = r->content_length - r->bytes_read;
-      if (len > remaining) len = remaining;
+      if (n > remaining) n = remaining;
     }
-    lua_pushlstring(L, readbuf, len);
-    r->bytes_read += len;
+    *data = scratch;
+    *len = n;
+    r->bytes_read += n;
     if (r->body_state == kHttpClientStateBodyLengthed &&
         r->bytes_read >= r->content_length) {
       r->stream_complete = true;
     }
     return 1;
+  }
+}
+
+// Appends bytes to the read_until() carry-over buffer.
+static int FetchReaderCarry(FetchReader *r, const char *p, size_t n) {
+  char *q;
+  size_t c;
+  if (r->line.n + n > r->line.c) {
+    c = r->line.c ? r->line.c : 4096;
+    while (c < r->line.n + n) c *= 2;
+    if (!(q = realloc(r->line.p, c))) return -1;
+    r->line.p = q;
+    r->line.c = c;
+  }
+  memcpy(r->line.p + r->line.n, p, n);
+  r->line.n += n;
+  return 0;
+}
+
+// reader:read() -> string (chunk), or nil on EOF, or nil,err on error
+static int LuaFetchReaderRead(lua_State *L) {
+  FetchReader *r = CheckFetchReader(L);
+  const char *data;
+  const char *err;
+  size_t len;
+  int rc;
+  char scratch[16384];
+  char errbuf[300];
+
+  if (r->closed) {
+    lua_pushnil(L);
+    lua_pushliteral(L, "reader closed");
+    return 2;
+  }
+
+  // Drain any carry-over a read_until() left behind first, so mixing
+  // the two methods never reorders or drops bytes.
+  if (r->line_pos < r->line.n) {
+    lua_pushlstring(L, r->line.p + r->line_pos, r->line.n - r->line_pos);
+    r->line_pos = 0;
+    r->line.n = 0;
+    return 1;
+  }
+
+  rc = FetchReaderNext(r, scratch, sizeof(scratch), errbuf, sizeof(errbuf),
+                       &data, &len, &err);
+  if (rc > 0) {
+    lua_pushlstring(L, data, len);
+    return 1;
+  }
+  if (rc == 0) {
+    lua_pushnil(L);
+    return 1;
+  }
+  lua_pushnil(L);
+  lua_pushstring(L, err);
+  return 2;
+}
+
+// reader:read_until(delim) -> string (bytes before delim, consuming
+// it), the unterminated remainder at EOF, nil at EOF, or nil,err on
+// error. The delimiter may be multiple bytes and is never included in
+// the result. Buffering lives here in C, so consumers iterating lines
+// don't pay a Lua-side buffer rebuild per arriving chunk.
+static int LuaFetchReaderReadUntil(lua_State *L) {
+  FetchReader *r = CheckFetchReader(L);
+  const char *data;
+  const char *err;
+  const char *hit;
+  size_t len, dn;
+  const char *d;
+  int rc;
+  char scratch[16384];
+  char errbuf[300];
+
+  d = luaL_checklstring(L, 2, &dn);
+  luaL_argcheck(L, dn >= 1, 2, "delimiter must be non-empty");
+
+  if (r->closed) {
+    lua_pushnil(L);
+    lua_pushliteral(L, "reader closed");
+    return 2;
+  }
+
+  for (;;) {
+    // Serve from the carry-over buffer if it holds a delimiter
+    if (r->line.n - r->line_pos >= dn &&
+        (hit = memmem(r->line.p + r->line_pos, r->line.n - r->line_pos, d,
+                      dn))) {
+      lua_pushlstring(L, r->line.p + r->line_pos,
+                      hit - (r->line.p + r->line_pos));
+      r->line_pos = (hit - r->line.p) + dn;
+      return 1;
+    }
+
+    // Compact the consumed prefix before buffering more
+    if (r->line_pos) {
+      memmove(r->line.p, r->line.p + r->line_pos, r->line.n - r->line_pos);
+      r->line.n -= r->line_pos;
+      r->line_pos = 0;
+    }
+
+    rc = FetchReaderNext(r, scratch, sizeof(scratch), errbuf, sizeof(errbuf),
+                         &data, &len, &err);
+    if (rc < 0) {
+      // Error takes precedence; the carry-over stays buffered for a
+      // later read()/read_until() to drain.
+      lua_pushnil(L);
+      lua_pushstring(L, err);
+      return 2;
+    }
+    if (rc == 0) {
+      // EOF: yield the unterminated remainder once, then nil
+      if (r->line.n) {
+        lua_pushlstring(L, r->line.p, r->line.n);
+        r->line.n = 0;
+        return 1;
+      }
+      lua_pushnil(L);
+      return 1;
+    }
+    if (FetchReaderCarry(r, data, len) == -1) {
+      lua_pushnil(L);
+      lua_pushliteral(L, "out of memory");
+      return 2;
+    }
   }
 }
 
@@ -556,6 +683,7 @@ static int LuaFetchReaderTostring(lua_State *L) {
 
 static const luaL_Reg kFetchReaderMethods[] = {
     {"read", LuaFetchReaderRead},
+    {"read_until", LuaFetchReaderReadUntil},
     {"close", LuaFetchReaderCloseMethod},
     {0},
 };
