@@ -85,6 +85,16 @@ static int SerializeString(lua_State *L, char **buf, int idx,
   size_t m;
   const char *s;
   s = lua_tolstring(L, idx, &m);
+  if (JsStringLiteralSpan(s, m) == m) {
+    // the escaper would pass every byte through verbatim (the common
+    // case for keys and clean values), so append the string directly
+    // instead of paying the escape pass into z->strbuf plus a second
+    // copy out of it. output bytes are identical by construction.
+    RETURN_ON_ERROR(appendw(buf, '"'));
+    RETURN_ON_ERROR(appendd(buf, s, m));
+    RETURN_ON_ERROR(appendw(buf, '"'));
+    return 0;
+  }
   if (!(s = EscapeJsStringLiteral(&z->strbuf, &z->strbuflen, s, m, &m))) {
     goto OnError;
   }
@@ -142,34 +152,55 @@ OnError:
   return -1;
 }
 
-static int CompareJsonEntries(const void *p1, const void *p2) {
-  const char *a = *(const char **)p1;
-  const char *b = *(const char **)p2;
-  for (; *a == *b; a++, b++) {
-    if (!*a)
-      break;
-  }
-  return (*a & 0xff) - (*b & 0xff);
+struct JsonEntry {
+  size_t off;  // into the entry buffer
+  size_t len;  // excluding any terminator; entries contain no NULs
+};
+
+static int CompareJsonEntries(const void *p1, const void *p2, void *arg) {
+  // Escaped entry bytes never contain NUL (a NUL in a key or value is
+  // emitted as the six characters of its \u escape), so unsigned memcmp
+  // with a shorter-prefix-first tiebreak orders exactly like the
+  // bytewise strcmp this replaces.
+  const struct JsonEntry *a = p1;
+  const struct JsonEntry *b = p2;
+  const char *base = arg;
+  size_t n = a->len < b->len ? a->len : b->len;
+  int r = memcmp(base + a->off, base + b->off, n);
+  if (r)
+    return r;
+  return (a->len > b->len) - (a->len < b->len);
 }
 
 static int SerializeSorted(lua_State *L, char **buf, struct Serializer *z,
                            int depth, bool multi) {
-  // Serialize each `"key":value` entry into one contiguous buffer,
-  // NUL-separated, then sort pointers into it. This produces byte-for-byte
-  // the same output as sorting a StrList of individually-allocated entries,
-  // but replaces the per-key malloc/free churn with a single growable buffer
-  // plus one pointer array.
+  // Serialize each `"key":value` entry into one contiguous buffer and
+  // record its offset and length as it is written, then sort the
+  // records. This produces byte-for-byte the same output as sorting
+  // NUL-terminated entry pointers, without the two extra full passes
+  // over the entry bytes that terminators cost (the strlen walk that
+  // rebuilt pointers, and appends()'s strlen at emission).
   int i, n = 0;
-  char *s;
+  size_t cap = 0;
   char *ent = 0;
-  char **ptrs = 0;
+  struct JsonEntry *ents = 0;
+  void *grown;
   lua_pushnil(L);
   while (lua_next(L, -2)) {
     if (lua_type(L, -2) == LUA_TSTRING) {
+      if ((size_t)n == cap) {
+        cap = cap ? cap * 2 : 8;
+        if (!(grown = realloc(ents, cap * sizeof(*ents)))) {
+          z->reason = "out of memory";
+          goto OnError;
+        }
+        ents = grown;
+      }
+      ents[n].off = appendz(ent).i;
       RETURN_ON_ERROR(SerializeString(L, &ent, -2, z));
       RETURN_ON_ERROR(appendw(&ent, z->conf.pretty ? READ16LE(": ") : ':'));
       RETURN_ON_ERROR(Serialize(L, &ent, -1, z, depth + 1));
-      RETURN_ON_ERROR(appendw(&ent, 0));  // NUL separator between entries
+      ents[n].len = appendz(ent).i - ents[n].off;
       ++n;
       lua_pop(L, 1);
     } else {
@@ -178,15 +209,7 @@ static int SerializeSorted(lua_State *L, char **buf, struct Serializer *z,
     }
   }
   if (n) {
-    if (!(ptrs = malloc(n * sizeof(*ptrs)))) {
-      z->reason = "out of memory";
-      goto OnError;
-    }
-    for (i = 0, s = ent; i < n; ++i) {
-      ptrs[i] = s;
-      s += strlen(s) + 1;
-    }
-    qsort(ptrs, n, sizeof(*ptrs), CompareJsonEntries);
+    qsort_r(ents, n, sizeof(*ents), CompareJsonEntries, ent);
   }
   RETURN_ON_ERROR(SerializeObjectStart(buf, z, depth, multi));
   for (i = 0; i < n; ++i) {
@@ -196,14 +219,14 @@ static int SerializeSorted(lua_State *L, char **buf, struct Serializer *z,
         RETURN_ON_ERROR(SerializeObjectIndent(buf, z, depth + 1));
       }
     }
-    RETURN_ON_ERROR(appends(buf, ptrs[i]));
+    RETURN_ON_ERROR(appendd(buf, ent + ents[i].off, ents[i].len));
   }
   RETURN_ON_ERROR(SerializeObjectEnd(buf, z, depth, multi));
-  free(ptrs);
+  free(ents);
   free(ent);
   return 0;
 OnError:
-  free(ptrs);
+  free(ents);
   free(ent);
   return -1;
 }
