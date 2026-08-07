@@ -1409,6 +1409,36 @@ re.Regex = {}
 ---@nodiscard
 function re.Regex:search(str, flags) end
 
+--- Executes precompiled regular expression, reporting where the match
+--- is. Like `re.Regex:search`, but instead of the matched substring it
+--- returns the match's absolute 1-based inclusive start and end offsets
+--- into `str`, plus the table of parenthesized capture groups (an empty
+--- table when the pattern has no groups; `""` for a group that did not
+--- participate). The matched text is `str:sub(start, stop)`.
+---
+--- `init` (1-based, defaults to 1) starts the search at that offset:
+--- the pattern is matched against the tail of `str`, and the returned
+--- offsets are still absolute. This is what makes iterating every match
+--- O(𝑛) overall: advance `init` past each match instead of taking an
+--- O(𝑛) `str:sub` per step. When `init > 1` the engine sees the tail as
+--- the whole subject, so pass `re.NOTBOL` if `^` should not match at
+--- `init`. An `init` past the end of `str` reports no match.
+---
+--- A no-match is not an error: it returns a single bare `nil`. Only a
+--- genuine regex engine failure returns `nil, err`. Like
+--- `re.Regex:search`, matching stops at the first NUL byte in `str`.
+---@param str string
+---@param flags? re.SearchFlag defaults to zero and may have any of:
+---
+--- - `re.NOTBOL`
+--- - `re.NOTEOL`
+---@param init? integer 1-based offset to start searching at (defaults to 1)
+---@return integer|nil start absolute 1-based offset of the first matched character
+---@return integer|string|nil stop absolute 1-based offset of the last matched character (an error string when start is nil)
+---@return {string} captures the parenthesized capture groups, in order
+---@nodiscard
+function re.Regex:find(str, flags, init) end
+
 --- Searches for regular expression match in text.
 ---
 --- This is a shorthand notation roughly equivalent to:
@@ -2693,6 +2723,24 @@ function cosmo.IsAcceptablePath(str) end
 ---@return boolean
 ---@nodiscard
 function cosmo.IsAcceptablePort(str) end
+
+--- Returns `true` if `ascii` is structurally valid base64: zero or more
+--- characters from one alphabet, then at most two `=` padding
+--- characters, then the end of the string. The empty string is valid,
+--- and unpadded input is valid. The alphabet is the standard
+--- `A-Za-z0-9+/` (RFC 4648 §4), or the url-safe `A-Za-z0-9-_`
+--- (RFC 4648 §5) when `urlsafe` is true.
+---
+--- This is the strict complement to `DecodeBase64`, which is permissive
+--- by design (it skips characters outside its alphabet and accepts both
+--- alphabets interchangeably). Callers that must reject malformed or
+--- cross-alphabet input can gate the decode on this one C-speed scan
+--- instead of validating in Lua. See `isbase64.c`.
+---@param ascii string
+---@param urlsafe boolean? validate the url-safe alphabet instead (defaults to false)
+---@return boolean
+---@nodiscard
+function cosmo.IsBase64(ascii, urlsafe) end
 
 ---@param uint32 integer
 ---@return boolean # true if IP address is part of the localhost network (127.0.0.0/8).

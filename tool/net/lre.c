@@ -92,6 +92,44 @@ static int LuaReSearchImpl(lua_State *L, regex_t *r, const char *s, int f) {
   }
 }
 
+// Like LuaReSearchImpl, but reports WHERE the match is: absolute
+// 1-based inclusive start and end offsets into the original subject,
+// then the capture table. The search runs on the tail s + off (off is
+// 0-based, already validated <= subject length), which is why the
+// offsets regexec() reports are rebased by off before being pushed.
+// No-match and error conventions are LuaReSearchImpl's: a bare nil for
+// no match, nil + err:string for an engine failure.
+static int LuaReFindImpl(lua_State *L, regex_t *r, const char *s, size_t off,
+                         int f) {
+  int rc, i, n;
+  regmatch_t *m;
+  luaL_Buffer tmp;
+  n = 1 + r->re_nsub;
+  m = (regmatch_t *)luaL_buffinitsize(L, &tmp, n * sizeof(regmatch_t));
+  m->rm_so = 0;
+  m->rm_eo = 0;
+  rc = regexec(r, s + off, n, m, f >> 8);
+  if (rc == REG_OK) {
+    lua_pushinteger(L, off + m[0].rm_so + 1);
+    lua_pushinteger(L, off + m[0].rm_eo);
+    lua_createtable(L, n - 1, 0);
+    for (i = 1; i < n; ++i) {
+      if (m[i].rm_so >= 0) {
+        lua_pushlstring(L, s + off + m[i].rm_so, m[i].rm_eo - m[i].rm_so);
+      } else {
+        lua_pushliteral(L, "");
+      }
+      lua_rawseti(L, -2, i);
+    }
+    return 3;
+  } else if (rc == REG_NOMATCH) {
+    lua_pushnil(L);
+    return 1;
+  } else {
+    return LuaReReturnError(L, r, rc);
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // re
 
@@ -148,6 +186,29 @@ static int LuaReRegexSearch(lua_State *L) {
   return LuaReSearchImpl(L, r, s, f);
 }
 
+static int LuaReRegexFind(lua_State *L) {
+  int f;
+  size_t sn;
+  regex_t *r;
+  const char *s;
+  lua_Integer init;
+  r = luaL_checkudata(L, 1, "re.Regex");
+  s = luaL_checklstring(L, 2, &sn);
+  f = luaL_optinteger(L, 3, 0);
+  init = luaL_optinteger(L, 4, 1);
+  if (f & ~(REG_NOTBOL << 8 | REG_NOTEOL << 8)) {
+    luaL_argerror(L, 3, "invalid flags");
+    __builtin_unreachable();
+  }
+  if (init < 1)
+    init = 1;
+  if (init > (lua_Integer)sn + 1) {
+    lua_pushnil(L);
+    return 1;
+  }
+  return LuaReFindImpl(L, r, s, init - 1, f);
+}
+
 static int LuaReRegexGc(lua_State *L) {
   regex_t *r;
   r = luaL_checkudata(L, 1, "re.Regex");
@@ -162,6 +223,7 @@ static const luaL_Reg kLuaRe[] = {
 };
 
 static const luaL_Reg kLuaReRegexMeth[] = {
+    {"find", LuaReRegexFind},      //
     {"search", LuaReRegexSearch},  //
     {NULL, NULL},                  //
 };

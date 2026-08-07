@@ -909,6 +909,14 @@ int LuaIsValidPercentEncoding(lua_State *L) {
   return LuaIsValid(L, IsValidPercentEncoding);
 }
 
+int LuaIsBase64(lua_State *L) {
+  size_t n;
+  const char *p;
+  p = luaL_checklstring(L, 1, &n);
+  lua_pushboolean(L, IsBase64(p, n, lua_toboolean(L, 2)));
+  return 1;
+}
+
 static dontinline int LuaCoderImpl(lua_State *L,
                                    char *C(const char *, size_t, size_t *)) {
   void *q;
