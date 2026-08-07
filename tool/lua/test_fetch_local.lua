@@ -109,6 +109,20 @@ local function handle(c, base)
       write_all(c, "hi\r\n")
       unix.nanosleep(0, 150000000)
       write_all(c, "0\r\n\r\n")
+    elseif path == "/lines" then
+      -- newline-separated body paced so lines straddle arrival
+      -- boundaries: one write ends mid-line, one line spans two
+      -- writes, adjacent delimiters make an empty line, and the final
+      -- line is unterminated
+      local body = "alpha\nbravo\n\ncharlie delta\necho"
+      write_all(c, "HTTP/1.1 200 OK\r\nConnection: close\r\n" ..
+        "Content-Length: " .. #body .. "\r\n\r\n")
+      unix.nanosleep(0, 100000000)
+      write_all(c, "alpha\nbra")
+      unix.nanosleep(0, 100000000)
+      write_all(c, "vo\n\ncharlie")
+      unix.nanosleep(0, 100000000)
+      write_all(c, " delta\necho")
     else
       respond(c, "404 Not Found", nil, "")
     end
@@ -414,6 +428,71 @@ local function test_stream_no_empty_chunks()
   check("chunked body reassembled", body == "hi")
 end
 
+local function test_read_until_lines()
+  local status, _, reader = cosmo.FetchStream(BASE .. "/lines",
+                                              {allowprivate = true})
+  check("lines stream fetch succeeds", status == 200)
+  local got = {}
+  while true do
+    local line, err = reader:read_until("\n")
+    if not line then
+      check("lines stream ends cleanly, got error " .. tostring(err),
+            err == nil)
+      break
+    end
+    got[#got + 1] = line
+  end
+  check("line count, got " .. #got, #got == 5)
+  check("line 1", got[1] == "alpha")
+  check("line spanning two writes", got[2] == "bravo")
+  check("adjacent delimiters yield an empty line", got[3] == "")
+  check("line 4", got[4] == "charlie delta")
+  check("unterminated final line yielded once", got[5] == "echo")
+  local again, aerr = reader:read_until("\n")
+  check("EOF after remainder stays nil", again == nil and aerr == nil)
+  reader:close()
+  local closed, cerr = reader:read_until("\n")
+  check("read_until after close errors",
+        closed == nil and cerr == "reader closed")
+end
+
+local function test_read_until_multibyte_and_mixing()
+  -- multi-byte delimiter spanning the first two server writes
+  -- ("alpha\nbra" + "vo\n..."): the scan must see it once the carry
+  -- buffer holds both arrivals
+  local status, _, reader = cosmo.FetchStream(BASE .. "/lines",
+                                              {allowprivate = true})
+  check("lines stream fetch succeeds again", status == 200)
+  local first = reader:read_until("a\nbrav")
+  check("multi-byte delimiter consumed across a write boundary, got " ..
+        string.format("%q", tostring(first)), first == "alph")
+  -- mixing: read() must drain the carry-over before touching the wire,
+  -- so the reassembled tail continues exactly after the delimiter
+  local rest = ""
+  while true do
+    local chunk = reader:read()
+    if not chunk then break end
+    rest = rest .. chunk
+  end
+  check("read() after read_until() drains carry-over in order, got " ..
+        string.format("%q", rest), rest == "o\n\ncharlie delta\necho")
+  reader:close()
+end
+
+local function test_read_until_delim_validation()
+  local status, _, reader = cosmo.FetchStream(BASE .. "/ok",
+                                              {allowprivate = true})
+  check("ok stream fetch succeeds", status == 200)
+  local ok = pcall(function() return reader:read_until("") end)
+  check("empty delimiter is rejected", not ok)
+  -- delimiter absent from the body: whole body is the remainder
+  local all, rerr = reader:read_until("\n")
+  check("delimiter-free body returned whole as remainder, got " ..
+        tostring(all) .. " " .. tostring(rerr), all == "hello")
+  check("then clean EOF", (reader:read_until("\n")) == nil)
+  reader:close()
+end
+
 --------------------------------------------------------------------------------
 -- Run all tests
 --------------------------------------------------------------------------------
@@ -442,6 +521,12 @@ local tests = {
   {"stream basic read + effective url", test_stream_basic_and_url},
   {"stream 204 clean EOF", test_stream_204_clean_eof},
   {"stream chunked never returns empty chunks", test_stream_no_empty_chunks},
+  {"read_until iterates lines across arrival boundaries",
+   test_read_until_lines},
+  {"read_until multi-byte delim + read() mixing",
+   test_read_until_multibyte_and_mixing},
+  {"read_until validates delim; remainder-only body",
+   test_read_until_delim_validation},
 }
 
 local ok, failure = true, nil
