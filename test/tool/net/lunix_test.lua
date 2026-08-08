@@ -94,7 +94,7 @@ function UnixTest()
    -- 5. restore old signal mask
    -- 6. restore old sig handler
    oldhand, oldflags, oldmask = assert(unix.sigaction(unix.SIGUSR1, OnSigUsr1))
-   oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.Sigset(unix.SIGUSR1)))
+   oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.sigset(unix.SIGUSR1)))
    assert(unix.raise(unix.SIGUSR1))
    assert(not gotsigusr1)
    ok, err = unix.sigsuspend(oldmask)

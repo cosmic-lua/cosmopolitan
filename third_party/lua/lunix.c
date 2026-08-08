@@ -3953,7 +3953,7 @@ static int LuaUnixMapshared(lua_State *L) {
 ////////////////////////////////////////////////////////////////////////////////
 // unix.Sigset object
 
-// unix.Sigset(sig:int, ...)
+// unix.sigset(sig:int, ...)
 //     └─→ unix.Sigset
 static int LuaUnixSigset(lua_State *L) {
   int i, n;
@@ -4266,7 +4266,6 @@ static const luaL_Reg kLuaUnix[] = {
     {"S_ISLNK", LuaUnixSislnk},           // is st:mode() a symbolic link?
     {"S_ISREG", LuaUnixSisreg},           // is st:mode() a regular file?
     {"S_ISSOCK", LuaUnixSissock},         // is st:mode() a socket?
-    {"Sigset", LuaUnixSigset},            // creates signal bitmask (deprecated name)
     {"sigset", LuaUnixSigset},            // creates signal bitmask
     {"WEXITSTATUS", LuaUnixWexitstatus},  // gets exit status from wait status
     {"WIFEXITED", LuaUnixWifexited},      // gets exit code from wait status

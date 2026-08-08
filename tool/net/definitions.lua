@@ -6400,12 +6400,12 @@ function unix.shutdown(fd, how) end
 --- - `SIG_UNBLOCK`: removes bits in `mask` from set of blocked signals
 --- - `SIG_SETMASK`: replaces process signal mask with `mask`
 ---
---- `mask` is a unix.Sigset() object (see section below).
+--- `mask` is a unix.sigset() object (see section below).
 ---
 --- For example, to temporarily block `SIGTERM` and `SIGINT` so critical
 --- work won't be interrupted, sigprocmask() can be used as follows:
 ---
----   newmask = unix.Sigset(unix.SIGTERM)
+---   newmask = unix.sigset(unix.SIGTERM)
 ---   oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, newmask))
 ---   -- do something...
 ---   assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
@@ -6475,7 +6475,7 @@ function unix.sigprocmask(how, newmask) end
 ---         gotsigusr1 = true
 ---     end
 ---     gotsigusr1 = false
----     oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.Sigset(unix.SIGUSR1)))
+---     oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.sigset(unix.SIGUSR1)))
 ---     assert(unix.sigaction(unix.SIGUSR1, OnSigUsr1))
 ---     assert(unix.raise(unix.SIGUSR1))
 ---     assert(not gotsigusr1)
@@ -8067,21 +8067,12 @@ function unix.fstatfs(fd) end
 --- The unix.Sigset class defines a mutable bitset that may currently
 --- contain 128 entries. See `unix.NSIG` to find out how many signals
 --- your operating system actually supports.
----
---- Constructs new signal bitset object.
----
---- `unix.Sigset` is the historical spelling, kept for compatibility.
---- Prefer `unix.sigset`: a constructor is a function, and the
---- capitalized name shadows the class it constructs, so a generated
---- type declaration cannot name the type and the constructor both.
----@param sig integer
----@param ... integer
----@return unix.Sigset
----@nodiscard
-function unix.Sigset(sig, ...) end
 
---- Constructs new signal bitset object (the lowercase constructor;
---- `unix.Sigset` is the same function under its historical name).
+--- Constructs new signal bitset object. The constructor is
+--- `unix.sigset` (lowercase): a constructor is a function, while
+--- `unix.Sigset` names the CLASS it builds, and one name cannot be
+--- both -- a generated type declaration that spends the name on the
+--- function has no way left to name the type.
 ---@param sig integer
 ---@param ... integer
 ---@return unix.Sigset
