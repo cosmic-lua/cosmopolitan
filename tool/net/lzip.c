@@ -18,6 +18,7 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "tool/net/lzip.h"
 #include "libc/calls/calls.h"
+#include "libc/calls/struct/stat.h"
 #include "libc/calls/struct/timespec.h"
 #include "libc/cosmo.h"
 #include "libc/dos.h"
@@ -30,6 +31,7 @@
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
+#include "libc/sysv/consts/s.h"
 #include "libc/time.h"
 #include "libc/zip.h"
 #include "net/http/http.h"
@@ -538,6 +540,135 @@ static int LuaZipReaderStat(lua_State *L) {
 }
 
 // reader:read(name) -> string | nil, error
+// Reads an entry's bytes into a malloc'd buffer, decompressing when
+// needed and verifying the CRC. On success returns the buffer (caller
+// frees) and sets *out_len. On failure returns NULL: *zip_msg carries a
+// static message for archive-shaped errors, else *sys_what names the
+// failed call and errno stands. Shared by read() and save() so the two
+// stay byte-identical.
+static uint8_t *ReaderSlurpEntry(struct LuaZipReader *z, uint8_t *cfile,
+                                 size_t *out_len, const char **zip_msg,
+                                 const char **sys_what) {
+  int64_t lfile_off = GetZipCfileOffset(cfile);
+  int64_t compressed_size = GetZipCfileCompressedSize(cfile);
+  int64_t uncompressed_size = GetZipCfileUncompressedSize(cfile);
+  uint32_t expected_crc = ZIP_CFILE_CRC32(cfile);
+  int method = ZIP_CFILE_COMPRESSIONMETHOD(cfile);
+
+  if (compressed_size > z->max_file_size) {
+    *zip_msg = "compressed size too large";
+    return NULL;
+  }
+  if (uncompressed_size > z->max_file_size) {
+    *zip_msg = "uncompressed size too large";
+    return NULL;
+  }
+  if (lfile_off < 0 || lfile_off + kZipLfileHdrMinSize > z->file_size) {
+    *zip_msg = "local file offset out of bounds";
+    return NULL;
+  }
+
+  // read local file header to get data offset
+  uint8_t lfile_hdr[kZipLfileHdrMinSize];
+  if (ReaderPread(z, lfile_hdr, kZipLfileHdrMinSize, lfile_off) !=
+      kZipLfileHdrMinSize) {
+    *sys_what = "read lfile";
+    return NULL;
+  }
+  if (ZIP_LFILE_MAGIC(lfile_hdr) != kZipLfileHdrMagic) {
+    *zip_msg = "bad local file header";
+    return NULL;
+  }
+  int64_t data_off = lfile_off + ZIP_LFILE_HDRSIZE(lfile_hdr);
+
+  if (data_off + compressed_size > z->file_size) {
+    *zip_msg = "file data extends beyond end of archive";
+    return NULL;
+  }
+
+  // read compressed data
+  uint8_t *compressed = malloc(compressed_size ? compressed_size : 1);
+  if (!compressed) {
+    *sys_what = "malloc";
+    return NULL;
+  }
+
+  ssize_t rc;
+  for (int64_t i = 0; i < compressed_size; i += rc) {
+    rc = ReaderPread(z, compressed + i, compressed_size - i, data_off + i);
+    if (rc <= 0) {
+      free(compressed);
+      *sys_what = "read data";
+      return NULL;
+    }
+  }
+
+  if (method == kZipCompressionNone) {
+    // stored - verify CRC32 and return as-is
+    uint32_t actual_crc = crc32_z(0, compressed, compressed_size);
+    if (actual_crc != expected_crc) {
+      free(compressed);
+      *zip_msg = "crc32 mismatch";
+      return NULL;
+    }
+    *out_len = compressed_size;
+    return compressed;
+  } else if (method == kZipCompressionDeflate) {
+    // deflated - decompress
+    uint8_t *uncompressed = malloc(uncompressed_size ? uncompressed_size : 1);
+    if (!uncompressed) {
+      free(compressed);
+      *sys_what = "malloc";
+      return NULL;
+    }
+
+    z_stream strm = {0};
+    strm.next_in = compressed;
+    strm.avail_in = compressed_size;
+    strm.next_out = uncompressed;
+    strm.avail_out = uncompressed_size;
+
+    int ret = inflateInit2(&strm, -MAX_WBITS);
+    if (ret != Z_OK) {
+      free(compressed);
+      free(uncompressed);
+      *zip_msg = "inflateInit2 failed";
+      return NULL;
+    }
+
+    ret = inflate(&strm, Z_FINISH);
+    // Capture total_out before inflateEnd() zeroes it.  Use this instead of
+    // the declared uncompressed_size: for a well-formed archive the values
+    // are equal, but a malicious archive could declare a larger size and have
+    // us CRC-check or return uninitialized tail bytes.  Capturing the actual
+    // bytes written avoids that without destabilising the inflate path.
+    size_t actual_out = strm.total_out;
+    inflateEnd(&strm);
+    free(compressed);
+
+    if (ret != Z_STREAM_END) {
+      free(uncompressed);
+      *zip_msg = "decompression failed";
+      return NULL;
+    }
+
+    // verify CRC32
+    uint32_t actual_crc = crc32_z(0, uncompressed, actual_out);
+    if (actual_crc != expected_crc) {
+      free(uncompressed);
+      *zip_msg = "crc32 mismatch";
+      return NULL;
+    }
+
+    *out_len = actual_out;
+    return uncompressed;
+  } else {
+    free(compressed);
+    *zip_msg = "unsupported compression method";
+    return NULL;
+  }
+}
+
 static int LuaZipReaderRead(lua_State *L) {
   struct LuaZipReader *z = GetZipReader(L);
   size_t namelen;
@@ -553,105 +684,65 @@ static int LuaZipReaderRead(lua_State *L) {
     return 2;
   }
 
-  int64_t lfile_off = GetZipCfileOffset(cfile);
-  int64_t compressed_size = GetZipCfileCompressedSize(cfile);
-  int64_t uncompressed_size = GetZipCfileUncompressedSize(cfile);
-  uint32_t expected_crc = ZIP_CFILE_CRC32(cfile);
-  int method = ZIP_CFILE_COMPRESSIONMETHOD(cfile);
+  size_t len = 0;
+  const char *zip_msg = NULL, *sys_what = NULL;
+  uint8_t *data = ReaderSlurpEntry(z, cfile, &len, &zip_msg, &sys_what);
+  if (!data)
+    return zip_msg ? ZipError(L, zip_msg) : SysError(L, sys_what);
+  lua_pushlstring(L, (char *)data, len);
+  free(data);
+  return 1;
+}
 
-  if (compressed_size > z->max_file_size)
-    return ZipError(L, "compressed size too large");
-  if (uncompressed_size > z->max_file_size)
-    return ZipError(L, "uncompressed size too large");
-  if (lfile_off < 0 || lfile_off + kZipLfileHdrMinSize > z->file_size)
-    return ZipError(L, "local file offset out of bounds");
+// reader:save(name, dest) -> true | nil, error
+// Extracts one entry straight to a file: decompressed and CRC-checked
+// in C and written to dest (created or truncated, mode 0644 before
+// umask), never materializing as a Lua string. Byte-identical to
+// writing the result of read(); entry permissions stay the caller's
+// concern, exactly as with read() plus a write.
+static int LuaZipReaderSave(lua_State *L) {
+  struct LuaZipReader *z = GetZipReader(L);
+  size_t namelen, destlen;
+  const char *name = luaL_checklstring(L, 2, &namelen);
+  const char *dest = luaL_checklstring(L, 3, &destlen);
 
-  // read local file header to get data offset
-  uint8_t lfile_hdr[kZipLfileHdrMinSize];
-  if (ReaderPread(z, lfile_hdr, kZipLfileHdrMinSize, lfile_off) !=
-      kZipLfileHdrMinSize)
-    return SysError(L, "read lfile");
-  if (ZIP_LFILE_MAGIC(lfile_hdr) != kZipLfileHdrMagic)
-    return ZipError(L, "bad local file header");
-  int64_t data_off = lfile_off + ZIP_LFILE_HDRSIZE(lfile_hdr);
+  if (z->fd == -1 && !z->data)
+    return ZipError(L, "zip reader is closed");
 
-  if (data_off + compressed_size > z->file_size)
-    return ZipError(L, "file data extends beyond end of archive");
+  uint8_t *cfile = FindEntry(z, name, namelen);
+  if (!cfile) {
+    lua_pushnil(L);
+    lua_pushfstring(L, "entry not found: %s", name);
+    return 2;
+  }
 
-  // read compressed data
-  uint8_t *compressed = malloc(compressed_size ? compressed_size : 1);
-  if (!compressed)
-    return SysError(L, "malloc");
+  size_t len = 0;
+  const char *zip_msg = NULL, *sys_what = NULL;
+  uint8_t *data = ReaderSlurpEntry(z, cfile, &len, &zip_msg, &sys_what);
+  if (!data)
+    return zip_msg ? ZipError(L, zip_msg) : SysError(L, sys_what);
 
-  ssize_t rc;
-  for (int64_t i = 0; i < compressed_size; i += rc) {
-    rc = ReaderPread(z, compressed + i, compressed_size - i, data_off + i);
+  int fd = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd == -1) {
+    free(data);
+    return SysError(L, "open dest");
+  }
+  for (size_t i = 0; i < len;) {
+    ssize_t rc = write(fd, data + i, len - i);
     if (rc <= 0) {
-      free(compressed);
-      return SysError(L, "read data");
+      int saved_errno = errno;
+      close(fd);
+      free(data);
+      errno = saved_errno;
+      return SysError(L, "write dest");
     }
+    i += rc;
   }
-
-  if (method == kZipCompressionNone) {
-    // stored - verify CRC32 and return as-is
-    uint32_t actual_crc = crc32_z(0, compressed, compressed_size);
-    if (actual_crc != expected_crc) {
-      free(compressed);
-      return ZipError(L, "crc32 mismatch");
-    }
-    lua_pushlstring(L, (char *)compressed, compressed_size);
-    free(compressed);
-    return 1;
-  } else if (method == kZipCompressionDeflate) {
-    // deflated - decompress
-    uint8_t *uncompressed = malloc(uncompressed_size ? uncompressed_size : 1);
-    if (!uncompressed) {
-      free(compressed);
-      return SysError(L, "malloc");
-    }
-
-    z_stream strm = {0};
-    strm.next_in = compressed;
-    strm.avail_in = compressed_size;
-    strm.next_out = uncompressed;
-    strm.avail_out = uncompressed_size;
-
-    int ret = inflateInit2(&strm, -MAX_WBITS);
-    if (ret != Z_OK) {
-      free(compressed);
-      free(uncompressed);
-      return ZipError(L, "inflateInit2 failed");
-    }
-
-    ret = inflate(&strm, Z_FINISH);
-    // Capture total_out before inflateEnd() zeroes it.  Use this instead of
-    // the declared uncompressed_size: for a well-formed archive the values
-    // are equal, but a malicious archive could declare a larger size and have
-    // us CRC-check or return uninitialized tail bytes.  Capturing the actual
-    // bytes written avoids that without destabilising the inflate path.
-    size_t actual_out = strm.total_out;
-    inflateEnd(&strm);
-    free(compressed);
-
-    if (ret != Z_STREAM_END) {
-      free(uncompressed);
-      return ZipError(L, "decompression failed");
-    }
-
-    // verify CRC32
-    uint32_t actual_crc = crc32_z(0, uncompressed, actual_out);
-    if (actual_crc != expected_crc) {
-      free(uncompressed);
-      return ZipError(L, "crc32 mismatch");
-    }
-
-    lua_pushlstring(L, (char *)uncompressed, actual_out);
-    free(uncompressed);
-    return 1;
-  } else {
-    free(compressed);
-    return ZipError(L, "unsupported compression method");
-  }
+  free(data);
+  if (close(fd))
+    return SysError(L, "close dest");
+  lua_pushboolean(L, 1);
+  return 1;
 }
 
 // reader:__tostring()
@@ -1539,15 +1630,16 @@ static int LuaZipAppend(lua_State *L) {
 }
 
 // appender:add(name, content, [options]) -> true | nil, error
-static int LuaZipAppenderAdd(lua_State *L) {
-  struct LuaZipAppender *a = GetZipAppender(L);
-  size_t namelen, contentlen;
-  const char *name = luaL_checklstring(L, 2, &namelen);
-  const char *content = luaL_checklstring(L, 3, &contentlen);
-
-  if (a->fd == -1)
-    return ZipError(L, "zip appender is closed");
-
+// The shared tail of add() and add_file(): validate, compress, and
+// stage one entry from bytes already in hand. optidx names the options
+// table's stack slot; mtime_default/mode_default are the values used
+// when the options omit them (add: now + 0644; add_file: the source
+// file's own stat). Never keeps the content pointer — the bytes are
+// copied or deflated into the pending buffers.
+static int AppenderAddBytes(lua_State *L, struct LuaZipAppender *a,
+                            const char *name, size_t namelen,
+                            const char *content, size_t contentlen, int optidx,
+                            int64_t mtime_default, uint32_t mode_default) {
   const char *name_err = ValidateEntryName(name, namelen);
   if (name_err)
     return ZipError(L, name_err);
@@ -1564,11 +1656,11 @@ static int LuaZipAppenderAdd(lua_State *L) {
   // Parse options
   bool force_store = false;
   bool force_deflate = false;
-  int64_t mtime_unix = time(NULL);
-  uint32_t mode = 0100644;
+  int64_t mtime_unix = mtime_default;
+  uint32_t mode = mode_default;
 
-  if (lua_istable(L, 4)) {
-    lua_getfield(L, 4, "method");
+  if (lua_istable(L, optidx)) {
+    lua_getfield(L, optidx, "method");
     if (!lua_isnil(L, -1)) {
       const char *m = luaL_checkstring(L, -1);
       if (!strcmp(m, "store"))
@@ -1580,12 +1672,12 @@ static int LuaZipAppenderAdd(lua_State *L) {
     }
     lua_pop(L, 1);
 
-    lua_getfield(L, 4, "mtime");
+    lua_getfield(L, optidx, "mtime");
     if (!lua_isnil(L, -1))
       mtime_unix = luaL_checkinteger(L, -1);
     lua_pop(L, 1);
 
-    lua_getfield(L, 4, "mode");
+    lua_getfield(L, optidx, "mode");
     if (!lua_isnil(L, -1))
       mode = luaL_checkinteger(L, -1);
     lua_pop(L, 1);
@@ -1675,6 +1767,86 @@ static int LuaZipAppenderAdd(lua_State *L) {
 
   lua_pushboolean(L, 1);
   return 1;
+}
+
+static int LuaZipAppenderAdd(lua_State *L) {
+  struct LuaZipAppender *a = GetZipAppender(L);
+  size_t namelen, contentlen;
+  const char *name = luaL_checklstring(L, 2, &namelen);
+  const char *content = luaL_checklstring(L, 3, &contentlen);
+
+  if (a->fd == -1)
+    return ZipError(L, "zip appender is closed");
+
+  return AppenderAddBytes(L, a, name, namelen, content, contentlen, 4,
+                          time(NULL), 0100644);
+}
+
+// appender:add_file(name, source, [options]) -> true | nil, error
+// Adds a regular file from the filesystem, streaming through C: the
+// bytes are read, sized, and compressed without ever materializing as
+// a Lua string. Equivalent to add(name, <contents of source>, options)
+// except for the defaults: mtime defaults to the source's modification
+// time (not the current time) and mode to the source's permission
+// bits, so archives built from trees don't need per-entry options.
+static int LuaZipAppenderAddFile(lua_State *L) {
+  struct LuaZipAppender *a = GetZipAppender(L);
+  size_t namelen, srclen;
+  const char *name = luaL_checklstring(L, 2, &namelen);
+  const char *src = luaL_checklstring(L, 3, &srclen);
+
+  if (a->fd == -1)
+    return ZipError(L, "zip appender is closed");
+
+  int fd = open(src, O_RDONLY);
+  if (fd == -1)
+    return SysError(L, "open source");
+  struct stat st;
+  if (fstat(fd, &st)) {
+    int saved_errno = errno;
+    close(fd);
+    errno = saved_errno;
+    return SysError(L, "stat source");
+  }
+  if (!S_ISREG(st.st_mode)) {
+    close(fd);
+    return ZipError(L, "source is not a regular file");
+  }
+  if (st.st_size > (int64_t)UINT_MAX) {
+    close(fd);
+    return ZipError(L, "content too large (exceeds 4GB limit)");
+  }
+  if (st.st_size > a->max_file_size) {
+    close(fd);
+    return ZipError(L, "content exceeds max_file_size limit");
+  }
+
+  size_t contentlen = st.st_size;
+  uint8_t *buf = malloc(contentlen ? contentlen : 1);
+  if (!buf) {
+    close(fd);
+    return SysError(L, "malloc");
+  }
+  for (size_t i = 0; i < contentlen;) {
+    ssize_t rc = read(fd, buf + i, contentlen - i);
+    if (rc <= 0) {
+      // rc == 0 means the file shrank under us: surface it rather than
+      // archive a short entry with a size nobody wrote
+      int saved_errno = rc ? errno : EIO;
+      free(buf);
+      close(fd);
+      errno = saved_errno;
+      return SysError(L, "read source");
+    }
+    i += rc;
+  }
+  close(fd);
+
+  int nret = AppenderAddBytes(L, a, name, namelen, (const char *)buf,
+                              contentlen, 4, st.st_mtim.tv_sec,
+                              (st.st_mode & 0777) | 0100000);
+  free(buf);
+  return nret;
 }
 
 // Returns true if entry name matches for removal.
@@ -1894,6 +2066,7 @@ static const luaL_Reg kLuaZipReaderMethods[] = {
     {"list", LuaZipReaderList},
     {"stat", LuaZipReaderStat},
     {"read", LuaZipReaderRead},
+    {"save", LuaZipReaderSave},
     {0},
 };
 
@@ -1920,6 +2093,7 @@ static const luaL_Reg kLuaZipAppenderMeta[] = {
 static const luaL_Reg kLuaZipAppenderMethods[] = {
     {"close", LuaZipAppenderClose},
     {"add", LuaZipAppenderAdd},
+    {"add_file", LuaZipAppenderAddFile},
     {"remove", LuaZipAppenderRemove},
     {0},
 };

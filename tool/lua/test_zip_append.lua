@@ -423,6 +423,64 @@ assert(err:match("not found"), "error should mention not found")
 appender:close()
 
 --------------------------------------------------------------------------------
+-- Test appender:add_file() — stream a filesystem file into the archive
+--------------------------------------------------------------------------------
+
+local src_path = tmpdir .. "/add_file_src.txt"
+local src_content = string.rep("file content for streaming add ", 200)
+local sf = io.open(src_path, "wb")
+sf:write(src_content)
+sf:close()
+assert(unix.chmod(src_path, 0x1ED))  -- 0755: defaults must mirror the source
+
+local addfile_zip = tmpdir .. "/add_file_test.zip"
+local afw = zip.open(addfile_zip, "w")
+assert(afw:add("placeholder.txt", "x"))
+afw:close()
+
+local afa = zip.open(addfile_zip, "a")
+assert(afa, "failed to open add_file test zip for append")
+local aok, aerr = afa:add_file("streamed.txt", src_path)
+assert(aok == true, "add_file failed: " .. tostring(aerr))
+-- options still apply, overriding the source-derived defaults
+assert(afa:add_file("streamed_stored.txt", src_path,
+                    {method = "store", mode = 0x1A4, mtime = 1234567890}))
+
+-- missing source: nil, err
+local mok, merr = afa:add_file("missing.txt", tmpdir .. "/no_such_file")
+assert(mok == nil and merr ~= nil, "add_file of a missing source should fail")
+
+-- non-regular source: nil, err
+local dok2, derr2 = afa:add_file("dir.txt", tmpdir)
+assert(dok2 == nil and derr2:match("regular"),
+       "add_file of a directory should fail")
+
+-- duplicate entry name still refused
+local dupok, duperr = afa:add_file("streamed.txt", src_path)
+assert(dupok == nil and duperr:match("duplicate"),
+       "duplicate add_file should fail")
+afa:close()
+
+-- round-trip: bytes identical to add() of the read contents, and the
+-- source's mode/mtime became the entry's defaults
+local afr = zip.open(addfile_zip)
+assert(afr:read("streamed.txt") == src_content,
+       "add_file content must round-trip byte-identical")
+local afstat = afr:stat("streamed.txt")
+assert(afstat.mode % 0x200 == 0x1ED,
+       "add_file should default mode to the source file's permissions")
+local src_stat = unix.stat(src_path)
+assert(math.abs(afstat.mtime - src_stat:mtim()) <= 2,
+       "add_file should default mtime to the source file's mtime")
+local ovstat = afr:stat("streamed_stored.txt")
+assert(ovstat.method == 0, "method='store' option must be honored")
+assert(ovstat.mode % 0x200 == 0x1A4, "mode option must override the source's")
+-- DOS timestamps carry 2-second resolution
+assert(math.abs(ovstat.mtime - 1234567890) <= 2,
+       "mtime option must override the source's")
+afr:close()
+
+--------------------------------------------------------------------------------
 -- Cleanup
 --------------------------------------------------------------------------------
 

@@ -1891,6 +1891,18 @@ function zip.Reader:stat(name) end
 ---@nodiscard
 function zip.Reader:read(name) end
 
+--- Extracts one entry straight to a file. The bytes are decompressed
+--- and CRC-checked in C and written to `dest` (created or truncated,
+--- mode 0644 before umask), never materializing as a Lua string —
+--- byte-identical to writing the result of `read`. The entry's own
+--- permission bits stay the caller's concern, exactly as with `read`
+--- plus a write.
+---@param name string The file path within the archive
+---@param dest string Filesystem path to write the entry's bytes to
+---@return boolean? success `true` on success
+---@return string? error Error message on failure
+function zip.Reader:save(name, dest) end
+
 --- Closes the ZIP reader and releases resources.
 function zip.Reader:close() end
 
@@ -1922,6 +1934,20 @@ zip.Appender = {}
 ---@return boolean? success `true` on success
 ---@return string? error Error message on failure
 function zip.Appender:add(name, content, options) end
+
+--- Adds a regular file from the filesystem, streaming through C: the
+--- bytes are read, sized, and compressed without ever materializing as
+--- a Lua string. Equivalent to `add(name, <contents of source>,
+--- options)` except for the defaults: `mtime` defaults to the source
+--- file's modification time (not the current time) and `mode` to the
+--- source file's permission bits, so archives built from trees don't
+--- need per-entry options. Fails on a missing or non-regular source.
+---@param name string The path/filename within the ZIP archive
+---@param source string Filesystem path of the regular file to add
+---@param options? zip.AddOptions Optional settings for this entry
+---@return boolean? success `true` on success
+---@return string? error Error message on failure
+function zip.Appender:add_file(name, source, options) end
 
 --- Removes entries by name from the archive.
 ---
