@@ -176,4 +176,43 @@ assert(cosmo.IsBase64(payload), "EncodeBase64 output validates")
 assert(cosmo.DecodeBase64(payload) ==
   "The quick brown fox jumps over the lazy dog", "gated decode round-trips")
 
+-- sparse arrays: an array with holes errors by default (a hole would
+-- otherwise truncate the array or invent a value); sparsenull=true
+-- encodes each hole as null. Built key-by-key so no constructor-border
+-- ambiguity is involved.
+local sparse = {}
+sparse[1] = 1
+sparse[3] = 3
+local sv, serr = cosmo.EncodeJson(sparse)
+assert(sv == nil, "sparse array must not encode by default")
+assert(serr and serr:find("sparse", 1, true),
+  "sparse failure names the condition, got: " .. tostring(serr))
+assert(cosmo.EncodeJson(sparse, {sparsenull = true}) == "[1,null,3]",
+  "sparsenull encodes holes as null")
+assert(cosmo.EncodeJson({1, 2, 3}) == "[1,2,3]",
+  "dense arrays are unaffected")
+assert(cosmo.EncodeJson(cosmo.jsonarray({})) == "[]",
+  "marked empty arrays are unaffected")
+
+-- decode nullval (dkjson-style): a caller-supplied stand-in for JSON
+-- null, so nulls survive the decode; with cosmo.null it re-encodes as
+-- null, closing the lossless round trip.
+local arr = assert(cosmo.DecodeJson("[1,null,2]", {nullval = cosmo.null}))
+assert(#arr == 3, "the null element keeps its slot")
+assert(arr[2] == cosmo.null, "null decodes to the sentinel")
+assert(cosmo.EncodeJson(arr) == "[1,null,2]",
+  "null array round-trips losslessly through the sentinel")
+local obj = assert(cosmo.DecodeJson('{"a":null,"b":1}', {nullval = cosmo.null}))
+assert(obj.a == cosmo.null, "null-valued keys survive the decode")
+assert(cosmo.EncodeJson(obj) == '{"a":null,"b":1}',
+  "null object round-trips losslessly through the sentinel")
+local top, toperr = cosmo.DecodeJson("null", {nullval = cosmo.null})
+assert(top == cosmo.null and toperr == nil,
+  "top-level null decodes to the sentinel, distinguishable from failure")
+local fv = cosmo.DecodeJson("null", {nullval = false})
+assert(fv == false, "false is a legal sentinel (only nil means default)")
+assert(cosmo.DecodeJson("null") == nil, "default null mapping is still nil")
+local hole = assert(cosmo.DecodeJson("[1,null,2]"))
+assert(hole[2] == nil, "default decode still leaves a hole")
+
 print("test_data_formats: PASS")

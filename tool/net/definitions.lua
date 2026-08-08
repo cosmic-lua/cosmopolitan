@@ -93,6 +93,10 @@ arg = nil
 ---@field indent string? defaults to " ". This option controls the indentation of pretty formatting. This field is ignored if pretty isn't true.
 ---@field maxdepth integer? defaults to 64. This option controls the maximum amount of recursion the serializer is allowed to perform. The max is 32767. You might not be able to set it that high if there isn't enough C stack memory. Your serializer checks for this and will return an error rather than crashing.
 ---@field nan cosmo.JsonNanMode? `EncodeJson` only: encode NaN and Infinity as `null` (the v8 behavior) instead of failing with `nil, error`.
+---@field sparsenull boolean? `EncodeJson` only: encode array holes as `null` instead of failing the encode with `nil, error`. With it, an array containing JSON `null` round-trips losslessly with `DecodeJson`'s default nil mapping.
+
+---@class cosmo.DecoderOptions
+---@field nullval JsonValue? a value to stand in for JSON `null` (dkjson-style), so nulls survive the decode as a distinguishable value. `cosmo.null` re-encodes as `null`, making null round-trips lossless. When absent, `null` decodes to nil: null-valued object keys vanish and arrays containing null decode with holes.
 
 ---@class cosmo.DeflateOptions
 ---@field level integer? compression level `-1`..`9`; defaults to `-1`, the zlib default (currently 6). `0` stores without compressing; higher levels are slower but compress better.
@@ -2170,11 +2174,20 @@ function cosmo.DecodeHex(ascii) end
 --- This parser has perfect conformance with JSONTestSuite.
 ---
 --- This parser validates utf-8 and utf-16.
+---
+--- The `options` table takes one field: `nullval`, a caller-supplied
+--- value that stands in for JSON `null` (dkjson-style), so nulls
+--- survive the decode as a distinguishable value — `cosmo.null`
+--- re-encodes as `null`, making null round-trips lossless. Without it,
+--- `null` decodes to nil: null-valued object keys vanish and arrays
+--- containing null decode with holes (which `EncodeJson` then refuses
+--- as sparse unless `sparsenull=true` is given).
 ---@param input string
+---@param options cosmo.DecoderOptions?
 ---@return JsonValue|nil
 ---@return string? error
 ---@nodiscard
-function cosmo.DecodeJson(input) end
+function cosmo.DecodeJson(input, options) end
 
 --- Turns ISO-8859-1 string into UTF-8.
 ---@param iso_8859_1 string
@@ -2242,16 +2255,16 @@ function cosmo.EncodeHex(binary) end
 ---     >: EncodeJson({[1]=2, ["hi"]=1})
 ---     "[2]"
 ---
---- If there are holes in your array, then the serialized array
---- will exclude everything after the first hole. If the beginning
---- of your array is a hole, then an error is returned.
+--- An array with holes is an error by default: a hole would otherwise
+--- have to either truncate the array (silent data loss) or invent a
+--- value. Passing `sparsenull=true` encodes each hole as `null`
+--- instead, which is how an array containing JSON `null` round-trips
+--- losslessly:
 ---
 ---     >: EncodeJson({[1]=1, [3]=3})
----     "[1]"
----     >: EncodeJson({[2]=1, [3]=3})
----     "[]"
----     >: EncodeJson({[2]=1, [3]=3})
----     nil     "json objects must only use string keys"
+---     nil     "sparse array (pass sparsenull=true to encode holes as null)"
+---     >: EncodeJson({[1]=1, [3]=3}, {sparsenull=true})
+---     "[1,null,3]"
 ---
 --- If the raw length of a table is reported as zero, then we check
 --- whether it carries the shared `json.array` marker metatable. If it
@@ -2294,6 +2307,8 @@ function cosmo.EncodeHex(binary) end
 --- - `nan`: `(str)` The only accepted value is `"null"`, which makes NaN
 ---   and Infinity serialize as `null` (the v8 behavior) instead of
 ---   failing the encode.
+--- - `sparsenull`: `(bool=false)` encode array holes as `null` instead
+---   of failing the encode.
 ---
 --- This function will return an error if:
 ---
@@ -2302,6 +2317,7 @@ function cosmo.EncodeHex(binary) end
 --- - value contains functions, user data, or threads
 --- - value is table that blends string / non-string keys
 --- - value contains NaN or Infinity and `nan="null"` wasn't given
+--- - value is an array with holes and `sparsenull` wasn't given
 --- - Your serializer runs out of C heap memory (setrlimit)
 ---
 --- We assume strings in value contain UTF-8. This serializer currently does not

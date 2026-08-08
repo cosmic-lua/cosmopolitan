@@ -231,6 +231,32 @@ OnError:
   return -1;
 }
 
+// The true extent of an array-shaped table: the largest positive
+// integer key present, found by walking every key. lua_rawlen only
+// returns *a* border, so a sparse table like {1,[3]=2} can report
+// length 1 and silently truncate — the walk is what makes holes a
+// detectable condition instead of border-dependent data loss.
+// Returns -1 (sparse, conf.sparsenull unset) or 0 with *out_len set.
+static int MeasureArray(lua_State *L, struct Serializer *z,
+                        lua_Unsigned *out_len) {
+  lua_Integer k;
+  lua_Unsigned max = 0, cnt = 0;
+  lua_pushnil(L);            // +1
+  while (lua_next(L, -2)) {  // key at -2, value at -1
+    lua_pop(L, 1);           // pop the value; the key stays for lua_next
+    if (lua_isinteger(L, -1) && (k = lua_tointeger(L, -1)) >= 1) {
+      ++cnt;
+      if ((lua_Unsigned)k > max) max = k;
+    }
+  }
+  if (cnt < max && !z->conf.sparsenull) {
+    z->reason = "sparse array (pass sparsenull=true to encode holes as null)";
+    return -1;
+  }
+  *out_len = max;
+  return 0;
+}
+
 static int SerializeTable(lua_State *L, char **buf, int idx,
                           struct Serializer *z, int depth) {
   int rc;
@@ -254,6 +280,7 @@ static int SerializeTable(lua_State *L, char **buf, int idx,
       lua_pop(L, 1);
     }
     if (isarray) {
+      RETURN_ON_ERROR(MeasureArray(L, z, &n));
       RETURN_ON_ERROR(SerializeArray(L, buf, z, depth, n));
     } else {
       multi = z->conf.pretty && LuaHasMultipleItems(L);

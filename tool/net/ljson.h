@@ -9,6 +9,7 @@ struct DecodeJson {
 };
 
 struct DecodeJson DecodeJson(struct lua_State *, const char *, size_t);
+struct DecodeJson DecodeJsonEx(struct lua_State *, const char *, size_t, int);
 
 COSMOPOLITAN_C_END_
 #endif /* COSMOPOLITAN_TOOL_NET_LJSON_H_ */
