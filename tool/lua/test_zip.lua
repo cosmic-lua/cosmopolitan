@@ -456,6 +456,56 @@ assert(appender2, "failed to reopen APE for append: " .. tostring(err))
 appender2:close()
 
 --------------------------------------------------------------------------------
+-- Test reader:save() — extract straight to a file, byte-identical to read()
+--------------------------------------------------------------------------------
+
+local save_zip = tmpdir .. "/save_test.zip"
+local sw = zip.open(save_zip, "w")
+assert(sw, "failed to create save test zip")
+-- one stored entry, one deflated, one empty: all three save paths
+assert(sw:add("stored.bin", "stored bytes here", {method = "store"}))
+assert(sw:add("deflated.txt", string.rep("compress me ", 500), {method = "deflate"}))
+assert(sw:add("empty.txt", ""))
+sw:close()
+
+local sr = zip.open(save_zip)
+assert(sr, "failed to open save test zip")
+for _, name in ipairs({"stored.bin", "deflated.txt", "empty.txt"}) do
+  local dest = tmpdir .. "/saved_" .. name:gsub("/", "_")
+  local ok, serr = sr:save(name, dest)
+  assert(ok == true, "save " .. name .. " failed: " .. tostring(serr))
+  local f = io.open(dest, "rb")
+  local on_disk = f:read("*a")
+  f:close()
+  assert(on_disk == sr:read(name),
+         "save must be byte-identical to read for " .. name)
+end
+
+-- save truncates an existing destination
+local trunc_dest = tmpdir .. "/saved_trunc"
+local tf = io.open(trunc_dest, "wb")
+tf:write(string.rep("x", 100000))
+tf:close()
+assert(sr:save("stored.bin", trunc_dest))
+local tf2 = io.open(trunc_dest, "rb")
+local trunc_content = tf2:read("*a")
+tf2:close()
+assert(trunc_content == "stored bytes here", "save must truncate the destination")
+
+-- missing entry: nil, err like read
+local sok, serr = sr:save("nonexistent.txt", tmpdir .. "/never")
+assert(sok == nil and serr:match("entry not found"),
+       "save of a missing entry should fail like read")
+
+-- unwritable destination: nil, err
+local dok, derr = sr:save("stored.bin", tmpdir .. "/no/such/dir/file")
+assert(dok == nil and derr ~= nil, "save into a missing directory should fail")
+
+sr:close()
+local cok, cerr = sr:save("stored.bin", tmpdir .. "/after_close")
+assert(cok == nil and cerr:match("closed"), "save after close should fail")
+
+--------------------------------------------------------------------------------
 -- Cleanup
 --------------------------------------------------------------------------------
 
