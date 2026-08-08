@@ -5754,6 +5754,21 @@ function unix.fdatasync(fd) end
 ---@return unix.Errno? errno
 function unix.lseek(fd, offset, whence) end
 
+--- Copies up to `count` bytes between file descriptors inside the
+--- kernel (Linux 4.5+, FreeBSD 13+), never bouncing the data through
+--- userspace. Both descriptors' file offsets advance by the bytes
+--- copied, exactly as a `read`+`write` pair would, and short copies
+--- are normal — loop until the returned count reaches zero at end of
+--- file. On platforms without the syscall it fails with `ENOSYS`;
+--- callers keep a read/write fallback.
+---@param infd integer File descriptor to copy from, at its current offset
+---@param outfd integer File descriptor to copy to, at its current offset
+---@param count integer Maximum number of bytes to copy
+---@return integer|nil copied Bytes actually copied (`0` at end of file)
+---@return string? error
+---@return unix.Errno? errno
+function unix.copy_file_range(infd, outfd, count) end
+
 --- Reduces or extends underlying physical medium of file.
 --- If file was originally larger, content >length is lost.
 ---@param path string

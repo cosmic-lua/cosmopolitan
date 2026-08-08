@@ -1703,6 +1703,23 @@ static int LuaUnixLseek(lua_State *L) {
                              luaL_optinteger(L, 3, SEEK_SET)));
 }
 
+// unix.copy_file_range(infd:int, outfd:int, count:int)
+//     ├─→ copied:int
+//     └─→ nil, error:str, errno:int
+// Copies up to count bytes between file descriptors inside the kernel
+// (Linux 4.5+, FreeBSD 13+), never bouncing through userspace. Both
+// descriptors' file offsets advance by the bytes copied, exactly as a
+// read()+write() pair would, and short copies are normal. On platforms
+// without the syscall it fails with ENOSYS; callers keep a read/write
+// fallback.
+static int LuaUnixCopyFileRange(lua_State *L) {
+  int olderr = errno;
+  return SysretInteger(L, "copy_file_range", olderr,
+                       copy_file_range(luaL_checkinteger(L, 1), 0,
+                                       luaL_checkinteger(L, 2), 0,
+                                       luaL_checkinteger(L, 3), 0));
+}
+
 // unix.truncate(path:str[, length:int])
 //     ├─→ true
 //     └─→ nil, error:str, errno:int
@@ -4367,6 +4384,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"tcsetattr", LuaUnixTcsetattr},      // set terminal attributes
     {"tiocgwinsz", LuaUnixTiocgwinsz},    // pseudoteletypewriter dimensions
     {"tmpfd", LuaUnixTmpfd},              // create anonymous file
+    {"copy_file_range", LuaUnixCopyFileRange},  // kernel-side fd-to-fd copy
     {"truncate", LuaUnixTruncate},        // shrink or extend file medium
     {"umask", LuaUnixUmask},              // set default file mask
     {"uname", LuaUnixUname},              // get operating system identity
