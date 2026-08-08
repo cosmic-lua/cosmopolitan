@@ -138,6 +138,32 @@ function UnixTest()
    assert(unix.read(fd, 8) == "bearbear")
    assert(unix.close(fd))
 
+   -- copy_file_range: kernel-side fd-to-fd copy, offsets advance like
+   -- read+write; ENOSYS on platforms without the syscall keeps callers
+   -- on their fallback, so both outcomes are legitimate here
+   fd = assert(unix.open("%s/cfr_src" % {tmpdir}, unix.O_RDWR | unix.O_CREAT | unix.O_TRUNC, 0600))
+   assert(unix.write(fd, "0123456789abcdef"))
+   assert(unix.lseek(fd, 0))
+   fd2 = assert(unix.open("%s/cfr_dst" % {tmpdir}, unix.O_RDWR | unix.O_CREAT | unix.O_TRUNC, 0600))
+   copied, cfrerr, cfrerrno = unix.copy_file_range(fd, fd2, 16)
+   if copied then
+      -- short copies are legal; drain the rest
+      local total = copied
+      while total < 16 do
+         local n = assert(unix.copy_file_range(fd, fd2, 16 - total))
+         assert(n > 0)
+         total = total + n
+      end
+      assert(total == 16)
+      -- both offsets advanced: src at EOF now, so another copy reads 0
+      assert(unix.copy_file_range(fd, fd2, 16) == 0)
+      assert(unix.read(fd2, 16, 0) == "0123456789abcdef")
+   else
+      assert(cfrerrno == unix.ENOSYS)
+   end
+   assert(unix.close(fd))
+   assert(unix.close(fd2))
+
    -- getdents
    t = {}
    for name, kind, ino, off in assert(unix.opendir(tmpdir)) do
