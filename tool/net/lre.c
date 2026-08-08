@@ -224,6 +224,7 @@ static const luaL_Reg kLuaRe[] = {
 
 static const luaL_Reg kLuaReRegexMeth[] = {
     {"find", LuaReRegexFind},      //
+    {"match", LuaReRegexSearch},   // the charter spelling (match IS search)
     {"search", LuaReRegexSearch},  //
     {NULL, NULL},                  //
 };

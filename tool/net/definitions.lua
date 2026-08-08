@@ -1413,6 +1413,24 @@ re.Regex = {}
 ---@nodiscard
 function re.Regex:search(str, flags) end
 
+--- Executes precompiled regular expression against a string. The same
+--- function as `re.Regex:search`, under the verb the operation
+--- actually performs — matching. Downstreams that reserve `match`
+--- tree-wide (whilp/cosmic's naming charter) can name the method
+--- without a wrapper; `search` stays for compatibility.
+---@param str string
+---@param flags? re.SearchFlag defaults to zero and may have any of:
+---
+--- - `re.NOTBOL`
+--- - `re.NOTEOL`
+---
+--- This has an O(𝑛) cost.
+---@return string|nil match the whole matched substring
+---@return {string} captures the parenthesized capture groups, in order
+---@return string? error
+---@nodiscard
+function re.Regex:match(str, flags) end
+
 --- Executes precompiled regular expression, reporting where the match
 --- is. Like `re.Regex:search`, but instead of the matched substring it
 --- returns the match's absolute 1-based inclusive start and end offsets
@@ -5725,12 +5743,19 @@ function unix.clock_gettime(clock) end
 
 --- Sleeps with nanosecond precision.
 ---
---- Returns `EINTR` if a signal was received while waiting.
+--- Returns `EINTR` if a signal was received while waiting. On that
+--- failure the kernel's remainder follows the errno as two further
+--- values (`remseconds`, `remnanos`), so an interrupted sleep can be
+--- resumed without re-deriving the remainder from a clock. A sleep
+--- that completes returns a zero remainder: POSIX leaves the kernel's
+--- buffer unspecified on success, and the sleep is over by definition.
 ---@param seconds integer
 ---@param nanos integer?
 ---@return integer|nil remseconds, integer remnanos
 ---@return string? error
 ---@return unix.Errno? errno
+---@return integer? eintr_remseconds
+---@return integer? eintr_remnanos
 function unix.nanosleep(seconds, nanos) end
 
 --- These functions are used to make programs slower by asking the
@@ -8044,11 +8069,24 @@ function unix.fstatfs(fd) end
 --- your operating system actually supports.
 ---
 --- Constructs new signal bitset object.
+---
+--- `unix.Sigset` is the historical spelling, kept for compatibility.
+--- Prefer `unix.sigset`: a constructor is a function, and the
+--- capitalized name shadows the class it constructs, so a generated
+--- type declaration cannot name the type and the constructor both.
 ---@param sig integer
 ---@param ... integer
 ---@return unix.Sigset
 ---@nodiscard
 function unix.Sigset(sig, ...) end
+
+--- Constructs new signal bitset object (the lowercase constructor;
+--- `unix.Sigset` is the same function under its historical name).
+---@param sig integer
+---@param ... integer
+---@return unix.Sigset
+---@nodiscard
+function unix.sigset(sig, ...) end
 
 --- Adds signal to bitset.
 ---@param sig integer

@@ -1582,18 +1582,31 @@ static int LuaUnixGettime(lua_State *L) {
 
 // unix.nanosleep(seconds:int[, nanos:int])
 //     ├─→ remseconds:int, remnanos:int
-//     └─→ nil, error:str, errno:int
+//     └─→ nil, error:str, errno:int[, remseconds:int, remnanos:int]
 static int LuaUnixNanosleep(lua_State *L) {
-  int olderr = errno;
-  struct timespec req, rem;
+  int rc, err, olderr = errno;
+  struct timespec req, rem = {0};
   req.tv_sec = luaL_checkinteger(L, 1);
   req.tv_nsec = luaL_optinteger(L, 2, 0);
   if (!nanosleep(&req, &rem)) {
-    lua_pushinteger(L, rem.tv_sec);
-    lua_pushinteger(L, rem.tv_nsec);
+    // POSIX leaves rem unspecified on success: the sleep completed,
+    // so the remainder is zero by definition (the old code returned
+    // whatever the kernel left in the buffer)
+    lua_pushinteger(L, 0);
+    lua_pushinteger(L, 0);
     return 2;
   } else {
-    return LuaUnixSysretErrno(L, "nanosleep", olderr);
+    // EINTR is the one failure that fills rem; return the kernel's
+    // remainder after the errno so an interrupted sleep can resume
+    // without re-deriving it from a clock
+    err = errno;
+    rc = LuaUnixSysretErrno(L, "nanosleep", olderr);
+    if (err == EINTR) {
+      lua_pushinteger(L, rem.tv_sec);
+      lua_pushinteger(L, rem.tv_nsec);
+      return rc + 2;
+    }
+    return rc;
   }
 }
 
@@ -2577,14 +2590,19 @@ static int LuaUnixSigaction(lua_State *L) {
   if (!lua_isnoneornil(L, 4)) {
     mask = luaL_checkudata(L, 4, "unix.Sigset");
     sigorset(&sa.sa_mask, &sa.sa_mask, mask);
-    lua_remove(L, 4);
   }
   if (lua_isnoneornil(L, 3)) {
     sa.sa_flags = 0;
   } else {
     sa.sa_flags = lua_tointeger(L, 3);
-    lua_remove(L, 3);
   }
+  // flags and mask are consumed into C values above, so drop every
+  // slot past the handler unconditionally. The old code removed only
+  // NON-nil slots, so an explicit trailing nil (sigaction(sig, fn,
+  // nil, nil)) lingered and shifted the handler's stack position — the
+  // registry then recorded nil instead of the Lua handler, which
+  // therefore never dispatched.
+  lua_settop(L, 2);
   if (!sigaction(sig, saptr, &oldsa)) {
     lua_rawgetp(L, LUA_REGISTRYINDEX, &kSignalHandlers);
     // push the old handler result to stack. if the registry handler
@@ -4248,7 +4266,8 @@ static const luaL_Reg kLuaUnix[] = {
     {"S_ISLNK", LuaUnixSislnk},           // is st:mode() a symbolic link?
     {"S_ISREG", LuaUnixSisreg},           // is st:mode() a regular file?
     {"S_ISSOCK", LuaUnixSissock},         // is st:mode() a socket?
-    {"Sigset", LuaUnixSigset},            // creates signal bitmask
+    {"Sigset", LuaUnixSigset},            // creates signal bitmask (deprecated name)
+    {"sigset", LuaUnixSigset},            // creates signal bitmask
     {"WEXITSTATUS", LuaUnixWexitstatus},  // gets exit status from wait status
     {"WIFEXITED", LuaUnixWifexited},      // gets exit code from wait status
     {"WIFSIGNALED", LuaUnixWifsignaled},  // determines if died due to signal

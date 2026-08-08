@@ -72,4 +72,41 @@ do
     fired)
 end
 
+-- Explicit trailing nils must not shift the stack slot the binding
+-- reads the Lua handler from: sigaction(sig, fn, nil, nil) has to
+-- register and dispatch fn exactly like sigaction(sig, fn) does.
+-- Before the fix the nil-valued slots lingered, the registry recorded
+-- nil, and the handler never ran (cosmic carried a four-branch call
+-- ladder to avoid ever passing them).
+do
+  local fired = false
+  assert(unix.sigaction(unix.SIGUSR2, function() fired = true end, nil, nil))
+  assert(unix.raise(unix.SIGUSR2))
+  for _ = 1, 1000 do
+    if fired then break end
+  end
+  assert(fired, "a handler passed with explicit trailing nils must dispatch")
+  unix.sigaction(unix.SIGUSR2, unix.SIG_DFL)
+end
+
+-- unix.sigset is unix.Sigset under a constructor-shaped name; both
+-- build the same object, so either may be passed as a mask.
+do
+  local lower = unix.sigset(unix.SIGUSR1)
+  assert(lower:contains(unix.SIGUSR1), "sigset() builds a populated set")
+  assert(not lower:contains(unix.SIGUSR2), "and only what was asked for")
+  local old = assert(unix.sigprocmask(unix.SIG_BLOCK, lower))
+  assert(unix.sigprocmask(unix.SIG_SETMASK, old))
+end
+
+-- An uninterrupted nanosleep reports a zero remainder rather than
+-- whatever the kernel left in its buffer (POSIX leaves it unspecified
+-- on success), so a caller can trust the value without a clock read.
+do
+  local s, ns = unix.nanosleep(0, 1000000)
+  assert(s == 0 and ns == 0,
+    "a completed sleep has no remainder, got " .. tostring(s) .. "," ..
+    tostring(ns))
+end
+
 print("PASS")

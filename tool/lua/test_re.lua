@@ -125,4 +125,14 @@ assert((fanch:find("xxabc", 0, 3)) == 3, "^ matches at init by default")
 assert((fanch:find("xxabc", re.NOTBOL, 3)) == nil,
   "NOTBOL suppresses ^ at init")
 
+-- :match is :search under the verb the operation performs, so a
+-- downstream that reserves `match` tree-wide can name the method
+-- directly instead of wrapping it. Same function, same returns.
+local mre = assert(re.compile("(a+)(b+)"))
+local m1, c1 = mre:match("xxaabbyy")
+local s1, cs1 = mre:search("xxaabbyy")
+assert(m1 == s1, "match returns what search returns, got " .. tostring(m1))
+assert(c1[1] == cs1[1] and c1[2] == cs1[2], "captures agree")
+assert(mre:match("zzz") == nil, "a no-match is a bare nil, as with search")
+
 print("test_re: PASS")
