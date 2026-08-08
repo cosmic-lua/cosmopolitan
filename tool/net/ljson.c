@@ -95,7 +95,7 @@ static const char kJsonStr[256] = {
 
 static struct DecodeJson Parse(struct lua_State *L, const char *p,
                                const char *e, int context, int depth,
-                               uintptr_t bsp, int arraymt) {
+                               uintptr_t bsp, int arraymt, int nullvalidx) {
   long x;
   char w[4];
   luaL_Buffer b;
@@ -137,7 +137,14 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
         if (context & (KEY | COLON | COMMA))
           goto OnColonCommaKey;
         if (p + 3 <= e && READ32LE(p - 1) == READ32LE("null")) {
-          lua_pushnil(L);
+          // nullvalidx names a caller-supplied sentinel (dkjson-style
+          // nullval) so nulls can survive the decode; 0 means the
+          // default nil mapping
+          if (nullvalidx) {
+            lua_pushvalue(L, nullvalidx);
+          } else {
+            lua_pushnil(L);
+          }
           return (struct DecodeJson){1, p + 3};
         } else {
           goto IllegalCharacter;
@@ -251,7 +258,8 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
         lua_pushvalue(L, arraymt);
         lua_setmetatable(L, -2);
         for (context = ARRAY, i = 0;;) {
-          r = Parse(L, p, e, context, depth - 1, bsp, arraymt);  // +2
+          r = Parse(L, p, e, context, depth - 1, bsp, arraymt,
+                    nullvalidx);  // +2
           if (UNLIKELY(r.rc == -1)) {
             lua_pop(L, 1);
             return r;
@@ -287,7 +295,8 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
         lua_createtable(L, 0, 8);  // +1
         context = KEY | OBJECT;
         for (;;) {
-          r = Parse(L, p, e, context, depth - 1, bsp, arraymt);  // +2
+          r = Parse(L, p, e, context, depth - 1, bsp, arraymt,
+                    nullvalidx);  // +2
           if (r.rc == -1) {
             lua_pop(L, 1);
             return r;
@@ -296,7 +305,8 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
           if (!r.rc) {
             return (struct DecodeJson){1, p};
           }
-          r = Parse(L, p, e, COLON, depth - 1, bsp, arraymt);  // +3
+          r = Parse(L, p, e, COLON, depth - 1, bsp, arraymt,
+                    nullvalidx);  // +3
           if (r.rc == -1) {
             lua_pop(L, 2);
             return r;
@@ -605,6 +615,20 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
  * @return r.p is string describing error if `rc < 0`
  */
 struct DecodeJson DecodeJson(struct lua_State *L, const char *p, size_t n) {
+  return DecodeJsonEx(L, p, n, 0);
+}
+
+/**
+ * Like DecodeJson, with a caller-supplied null sentinel.
+ *
+ * When `nullvalidx` is nonzero it names an absolute stack slot whose
+ * value is pushed for every JSON `null` (dkjson-style nullval), so
+ * nulls survive the decode as a distinguishable value instead of the
+ * default nil mapping. The slot must sit below the parse's own pushes
+ * and is left untouched.
+ */
+struct DecodeJson DecodeJsonEx(struct lua_State *L, const char *p, size_t n,
+                               int nullvalidx) {
   if (n == -1)
     n = p ? strlen(p) : 0;
   uintptr_t bsp = GetStackBottom() + 4096;
@@ -615,7 +639,8 @@ struct DecodeJson DecodeJson(struct lua_State *L, const char *p, size_t n) {
     // decoded array
     luaL_newmetatable(L, "json.array");
     int arraymt = lua_gettop(L);
-    struct DecodeJson r = Parse(L, p, p + n, 0, DEPTH, bsp, arraymt);
+    struct DecodeJson r =
+        Parse(L, p, p + n, 0, DEPTH, bsp, arraymt, nullvalidx);
     lua_remove(L, arraymt);
     return r;
   } else {

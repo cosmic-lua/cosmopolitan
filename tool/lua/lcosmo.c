@@ -45,8 +45,21 @@ static int LuaDecodeJson(lua_State *L) {
   size_t n;
   const char *p;
   struct DecodeJson r;
+  int nullvalidx = 0;
   p = luaL_checklstring(L, 1, &n);
-  r = DecodeJson(L, p, n);
+  if (lua_istable(L, 2)) {
+    // opts.nullval (dkjson-style): a caller-supplied value pushed for
+    // every JSON null, so nulls survive the decode; pinned to a stable
+    // stack slot the parse reads from. Extra stack slots below the
+    // returned values are discarded by Lua on return.
+    lua_getfield(L, 2, "nullval");
+    if (!lua_isnil(L, -1)) {
+      nullvalidx = lua_gettop(L);
+    } else {
+      lua_pop(L, 1);
+    }
+  }
+  r = DecodeJsonEx(L, p, n, nullvalidx);
   if (!r.rc) {
     lua_pushnil(L);
     lua_pushstring(L, "unexpected eof");
@@ -57,7 +70,7 @@ static int LuaDecodeJson(lua_State *L) {
     lua_pushstring(L, r.p);
     return 2;
   }
-  r = DecodeJson(L, r.p, n - (r.p - p));
+  r = DecodeJsonEx(L, r.p, n - (r.p - p), nullvalidx);
   if (r.rc) {
     lua_pushnil(L);
     lua_pushstring(L, "junk after expression");
@@ -97,6 +110,10 @@ static int LuaEncodeSmth(lua_State *L, int Encoder(lua_State *, char **, int,
         lua_pushliteral(L, "invalid nan option (must be \"null\")");
         return 2;
       }
+    }
+    lua_getfield(L, 2, "sparsenull");
+    if (!lua_isnoneornil(L, -1)) {
+      conf.sparsenull = lua_toboolean(L, -1);
     }
     lua_getfield(L, 2, "pretty");
     if (!lua_isnoneornil(L, -1)) {

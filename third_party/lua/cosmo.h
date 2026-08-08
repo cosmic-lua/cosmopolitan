@@ -10,7 +10,8 @@ struct EncoderConfig {
   short maxdepth;
   bool sorted;
   bool pretty;
-  bool nannull;  // json: encode non-finite numbers as null instead of erroring
+  bool nannull;    // json: encode non-finite numbers as null instead of erroring
+  bool sparsenull; // json: encode array holes as null instead of erroring
   const char *indent;
 };
 
