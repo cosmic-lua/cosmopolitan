@@ -993,9 +993,8 @@ function lsqlite3.Statement:bind_blob(n, blob) end
 --- nametable; if the statement parameters are not named, it looks for
 --- numerical fields 1 to the number of statement parameters.
 ---
----@return integer `lsqlite3.OK` on success or else a numerical error code,
 ---@param nametable table
----@return integer
+---@return integer `lsqlite3.OK` on success, or else a numerical error code
 function lsqlite3.Statement:bind_names(nametable) end
 
 ---@return integer parameter_count the largest statement parameter index in the prepared statement.
@@ -6961,9 +6960,13 @@ function unix.unveil(path, permissions) end
 
 --- Breaks down UNIX timestamp into Zulu Time numbers.
 ---@param unixts integer
----@return integer|nil year
----@return integer mon 1 ≤ mon ≤ 12
----@return integer mday 1 ≤ mday ≤ 31
+---@return integer|nil year nil when the call failed
+---@return integer|string mon 1 ≤ mon ≤ 12, or the error string when the
+--- call failed — failure returns exactly `nil, error, errno`, so its two
+--- values land in the slots mon and mday occupy on success, not in slots
+--- of their own past `zone`
+---@return integer|unix.Errno mday 1 ≤ mday ≤ 31, or the errno when the
+--- call failed
 ---@return integer hour 0 ≤ hour ≤ 23
 ---@return integer min 0 ≤ min ≤ 59
 ---@return integer sec 0 ≤ sec ≤ 60
@@ -6972,8 +6975,6 @@ function unix.unveil(path, permissions) end
 ---@return integer yday 0 ≤ yday ≤ 365
 ---@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
 ---@return string zone
----@return string? error
----@return unix.Errno? errno
 ---@nodiscard
 function unix.gmtime(unixts) end
 
@@ -7009,9 +7010,13 @@ function unix.gmtime(unixts) end
 --- needed, without having to recompile.
 ---
 ---@param unixts integer
----@return integer|nil year
----@return integer mon 1 ≤ mon ≤ 12
----@return integer mday 1 ≤ mday ≤ 31
+---@return integer|nil year nil when the call failed
+---@return integer|string mon 1 ≤ mon ≤ 12, or the error string when the
+--- call failed — failure returns exactly `nil, error, errno`, so its two
+--- values land in the slots mon and mday occupy on success, not in slots
+--- of their own past `zone`
+---@return integer|unix.Errno mday 1 ≤ mday ≤ 31, or the errno when the
+--- call failed
 ---@return integer hour 0 ≤ hour ≤ 23
 ---@return integer min 0 ≤ min ≤ 59
 ---@return integer sec 0 ≤ sec ≤ 60
@@ -7020,8 +7025,6 @@ function unix.gmtime(unixts) end
 ---@return integer yday 0 ≤ yday ≤ 365
 ---@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
 ---@return string zone
----@return string? error
----@return unix.Errno? errno
 function unix.localtime(unixts) end
 
 --- Gets information about file or directory.

@@ -134,6 +134,23 @@ end
 -- One probe: call fn with args, compare every declared return position
 -- against the actual returns. Trailing absent returns are nil, which
 -- must still satisfy the declared type (T?, |nil, or nil).
+--
+-- That allowance is a hole on its own, and it is the hole re's phantom
+-- third slot fell through (#247): a slot the C never pushes reads as
+-- nil, and nil satisfies the `string?` it was declared as, so the check
+-- passes forever on a return value that does not exist. SLOT_SEEN
+-- closes it by demanding evidence -- every declared slot must be
+-- observed non-nil by SOME probe of that function, or the annotation is
+-- describing something no path produces.
+local function count_keys(t)
+  local n = 0
+  for _ in pairs(t) do n = n + 1 end
+  return n
+end
+
+local SLOT_SEEN = {}   -- fname -> { [slot] = true }
+local SLOT_COUNT = {}  -- fname -> number of declared slots
+
 local function probe(fname, fn, ...)
   local declared = declared_returns(fname)
   local actual = table.pack(fn(...))
@@ -141,6 +158,17 @@ local function probe(fname, fn, ...)
     local ok, why = value_matches(actual[i], t, 0)
     assert(ok, string.format("%s return #%d: %s (declared '%s', got %s)",
       fname, i, why or "mismatch", t, tostring(actual[i])))
+  end
+  local seen = SLOT_SEEN[fname]
+  if not seen then
+    seen = {}
+    SLOT_SEEN[fname] = seen
+  end
+  SLOT_COUNT[fname] = #declared
+  for i = 1, #declared do
+    if actual[i] ~= nil then
+      seen[i] = true
+    end
   end
   return table.unpack(actual, 1, actual.n)
 end
@@ -186,6 +214,28 @@ local hv, herr = probe("cosmo.GetCryptoHash", cosmo.GetCryptoHash,
   "NOT-A-HASH", "payload")
 assert(hv == nil and type(herr) == "string",
   "GetCryptoHash failure must be nil, string")
+
+-- Every declared error slot needs a probe that fills it, or the
+-- slot-observation ratchet at the bottom of this file cannot tell a
+-- real one from a phantom.
+local dv, derr = probe("cosmo.Deflate", cosmo.Deflate, "x", { level = 99 })
+assert(dv == nil and type(derr) == "string",
+  "Deflate with an out-of-range level must be nil, string")
+
+local iv, ierr = probe("cosmo.Inflate", cosmo.Inflate, "not-deflate-data")
+assert(iv == nil and type(ierr) == "string",
+  "Inflate of non-deflate bytes must be nil, string")
+
+local cyclic = {}
+cyclic.self = cyclic
+local jv, jerr = probe("cosmo.EncodeJson", cosmo.EncodeJson, cyclic)
+assert(jv == nil and type(jerr) == "string",
+  "EncodeJson of a cyclic table must be nil, string")
+
+local lv, lerr = probe("cosmo.EncodeLua", cosmo.EncodeLua, { 1 },
+  { nan = "bogus" })
+assert(lv == nil and type(lerr) == "string",
+  "EncodeLua with an invalid nan option must be nil, string")
 
 local pv, perr = probe("cosmo.ParseIp", cosmo.ParseIp, "not.an.ip.addr")
 -- ParseIp signals failure as -1 or nil,error depending on the C path;
@@ -242,5 +292,49 @@ for _, m in ipairs(CONST_MODULES) do
 end
 print("constants: " .. nconst .. " checked integer across " ..
   #CONST_MODULES .. " modules; " .. nabsent .. " conditionally absent")
+
+-- ===== every declared slot must be observed =====
+--
+-- A declared return slot that no probe ever fills is either a path this
+-- file does not exercise (add the probe) or a value the C never pushes
+-- (fix the annotation). Both are actionable; neither is "fine".
+--
+-- SLOT_UNPROBED is a RATCHET: it may only shrink. Its entries are slots
+-- whose path is genuinely out of reach here -- not slots nobody got
+-- around to probing. A stale entry fails, same as an unobserved slot.
+local SLOT_UNPROBED = {}
+
+local nslots, nslotallow = 0, 0
+local unobserved = {}
+do
+  local names = {}
+  for fname in pairs(SLOT_SEEN) do
+    names[#names + 1] = fname
+  end
+  table.sort(names)
+  for _, fname in ipairs(names) do
+    for i = 1, SLOT_COUNT[fname] do
+      local disp = fname .. " #" .. i
+      if SLOT_SEEN[fname][i] then
+        nslots = nslots + 1
+        assert(not SLOT_UNPROBED[disp],
+          "stale SLOT_UNPROBED entry (this slot IS observed now, remove " ..
+          "it): " .. disp)
+      elseif SLOT_UNPROBED[disp] then
+        nslotallow = nslotallow + 1
+      else
+        unobserved[#unobserved + 1] = disp
+      end
+    end
+  end
+  assert(#unobserved == 0, "declared return slots no probe ever produced. " ..
+    "Either the annotation describes a value the C never pushes (fix the " ..
+    "annotation -- this is how re's phantom third return survived) or the " ..
+    "path that fills it is unprobed (add the probe):\n  " ..
+    table.concat(unobserved, "\n  "))
+end
+print("return slots: " .. nslots .. " observed non-nil across " ..
+  count_keys(SLOT_SEEN) .. " probed functions; " .. nslotallow ..
+  " unobserved (shrink-only)")
 
 print("PASS")
