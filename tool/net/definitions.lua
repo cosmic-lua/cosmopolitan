@@ -1407,9 +1407,13 @@ re.Regex = {}
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return string|nil match the whole matched substring
----@return {string} captures the parenthesized capture groups, in order
----@return string? error
+---@return string|nil match the whole matched substring; nil both when
+--- nothing matched and when the search failed
+---@return {string}|string|nil captures the parenthesized capture groups
+--- (in order) on a match, or the error string when it failed. The C
+--- pushes at most two values: `(match, captures)`, a bare `nil` for a
+--- no-match, or `(nil, err)`. A third slot was annotated here and never
+--- returned, so a generated binding declared a value that does not exist.
 ---@nodiscard
 function re.Regex:search(str, flags) end
 
@@ -1425,9 +1429,13 @@ function re.Regex:search(str, flags) end
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return string|nil match the whole matched substring
----@return {string} captures the parenthesized capture groups, in order
----@return string? error
+---@return string|nil match the whole matched substring; nil both when
+--- nothing matched and when the search failed
+---@return {string}|string|nil captures the parenthesized capture groups
+--- (in order) on a match, or the error string when it failed. The C
+--- pushes at most two values: `(match, captures)`, a bare `nil` for a
+--- no-match, or `(nil, err)`. A third slot was annotated here and never
+--- returned, so a generated binding declared a value that does not exist.
 ---@nodiscard
 function re.Regex:match(str, flags) end
 
@@ -1486,9 +1494,13 @@ function re.Regex:find(str, flags, init) end
 --- This has exponential complexity. Please use `re.compile()` to compile your regular expressions once from `/.init.lua`. This API exists for convenience. This isn't recommended for prod.
 ---
 --- This uses POSIX extended syntax by default.
----@return string|nil match the whole matched substring
----@return {string} captures the parenthesized capture groups, in order
----@return string? error
+---@return string|nil match the whole matched substring; nil both when
+--- nothing matched and when the search failed
+---@return {string}|string|nil captures the parenthesized capture groups
+--- (in order) on a match, or the error string when it failed. The C
+--- pushes at most two values: `(match, captures)`, a bare `nil` for a
+--- no-match, or `(nil, err)`. A third slot was annotated here and never
+--- returned, so a generated binding declared a value that does not exist.
 ---@nodiscard
 function re.search(regex, text, flags) end
 
