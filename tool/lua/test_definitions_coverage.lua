@@ -202,6 +202,10 @@ local C_zip = slurp("tool/net/lzip.c")
 local C_cov = slurp("tool/net/lcov.c")
 local C_repl = slurp("third_party/lua/lreplmod.c")
 local C_cosmo = slurp("tool/lua/lcosmo.c")
+-- kCosmoFuncs[] registers names whose implementations live here, so the
+-- return-arity scan below needs this source to resolve them.
+local C_funcs = slurp("tool/net/lfuncs.c")
+local C_redbean = slurp("tool/net/redbean.c")
 
 -- unix constants: literal LuaSetIntField(L, "NAME", ...) calls.
 local unix_consts = {}
@@ -895,6 +899,244 @@ for _, m in ipairs(MODULES) do
   end
 end
 
+-- ===== return-arity conformance =====
+--
+-- An annotation may not declare MORE return values than the C can push.
+-- Nothing checked this, and it is how re.Regex:search/:match came to
+-- declare a third slot that lre.c never returns (#247): the runtime
+-- probe in test_definitions_conformance.lua reads declared slots
+-- positionally, and an absent trailing slot is nil, which satisfies the
+-- `string?` it was declared as. A phantom slot is invisible from the
+-- Lua side and obvious from the C side, so it is checked here.
+--
+-- The C side is read statically: a binding's registered name maps to its
+-- C function through the same luaL_Reg tables the coverage checks above
+-- use, and that function's arity is the largest value it can `return`.
+-- `return <literal>;` is the common case (there are hundreds); a
+-- `return Helper(...)` resolves to Helper's own arity, recursively, so
+-- the many SysretErrno/ReturnInteger/ZipError wrappers resolve too. A
+-- function whose arity cannot be determined that way is SKIPPED and
+-- counted, never silently passed.
+--
+-- Direction matters: declaring FEWER returns than the C pushes is a
+-- narrowing an annotation is allowed to make (a caller simply cannot
+-- see the extra), while declaring more advertises a value that does not
+-- exist. Only the second is a failure.
+
+-- Helpers that never return to their caller: they longjmp out, so they
+-- put nothing on the stack and must not contribute an arity.
+local NORETURN_C = set({
+  "luaL_error", "luaL_argerror", "lua_error", "luaL_typeerror",
+})
+
+-- Every C function in the loaded sources, as name -> body text. The body
+-- runs to the start of the next function rather than to a matched brace:
+-- a brace inside a string literal or comment cannot then throw the scan
+-- off, and these files are a flat sequence of functions.
+local C_BODIES = {}
+do
+  local sources = {
+    C_unix, C_path, C_re, C_argon2, C_sqlite, C_getopt, C_zip, C_cov,
+    C_repl, C_cosmo, C_funcs, C_redbean,
+  }
+  for _, C in ipairs(sources) do
+    local starts = {}
+    for pos, name in C:gmatch("()\n[%w_]+[%w_ %*]-([%w_]+)%s*%(lua_State%s*%*") do
+      starts[#starts + 1] = { pos = pos, name = name }
+    end
+    for i, f in ipairs(starts) do
+      local stop = starts[i + 1] and starts[i + 1].pos or #C
+      -- Last definition wins: a forward declaration is a prefix of the
+      -- real body's span and carries no returns of its own.
+      local body = C:sub(f.pos, stop)
+      if not C_BODIES[f.name] or #body > #C_BODIES[f.name] then
+        C_BODIES[f.name] = body
+      end
+    end
+  end
+end
+
+-- Macros that hide a return, e.g. lgetopt.c's
+--
+--   #define FAIL(...) do { lua_pushnil(L); lua_pushfstring(...); return 2; }
+--
+-- Without these the scan below reads a smaller arity than the C really
+-- pushes and reports a function that is fine -- which it did for
+-- getopt.parse on the first run of this check.
+local MACRO_RETURNS = {}
+do
+  local sources = {
+    C_unix, C_path, C_re, C_argon2, C_sqlite, C_getopt, C_zip, C_cov,
+    C_repl, C_cosmo, C_funcs, C_redbean,
+  }
+  for _, C in ipairs(sources) do
+    for name, tail in C:gmatch("#define%s+([A-Z_][A-Z_0-9]*)%s*%(([^\n]-)\n") do
+      local _ = tail
+      -- the macro body runs while lines end in a backslash
+      local at = C:find("#define%s+" .. name .. "%s*%(")
+      if at then
+        local body, i = "", at
+        repeat
+          local line_end = C:find("\n", i) or #C
+          local line = C:sub(i, line_end)
+          body = body .. line
+          i = line_end + 1
+        until not line:match("\\%s*\n$")
+        local n = body:match("return%s+(%d+)%s*;")
+        if n then
+          local v = tonumber(n)
+          if not MACRO_RETURNS[name] or v > MACRO_RETURNS[name] then
+            MACRO_RETURNS[name] = v
+          end
+        end
+      end
+    end
+  end
+end
+
+-- The largest number of values `fname` can leave on the Lua stack, or
+-- nil when that cannot be read off the source.
+local arity_memo = {}
+local function max_returns(fname, seen)
+  if arity_memo[fname] ~= nil then
+    if arity_memo[fname] == false then return nil end
+    return arity_memo[fname]
+  end
+  local body = C_BODIES[fname]
+  if not body then return nil end
+  seen = seen or {}
+  if seen[fname] then return nil end   -- recursion: cannot bound it here
+  seen[fname] = true
+  local best, unknown = nil, false
+  for macro, n in pairs(MACRO_RETURNS) do
+    if body:find("%f[%w_]" .. macro .. "%s*%(") then
+      if not best or n > best then best = n end
+    end
+  end
+  for stmt in body:gmatch("return%s+([^;]+);") do
+    local lit = stmt:match("^(%d+)%s*$")
+    local call = stmt:match("^([%w_]+)%s*%(")
+    if lit then
+      local n = tonumber(lit)
+      if not best or n > best then best = n end
+    elseif call and NORETURN_C[call] then
+      -- contributes nothing
+    elseif call then
+      local n = max_returns(call, seen)
+      if n then
+        if not best or n > best then best = n end
+      else
+        unknown = true
+      end
+    else
+      unknown = true                    -- `return n;`, `return top - 1;`, ...
+    end
+  end
+  seen[fname] = nil
+  local result = (not unknown) and best or nil
+  arity_memo[fname] = result or false
+  return result
+end
+
+-- Registered name -> C function, from a luaL_Reg table.
+local function reg_cfuncs(C, tbl)
+  local body = assert(C:match("luaL_Reg%s+" .. tbl .. "%[%]%s*=%s*{(.-)};"))
+  local out = {}
+  for name, cfn in body:gmatch('{%s*"([%a_][%w_]*)"%s*,%s*([%w_]+)%s*}') do
+    if not name:match("^__") then
+      out[name] = cfn
+    end
+  end
+  return out
+end
+
+-- How many ---@return lines the annotation for `decl` carries. Only a
+-- line that STARTS the tag counts; the wrapped prose under one does not.
+local function declared_return_count(decl)
+  local pat = "\nfunction " .. decl:gsub("[%.%:%-]", "%%%1") .. "%s*%("
+  local at = D:find(pat)
+  if not at then return nil end
+  local head = D:sub(1, at)
+  local block = head:match("(\n%-%-%-[^\n]*)$")
+  -- walk back over the contiguous --- comment block
+  local lines, i = {}, 0
+  for line in head:gmatch("([^\n]*)\n") do
+    i = i + 1
+    lines[i] = line
+  end
+  local n = 0
+  for j = i, 1, -1 do
+    local line = lines[j]
+    if not line:match("^%-%-%-") then break end
+    if line:match("^%-%-%-@return") then n = n + 1 end
+  end
+  local _ = block
+  return n
+end
+
+-- Annotations known to over-declare, kept so the check can land before
+-- every one is fixed. A RATCHET: it may only shrink, and a stale entry
+-- (now clean) fails just like a violation.
+local ARITY_ALLOW = set({})
+
+local ARITY_SKIPPED = {}
+local arity_checked, arity_vio = 0, {}
+do
+  local targets = {}
+  local function add(decl, C, tbl)
+    for name, cfn in pairs(reg_cfuncs(C, tbl)) do
+      targets[#targets + 1] = { decl = decl .. name, cfn = cfn }
+    end
+  end
+  add("cosmo.", C_cosmo, "kCosmoFuncs")
+  add("unix.", C_unix, "kLuaUnix")
+  add("unix.Stat:", C_unix, "kLuaUnixStatMeth")
+  add("unix.Statfs:", C_unix, "kLuaUnixStatfsMeth")
+  add("unix.Rusage:", C_unix, "kLuaUnixRusageMeth")
+  add("unix.Memory:", C_unix, "kLuaUnixMemoryMeth")
+  add("unix.Sigset:", C_unix, "kLuaUnixSigsetMeth")
+  add("unix.Dir:", C_unix, "kLuaUnixDirMeth")
+  add("path.", C_path, "kLuaPath")
+  add("re.", C_re, "kLuaRe")
+  add("re.Regex:", C_re, "kLuaReRegexMeth")
+  add("argon2.", C_argon2, "largon2")
+  add("lsqlite3.", C_sqlite, "sqlitelib")
+  add("lsqlite3.Database:", C_sqlite, "dblib")
+  add("lsqlite3.Statement:", C_sqlite, "vmlib")
+  add("lsqlite3.Context:", C_sqlite, "ctxlib")
+  add("getopt.", C_getopt, "kLuaGetopt")
+  add("zip.", C_zip, "kLuaZip")
+  add("zip.Reader:", C_zip, "kLuaZipReaderMethods")
+  add("zip.Writer:", C_zip, "kLuaZipWriterMethods")
+  add("zip.Appender:", C_zip, "kLuaZipAppenderMethods")
+  add("cov.", C_cov, "kLuaCov")
+  add("repl.", C_repl, "kReplFuncs")
+
+  for _, t in ipairs(targets) do
+    local declared = declared_return_count(t.decl)
+    local actual = max_returns(t.cfn)
+    if declared and declared > 0 then
+      if not actual then
+        ARITY_SKIPPED[#ARITY_SKIPPED + 1] = t.decl .. " (" .. t.cfn .. ")"
+      else
+        arity_checked = arity_checked + 1
+        if declared > actual then
+          arity_vio[string.format(
+            "%s declares %d returns; %s pushes at most %d",
+            t.decl, declared, t.cfn, actual)] = true
+        end
+      end
+    end
+  end
+end
+
+-- Skips are reported, not hidden: a binding whose arity the reader above
+-- cannot determine is one this check does not cover.
+table.sort(ARITY_SKIPPED)
+if os.getenv("ARITY_SKIPS") then
+  for _, d in ipairs(ARITY_SKIPPED) do print("  skip: " .. d) end
+end
+
 local function ratchet(viol, allow, label)
   for _, disp in ipairs(sorted_keys(viol)) do
     if not allow[disp] then
@@ -914,6 +1156,7 @@ ratchet(qvio.noreturn, QALLOW_NORETURN, "no @return/@overload")
 ratchet(qvio.inline, QALLOW_INLINE, "inline { } table type")
 ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
 ratchet(qvio.consttype, QALLOW_CONSTTYPE, "constant not declared integer")
+ratchet(arity_vio, ARITY_ALLOW, "annotation declares returns the C never pushes")
 
 assert(#failures == 0,
   "definitions.lua coverage failures (annotate the binding or fix the " ..
@@ -927,4 +1170,7 @@ print("definitions coverage: " .. nfns .. " functions, " .. nmethods ..
   #MODULES .. " modules; " .. count(ALLOW) .. " allowlisted")
 print("annotation quality: " .. #qdecls .. " declarations checked; " ..
   qallowed .. " quality-allowlisted (shrink-only)")
+print("return arity: " .. arity_checked .. " bindings checked against the C; "
+  .. #ARITY_SKIPPED .. " arity not statically readable; " ..
+  count(ARITY_ALLOW) .. " allowlisted (shrink-only)")
 print("test_definitions_coverage: PASS")

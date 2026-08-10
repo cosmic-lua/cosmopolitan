@@ -70,6 +70,33 @@ local function declared_returns(fname)
   return returns
 end
 
+-- ---@class blocks: class name -> { {field, type}, ... }. A declared
+-- class is checked structurally against these, so a class that lists a
+-- field the C never sets fails here rather than being taken on trust.
+local CLASSES = {}
+-- `---@class re.Regex: userdata` says the runtime value is a C handle,
+-- not a table, so it is checked by kind and nothing else -- there are no
+-- fields to walk.
+local CLASS_PARENT = {}
+do
+  local current
+  for line in (D .. "\n"):gmatch("([^\n]*)\n") do
+    local cls, parent = line:match("^%-%-%-@class%s+([%w_%.]+)%s*:?%s*([%w_%.]*)")
+    if cls then
+      CLASS_PARENT[cls] = parent ~= "" and parent or nil
+      current = {}
+      CLASSES[cls] = current
+    elseif current then
+      local f, ty = line:match("^%-%-%-@field%s+([%w_]+)%s+(%S+)")
+      if f then
+        current[#current + 1] = { f, ty }
+      elseif not line:match("^%-%-%-") then
+        current = nil
+      end
+    end
+  end
+end
+
 -- Check one runtime value against one declared LuaLS type string.
 -- Returns true, or nil and a reason.
 local function value_matches(v, t, depth)
@@ -117,6 +144,13 @@ local function value_matches(v, t, depth)
     if type(v) == "table" then return true end
     return nil, "expected table, got " .. type(v)
   end
+  -- `T[]`: an array of T. The element type is not walked -- an empty
+  -- array would prove nothing and a populated one only proves its own
+  -- elements -- but the container must at least be a table.
+  if t:match("%[%]$") then
+    if type(v) == "table" then return true end
+    return nil, "expected an array, got " .. type(v)
+  end
   -- literal string type: "null"
   local lit = t:match('^"(.*)"$')
   if lit then
@@ -127,6 +161,25 @@ local function value_matches(v, t, depth)
   if ALIASES[t] then
     return value_matches(v, ALIASES[t], depth)
   end
+  -- a declared ---@class: every declared field must hold its declared
+  -- type (an optional one may be absent, which `T?` already allows)
+  if CLASSES[t] then
+    if CLASS_PARENT[t] == "userdata" then
+      if type(v) == "userdata" then return true end
+      return nil, "expected " .. t .. " (userdata), got " .. type(v)
+    end
+    if type(v) ~= "table" then
+      return nil, "expected " .. t .. " (a table), got " .. type(v)
+    end
+    if depth > 4 then return true end
+    for _, ft in ipairs(CLASSES[t]) do
+      local ok, why = value_matches(v[ft[1]], ft[2], depth + 1)
+      if not ok then
+        return nil, t .. "." .. ft[1] .. ": " .. (why or "mismatch")
+      end
+    end
+    return true
+  end
   error("unsupported type in conformance checker: '" .. t
     .. "' — extend value_matches or probe a different binding")
 end
@@ -134,6 +187,23 @@ end
 -- One probe: call fn with args, compare every declared return position
 -- against the actual returns. Trailing absent returns are nil, which
 -- must still satisfy the declared type (T?, |nil, or nil).
+--
+-- That allowance is a hole on its own, and it is the hole re's phantom
+-- third slot fell through (#247): a slot the C never pushes reads as
+-- nil, and nil satisfies the `string?` it was declared as, so the check
+-- passes forever on a return value that does not exist. SLOT_SEEN
+-- closes it by demanding evidence -- every declared slot must be
+-- observed non-nil by SOME probe of that function, or the annotation is
+-- describing something no path produces.
+local function count_keys(t)
+  local n = 0
+  for _ in pairs(t) do n = n + 1 end
+  return n
+end
+
+local SLOT_SEEN = {}   -- fname -> { [slot] = true }
+local SLOT_COUNT = {}  -- fname -> number of declared slots
+
 local function probe(fname, fn, ...)
   local declared = declared_returns(fname)
   local actual = table.pack(fn(...))
@@ -142,12 +212,25 @@ local function probe(fname, fn, ...)
     assert(ok, string.format("%s return #%d: %s (declared '%s', got %s)",
       fname, i, why or "mismatch", t, tostring(actual[i])))
   end
+  local seen = SLOT_SEEN[fname]
+  if not seen then
+    seen = {}
+    SLOT_SEEN[fname] = seen
+  end
+  SLOT_COUNT[fname] = #declared
+  for i = 1, #declared do
+    if actual[i] ~= nil then
+      seen[i] = true
+    end
+  end
   return table.unpack(actual, 1, actual.n)
 end
 
 local cosmo = require("cosmo")
 local path = require("cosmo.path")
 local unix = require("cosmo.unix")
+local getopt = require("cosmo.getopt")
+local argon2 = require("cosmo.argon2")
 
 -- === success shapes ======================================================
 
@@ -169,6 +252,117 @@ probe("path.dirname", path.dirname, "/a/b/c.tl")
 probe("path.join", path.join, "a", "b")
 probe("unix.getpid", unix.getpid)
 
+-- --- the pure surface -------------------------------------------------
+-- Every binding in the modules whose functions are side-effect free is
+-- probed, not a sample of them: a curated set that stops growing while
+-- the surface does is the gap this file was written to close.
+
+local re = require("cosmo.re")
+
+-- single-slot: one call observes the only declared return
+probe("cosmo.Crc32c", cosmo.Crc32c, 0, "hello")
+probe("cosmo.DecodeLatin1", cosmo.DecodeLatin1, "abc")
+probe("cosmo.EncodeLatin1", cosmo.EncodeLatin1, "abc")
+probe("cosmo.EncodeHex", cosmo.EncodeHex, "\x00\xff")
+probe("cosmo.EscapeFragment", cosmo.EscapeFragment, "a b")
+probe("cosmo.EscapeHost", cosmo.EscapeHost, "ex ample.com")
+probe("cosmo.EscapeHtml", cosmo.EscapeHtml, "<b>")
+probe("cosmo.EscapeIp", cosmo.EscapeIp, 0x7f000001)
+probe("cosmo.EscapeLiteral", cosmo.EscapeLiteral, "a\"b")
+probe("cosmo.EscapeParam", cosmo.EscapeParam, "a b")
+probe("cosmo.EscapePass", cosmo.EscapePass, "a b")
+probe("cosmo.EscapePath", cosmo.EscapePath, "a b")
+probe("cosmo.EscapeSegment", cosmo.EscapeSegment, "a b")
+probe("cosmo.EscapeUser", cosmo.EscapeUser, "a b")
+probe("cosmo.UnescapeParam", cosmo.UnescapeParam, "a%20b")
+probe("cosmo.FormatHttpDateTime", cosmo.FormatHttpDateTime, 0)
+probe("cosmo.GetHttpReason", cosmo.GetHttpReason, 200)
+probe("cosmo.GetMonospaceWidth", cosmo.GetMonospaceWidth, "abc")
+probe("cosmo.HasControlCodes", cosmo.HasControlCodes, "abc")
+probe("cosmo.is_main", cosmo.is_main)
+probe("cosmo.IsAcceptableHost", cosmo.IsAcceptableHost, "example.com")
+probe("cosmo.IsAcceptablePath", cosmo.IsAcceptablePath, "/a/b")
+probe("cosmo.IsAcceptablePort", cosmo.IsAcceptablePort, "80")
+probe("cosmo.IsBase64", cosmo.IsBase64, "aGk=")
+probe("cosmo.IsLoopbackIp", cosmo.IsLoopbackIp, 0x7f000001)
+probe("cosmo.IsPrivateIp", cosmo.IsPrivateIp, 0x0a000001)
+probe("cosmo.IsPublicIp", cosmo.IsPublicIp, 0x08080808)
+probe("cosmo.IsReasonablePath", cosmo.IsReasonablePath, "/a/b")
+probe("cosmo.IsValidPercentEncoding", cosmo.IsValidPercentEncoding, "a%20b")
+probe("cosmo.jsonarray", cosmo.jsonarray, { 1, 2 })
+probe("cosmo.ParseParams", cosmo.ParseParams, "a=1&b=2")
+probe("cosmo.ParseUrl", cosmo.ParseUrl, "http://x/y")
+probe("cosmo.EncodeUrl", cosmo.EncodeUrl,
+  { scheme = "http", host = "x", path = "/y" })
+probe("cosmo.Rand64", cosmo.Rand64)
+probe("cosmo.Sha256", cosmo.Sha256, "x")
+probe("cosmo.UuidV4", cosmo.UuidV4)
+probe("cosmo.UuidV7", cosmo.UuidV7)
+probe("path.exists", path.exists, "tool")
+probe("path.isdir", path.isdir, "tool")
+probe("path.isfile", path.isfile, "tool/net/definitions.lua")
+probe("path.islink", path.islink, "tool")
+
+-- two-slot: the error slot needs a failing call of its own
+local dhv, dherr = probe("cosmo.DecodeHex", cosmo.DecodeHex, "zz")
+assert(dhv == nil and type(dherr) == "string",
+  "DecodeHex of non-hex must be nil, string")
+probe("cosmo.DecodeHex", cosmo.DecodeHex, "00ff")
+
+local rxbad, rxerr = probe("re.compile", re.compile, "[")
+assert(rxbad == nil and type(rxerr) == "string",
+  "re.compile of a bad pattern must be nil, string")
+local rx = probe("re.compile", re.compile, "a(b)c")
+
+local sv, scaps = probe("re.search", re.search, "a(b)c", "abc")
+assert(sv == "abc" and type(scaps) == "table", "re.search must match")
+probe("re.search", re.search, "[", "x")
+
+-- the compiled-Regex methods: a match fills every declared slot, which
+-- is how #247's phantom third return would have been caught here
+probe("re.Regex:search", rx.search, rx, "abc")
+probe("re.Regex:match", rx.match, rx, "abc")
+probe("re.Regex:find", rx.find, rx, "abc")
+
+local gv, gerr = probe("getopt.parse", getopt.parse, "not-a-table", "h")
+assert(gv == nil and type(gerr) == "string",
+  "getopt.parse with a non-table argv must be nil, string")
+probe("getopt.parse", getopt.parse, { "prog", "-h" }, "h")
+
+-- These two have a real second slot the C can push but no test can
+-- trigger (see SLOT_UNPROBED at the bottom). Probing the success path
+-- still covers slot 1, and keeps the allowlist entries live rather than
+-- inert: an unprobed function's slots are never visited at all, so a
+-- stale entry for one could never be detected.
+probe("cosmo.GetRandomBytes", cosmo.GetRandomBytes, 8)
+probe("cosmo.Strftime", cosmo.Strftime, "%Y", 0)
+
+-- ParseHost reports the port, so a bare host yields nil; the declared
+-- slot is only observable with one present.
+probe("cosmo.ParseHost", cosmo.ParseHost, "example.com:80")
+
+-- base32's second argument is the ALPHABET; one whose length is not a
+-- power of two in 2..128 is the reachable failure.
+local b32, b32err = probe("cosmo.EncodeBase32", cosmo.EncodeBase32, "hi", "abc")
+assert(b32 == nil and type(b32err) == "string",
+  "EncodeBase32 with a bad alphabet must be nil, string")
+probe("cosmo.EncodeBase32", cosmo.EncodeBase32, "hi")
+local d32, d32err = probe("cosmo.DecodeBase32", cosmo.DecodeBase32, "NBUQ", "abc")
+assert(d32 == nil and type(d32err) == "string",
+  "DecodeBase32 with a bad alphabet must be nil, string")
+probe("cosmo.DecodeBase32", cosmo.DecodeBase32, "NBUQ====")
+
+local ah, aherr = probe("argon2.hash_encoded", argon2.hash_encoded, "pw", "s",
+  { t_cost = 1, m_cost = 8, parallelism = 1 })
+assert(ah == nil and type(aherr) == "string",
+  "argon2.hash_encoded with too short a salt must be nil, string")
+local encoded = probe("argon2.hash_encoded", argon2.hash_encoded, "pw",
+  "saltsalt", { t_cost = 1, m_cost = 8, parallelism = 1 })
+local av, averr = probe("argon2.verify", argon2.verify, "not-encoded", "pw")
+assert(av == false and type(averr) == "string",
+  "argon2.verify of a malformed hash must be false, string")
+probe("argon2.verify", argon2.verify, encoded, "pw")
+
 -- compress round-trip, both directions typed
 local deflated = probe("cosmo.Deflate", cosmo.Deflate, ("ratchet"):rep(64))
 local inflated = probe("cosmo.Inflate", cosmo.Inflate, deflated)
@@ -186,6 +380,28 @@ local hv, herr = probe("cosmo.GetCryptoHash", cosmo.GetCryptoHash,
   "NOT-A-HASH", "payload")
 assert(hv == nil and type(herr) == "string",
   "GetCryptoHash failure must be nil, string")
+
+-- Every declared error slot needs a probe that fills it, or the
+-- slot-observation ratchet at the bottom of this file cannot tell a
+-- real one from a phantom.
+local dv, derr = probe("cosmo.Deflate", cosmo.Deflate, "x", { level = 99 })
+assert(dv == nil and type(derr) == "string",
+  "Deflate with an out-of-range level must be nil, string")
+
+local iv, ierr = probe("cosmo.Inflate", cosmo.Inflate, "not-deflate-data")
+assert(iv == nil and type(ierr) == "string",
+  "Inflate of non-deflate bytes must be nil, string")
+
+local cyclic = {}
+cyclic.self = cyclic
+local jv, jerr = probe("cosmo.EncodeJson", cosmo.EncodeJson, cyclic)
+assert(jv == nil and type(jerr) == "string",
+  "EncodeJson of a cyclic table must be nil, string")
+
+local lv, lerr = probe("cosmo.EncodeLua", cosmo.EncodeLua, { 1 },
+  { nan = "bogus" })
+assert(lv == nil and type(lerr) == "string",
+  "EncodeLua with an invalid nan option must be nil, string")
 
 local pv, perr = probe("cosmo.ParseIp", cosmo.ParseIp, "not.an.ip.addr")
 -- ParseIp signals failure as -1 or nil,error depending on the C path;
@@ -242,5 +458,58 @@ for _, m in ipairs(CONST_MODULES) do
 end
 print("constants: " .. nconst .. " checked integer across " ..
   #CONST_MODULES .. " modules; " .. nabsent .. " conditionally absent")
+
+-- ===== every declared slot must be observed =====
+--
+-- A declared return slot that no probe ever fills is either a path this
+-- file does not exercise (add the probe) or a value the C never pushes
+-- (fix the annotation). Both are actionable; neither is "fine".
+--
+-- SLOT_UNPROBED is a RATCHET: it may only shrink. Its entries are slots
+-- whose path is genuinely out of reach here -- not slots nobody got
+-- around to probing. A stale entry fails, same as an unobserved slot.
+local SLOT_UNPROBED = {
+  -- getrandom(2) itself has to fail to produce this, which a test
+  -- cannot arrange. The slot IS real: the static arity check in
+  -- test_definitions_coverage.lua confirms the C can push two.
+  ["cosmo.GetRandomBytes #2"] = true,
+  -- Strftime's failure path was not reachable with any format this
+  -- file tried; the arity check confirms the C can push two, so the
+  -- slot is real and the probe is the missing half.
+  ["cosmo.Strftime #2"] = true,
+}
+
+local nslots, nslotallow = 0, 0
+local unobserved = {}
+do
+  local names = {}
+  for fname in pairs(SLOT_SEEN) do
+    names[#names + 1] = fname
+  end
+  table.sort(names)
+  for _, fname in ipairs(names) do
+    for i = 1, SLOT_COUNT[fname] do
+      local disp = fname .. " #" .. i
+      if SLOT_SEEN[fname][i] then
+        nslots = nslots + 1
+        assert(not SLOT_UNPROBED[disp],
+          "stale SLOT_UNPROBED entry (this slot IS observed now, remove " ..
+          "it): " .. disp)
+      elseif SLOT_UNPROBED[disp] then
+        nslotallow = nslotallow + 1
+      else
+        unobserved[#unobserved + 1] = disp
+      end
+    end
+  end
+  assert(#unobserved == 0, "declared return slots no probe ever produced. " ..
+    "Either the annotation describes a value the C never pushes (fix the " ..
+    "annotation -- this is how re's phantom third return survived) or the " ..
+    "path that fills it is unprobed (add the probe):\n  " ..
+    table.concat(unobserved, "\n  "))
+end
+print("return slots: " .. nslots .. " observed non-nil across " ..
+  count_keys(SLOT_SEEN) .. " probed functions; " .. nslotallow ..
+  " unobserved (shrink-only)")
 
 print("PASS")
