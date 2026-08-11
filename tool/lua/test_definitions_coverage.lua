@@ -1137,6 +1137,58 @@ if os.getenv("ARITY_SKIPS") then
   for _, d in ipairs(ARITY_SKIPPED) do print("  skip: " .. d) end
 end
 
+-- 10) type documentation: every `---@class` needs a prose description above
+-- it, and every `---@field` needs one after its type. A type declared here is
+-- re-exported by downstream generators, so this file is the only source its
+-- consumers have for what the type IS -- their editors show these words or
+-- nothing. Function docs do not cover it: they describe the calls a type
+-- flows through, not the type. Both lists are ratchets: they may only shrink.
+local QALLOW_UNDOC_CLASS = set({})
+local QALLOW_UNDOC_FIELD = set({})
+do
+  local dlines = {}
+  for line in (D .. "\n"):gmatch("([^\n]*)\n") do dlines[#dlines + 1] = line end
+
+  -- A description is a `---` line carrying prose rather than another tag.
+  -- Walk up over the annotation lines a class may already have above it.
+  local function described_above(i)
+    local j = i - 1
+    while j >= 1 and dlines[j]:match("^%-%-%-") do
+      local body = dlines[j]:match("^%-%-%-%s*(.*)$")
+      if body ~= "" and not body:match("^@") then return true end
+      j = j - 1
+    end
+    return false
+  end
+
+  for i, line in ipairs(dlines) do
+    local cls = line:match("^%-%-%-@class%s+([%w_.]+)")
+    if cls and not described_above(i) then
+      if not QALLOW_UNDOC_CLASS[cls] then
+        fail("line " .. i .. ": ---@class " .. cls .. " has no description; " ..
+          "add a `--- <what it is>` line above it (downstreams re-export " ..
+          "this type and inherit its docs)")
+      end
+    end
+    -- `---@field <name> <type>` with nothing after the type.
+    local fname = line:match("^%-%-%-@field%s+([%w_]+)%s+%S+%s*$")
+    if fname then
+      -- attribute it to the class it belongs to, for a stable allowlist key
+      local owner = "?"
+      for j = i - 1, 1, -1 do
+        local c = dlines[j]:match("^%-%-%-@class%s+([%w_.]+)")
+        if c then owner = c break end
+        if not dlines[j]:match("^%-%-%-") then break end
+      end
+      local disp = owner .. "." .. fname
+      if not QALLOW_UNDOC_FIELD[disp] then
+        fail("line " .. i .. ": ---@field " .. disp .. " has no description; " ..
+          "describe it after the type")
+      end
+    end
+  end
+end
+
 local function ratchet(viol, allow, label)
   for _, disp in ipairs(sorted_keys(viol)) do
     if not allow[disp] then
