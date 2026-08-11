@@ -1,6 +1,8 @@
 ---@meta
 error("Tried to evaluate definition file.")
 
+--- Lua's builtin string type, extended with the operators this runtime
+--- installs: `s % {...}` formats and `s * n` repeats.
 ---@class string
 ---@operator mod(any[]): string
 ---@operator mul(integer): string
@@ -39,6 +41,8 @@ arg = nil
 
 -- DATATYPES
 
+--- A URL broken into its parts, as returned by `ParseUrl` and accepted by
+--- `EncodeUrl`.
 ---@class cosmo.Url
 ---@field scheme string e.g. `"http"`
 ---@field user string? the username string, or nil if absent
@@ -86,6 +90,7 @@ arg = nil
 --- the call site's return annotation).
 ---@alias cosmo.HostOs "LINUX"|"METAL"|"WINDOWS"|"XNU"|"NETBSD"|"FREEBSD"|"OPENBSD"
 
+--- Options controlling how `EncodeJson` and `EncodeLua` serialize a value.
 ---@class cosmo.EncoderOptions
 ---@field useoutput boolean? defaults to `false`. Encodes the result directly to the output buffer and returns `nil` value. This option is ignored if used outside of request handling code.
 ---@field sorted boolean? defaults to `true`. Lua uses hash tables so the order of object keys is lost in a Lua table. So, by default, we use strcmp to impose a deterministic output order. If you don't care about ordering then setting sorted=false should yield a performance boost in serialization.
@@ -95,17 +100,23 @@ arg = nil
 ---@field nan cosmo.JsonNanMode? `EncodeJson` only: encode NaN and Infinity as `null` (the v8 behavior) instead of failing with `nil, error`.
 ---@field sparsenull boolean? `EncodeJson` only: encode array holes as `null` instead of failing the encode with `nil, error`. With it, an array containing JSON `null` round-trips losslessly with `DecodeJson`'s default nil mapping.
 
+--- Options for `DecodeJson`, controlling how JSON `null` maps into Lua.
 ---@class cosmo.DecoderOptions
 ---@field nullval JsonValue? a value to stand in for JSON `null` (dkjson-style), so nulls survive the decode as a distinguishable value. `cosmo.null` re-encodes as `null`, making null round-trips lossless. When absent, `null` decodes to nil: null-valued object keys vanish and arrays containing null decode with holes.
 
+--- Options for `Deflate`: how hard to compress, and how to frame the result.
 ---@class cosmo.DeflateOptions
 ---@field level integer? compression level `-1`..`9`; defaults to `-1`, the zlib default (currently 6). `0` stores without compressing; higher levels are slower but compress better.
 ---@field format cosmo.CompressFormat? framing of the compressed stream; defaults to `"raw"` (headerless DEFLATE, as used inside ZIP files).
 
+--- Options for `Inflate`: how the input is framed, and the cap on how much
+--- it may decompress to.
 ---@class cosmo.InflateOptions
 ---@field maxsize integer? cap on the decompressed size in bytes; defaults to 64 MiB. Decompression streams into a growing buffer and fails with `nil, error` once the cap is exceeded, so no attacker-controlled length is ever trusted as an allocation size.
 ---@field format cosmo.UncompressFormat? framing of the compressed stream; defaults to `"raw"`. `"auto"` detects zlib or gzip framing from the stream header (but cannot detect `"raw"`).
 
+--- Options for `Fetch`: the request to send, and how redirects, proxying,
+--- and connection reuse are handled.
 ---@class cosmo.FetchOptions
 ---@field headers table<string,string>? request headers to send.
 ---@field method string? HTTP method, e.g. `"GET"` (default) or `"POST"`.
@@ -579,6 +590,8 @@ function lsqlite3.version() end
 ---@return integer? errorcode
 function lsqlite3.config(option, func, udata) end
 
+--- The context passed to a user-defined SQL function: its aggregate state
+--- and the slot its result is returned through.
 ---@class lsqlite3.Context: userdata
 --- A callback context is available as a parameter inside the callback functions
 --- `db:create_aggregate()` and `db:create_function()`. It can be used to get
@@ -629,6 +642,7 @@ function lsqlite3.Context:result_text(str) end
 ---@return any
 function lsqlite3.Context:user_data() end
 
+--- An open SQLite database connection, as returned by `lsqlite3.open`.
 ---@class lsqlite3.Database: userdata
 --- After opening a database with `lsqlite3.open()` or `lsqlite3.open_memory()`
 --- the returned database object should be used for all further method calls in
@@ -963,6 +977,7 @@ function lsqlite3.Database:wal_checkpoint(mode, name) end
 ---@param udata Udata?
 function lsqlite3.Database:wal_hook(func, udata) end
 
+--- A prepared SQL statement, as returned by `Database:prepare`.
 ---@class lsqlite3.Statement: userdata
 --- After creating a prepared statement with `db:prepare()` the returned statement
 --- object should be used for all further calls in connection with that statement.
@@ -1162,6 +1177,8 @@ function lsqlite3.Statement:urows() end
 ---@nodiscard
 function lsqlite3.Statement:last_insert_rowid() end
 
+--- The same prepared-statement handle as `lsqlite3.Statement`, under the
+--- name the iterator signatures use.
 ---@class lsqlite3.VM: userdata
 
 ---@param index integer
@@ -1386,6 +1403,7 @@ re = {
 --- `re.Regex:search` (`re.NOTBOL`, `re.NOTEOL`).
 ---@alias re.SearchFlag integer
 
+--- A compiled POSIX regular expression, as returned by `re.compile`.
 ---@class re.Regex: userdata
 re.Regex = {}
 
@@ -1535,13 +1553,17 @@ function re.compile(regex, flags) end
 --- independent, but do not call it concurrently from multiple threads.
 getopt = {}
 
+--- One recognized option: how it was spelled, and its argument when it
+--- takes one.
 ---@class getopt.Option
 --- A single recognized option and its argument (nil when the option takes
 --- none). For a long option that has a short equivalent, `opt` is that short
 --- letter; for a long-only option, `opt` is the long name.
----@field opt string
----@field arg string?
+---@field opt string the option as matched: its short letter, or the long name when it has no short equivalent
+---@field arg string? its argument, or nil when the option takes none
 
+--- The outcome of one `getopt.parse`: what was recognized, what was
+--- positional, and what went wrong.
 ---@class getopt.Result
 --- The outcome of a single `getopt.parse` call.
 ---@field opts getopt.Option[] Recognized options, in the order encountered
@@ -1715,6 +1737,7 @@ argon2 = {}
 --- by the strcmp chain in `tool/net/largon2.c`).
 ---@alias argon2.Variant "argon2id"|"argon2i"|"argon2d"
 
+--- Cost parameters and variant for password hashing.
 ---@class argon2.Config
 ---@field m_cost integer? the memory hardness in kibibytes, which defaults to 4096 (4 mibibytes). It's recommended that this be tuned upwards.
 ---@field t_cost integer? the number of iterations, which defaults to `3`.
@@ -1817,6 +1840,8 @@ zip = {}
 --- rejected with "invalid method".
 ---@alias zip.CompressionMethod "store"|"deflate"
 
+--- Options for `zip.open`: how hard to compress when writing, and how large
+--- a member may be when reading.
 ---@class zip.OpenOptions
 ---@field level? integer Compression level 0-9 (for "w" and "a" modes)
 ---@field max_file_size? integer Maximum file size limit in bytes
@@ -1874,6 +1899,7 @@ function zip.append(path, options) end
 ---@nodiscard
 function zip.validate_name(name) end
 
+--- Full metadata for one archive member, as returned by `Reader:stat`.
 ---@class zip.Stat
 --- File metadata within a ZIP archive.
 ---@field size integer Uncompressed file size in bytes
@@ -1884,6 +1910,7 @@ function zip.validate_name(name) end
 ---@field mode integer Unix file mode/permissions
 zip.Stat = {}
 
+--- One archive member as `Reader:list` reports it.
 ---@class zip.Entry
 --- Directory entry returned by `zip.Reader:list`.
 ---@field name string Entry path within the archive
@@ -1891,11 +1918,13 @@ zip.Stat = {}
 ---@field mode integer Unix file mode/permissions
 zip.Entry = {}
 
+--- Per-entry options for `Writer:add` and `Appender:add`.
 ---@class zip.AddOptions
 ---@field method? zip.CompressionMethod Compression method: `"store"` or `"deflate"`
 ---@field mtime? integer Modification time as Unix timestamp
 ---@field mode? integer Unix file mode (default 0644)
 
+--- A ZIP archive open for reading, as returned by `zip.open` in `"r"` mode.
 ---@class zip.Reader: userdata
 --- Reader for extracting files from a ZIP archive.
 zip.Reader = {}
@@ -1939,6 +1968,7 @@ function zip.Reader:save(name, dest) end
 --- Closes the ZIP reader and releases resources.
 function zip.Reader:close() end
 
+--- A ZIP archive open for writing, as returned by `zip.open` in `"w"` mode.
 ---@class zip.Writer: userdata
 --- Writer for creating new ZIP archives.
 zip.Writer = {}
@@ -1955,6 +1985,8 @@ function zip.Writer:add(name, content, options) end
 --- Closes the ZIP archive and writes the central directory.
 function zip.Writer:close() end
 
+--- An existing ZIP archive open for appending, as returned by `zip.open`
+--- in `"a"` mode.
 ---@class zip.Appender: userdata
 --- Writer for appending files to an existing ZIP archive.
 zip.Appender = {}
@@ -2082,6 +2114,8 @@ function repl.start() end
 --- required directly, e.g. `require("cosmo.unix")`.
 cosmo = {}
 
+--- Options for `Barf`: the mode a newly created file gets, and whether to
+--- append or overwrite a slice instead of truncating.
 ---@class cosmo.BarfOptions
 ---@field mode integer? file mode for a newly created file, defaults to 0644
 ---@field append boolean? append to the file instead of truncating it (default false)
@@ -3065,6 +3099,8 @@ function cosmo.UuidV4() end
 ---@return string
 function cosmo.UuidV7() end
 
+--- A response body delivered incrementally: each read returns the next
+--- chunk, then nil at end of stream.
 ---@class cosmo.StreamReader: userdata
 --- Streaming reader for an HTTP response body, returned by
 --- `cosmo.FetchStream`. The reader owns the underlying connection. It is
@@ -5629,12 +5665,12 @@ function unix.sysconf(name) end
 
 --- Fields reported by uname(2).
 ---@class unix.Uname
----@field sysname string
----@field nodename string
----@field release string
----@field version string
----@field machine string
----@field domainname string
+---@field sysname string operating system name, e.g. `"Linux"`
+---@field nodename string network node hostname
+---@field release string operating system release
+---@field version string operating system version
+---@field machine string hardware identifier, e.g. `"x86_64"`
+---@field domainname string NIS or YP domain name
 
 --- Returns identity of the current operating system.
 ---
@@ -7151,6 +7187,8 @@ function unix.isatty(fd) end
 ---@nodiscard
 function unix.tiocgwinsz(fd) end
 
+--- Terminal driver settings, as read by `tcgetattr` and applied by
+--- `tcsetattr`.
 ---@class unix.Termios
 ---@field iflag integer Input mode flags (e.g. `unix.BRKINT`, `unix.ICRNL`).
 ---@field oflag integer Output mode flags (e.g. `unix.OPOST`, `unix.ONLCR`).
@@ -7429,6 +7467,8 @@ function unix.landlock_restrict_self(ruleset_fd, flags) end
 ---@return unix.Memory
 function unix.mapshared(size) end
 
+--- A shared memory region, as returned by `unix.mapshared`: readable and
+--- writable across processes, with atomic operations on machine words.
 ---@class unix.Memory: userdata
 --- Shared memory for inter-process communication.
 ---
@@ -7649,6 +7689,7 @@ function unix.Memory:wake(index, count) end
 ---@return boolean unmapped
 function unix.Memory:unmap() end
 
+--- An open directory stream, as returned by `opendir` and `fdopendir`.
 ---@class unix.Dir: userdata
 --- Directory handle for reading directory entries.
 ---
@@ -7704,6 +7745,8 @@ function unix.Dir:tell() end
 ---Resets stream back to beginning.
 function unix.Dir:rewind() end
 
+--- Resource usage counters, as returned by `getrusage` and the `wait`
+--- family.
 ---@class unix.Rusage: userdata
 --- Process resource usage statistics.
 ---
@@ -7849,6 +7892,7 @@ function unix.Rusage:nvcsw() end
 --- allotted time slice.
 function unix.Rusage:nivcsw() end
 
+--- File metadata, as returned by `stat`, `lstat`, and `fstat`.
 ---@class unix.Stat: userdata
 --- File metadata and attributes.
 ---
@@ -7990,6 +8034,7 @@ function unix.major(rdev) end
 ---@nodiscard
 function unix.minor(rdev) end
 
+--- Filesystem statistics, as returned by `statfs` and `fstatfs`.
 ---@class unix.Statfs: userdata
 --- Filesystem statistics returned by `statfs()` and `fstatfs()`.
 
@@ -8075,6 +8120,7 @@ function unix.statfs(path) end
 ---@nodiscard
 function unix.fstatfs(fd) end
 
+--- A set of signal numbers, as constructed by `unix.sigset`.
 ---@class unix.Sigset: userdata
 --- Signal set for blocking, unblocking, and waiting on signals.
 ---
