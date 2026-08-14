@@ -729,6 +729,8 @@ static int LuaZipReaderSave(lua_State *L) {
   }
   for (size_t i = 0; i < len;) {
     ssize_t rc = write(fd, data + i, len - i);
+    if (rc == -1 && errno == EINTR)
+      continue;  // a signal handler without SA_RESTART fired; not an error
     if (rc <= 0) {
       int saved_errno = errno;
       close(fd);
@@ -1829,6 +1831,8 @@ static int LuaZipAppenderAddFile(lua_State *L) {
   }
   for (size_t i = 0; i < contentlen;) {
     ssize_t rc = read(fd, buf + i, contentlen - i);
+    if (rc == -1 && errno == EINTR)
+      continue;  // a signal handler without SA_RESTART fired; not an error
     if (rc <= 0) {
       // rc == 0 means the file shrank under us: surface it rather than
       // archive a short entry with a size nobody wrote
