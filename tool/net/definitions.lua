@@ -1982,7 +1982,12 @@ zip.Writer = {}
 ---@return string? error Error message on failure
 function zip.Writer:add(name, content, options) end
 
---- Closes the ZIP archive and writes the central directory.
+--- Closes the ZIP archive and writes the central directory. Close is
+--- where the archive actually lands on disk: every entry added so far
+--- is only durable once close returns `true`. Closing an
+--- already-closed writer fails.
+---@return boolean? success `true` on success
+---@return string? error Error message on failure
 function zip.Writer:close() end
 
 --- An existing ZIP archive open for appending, as returned by `zip.open`
@@ -2029,6 +2034,11 @@ function zip.Appender:add_file(name, source, options) end
 function zip.Appender:remove(name) end
 
 --- Closes the ZIP archive and writes the updated central directory.
+--- Close is where the pending entries actually land on disk: every
+--- `add` so far is only durable once close returns `true`. Closing an
+--- already-closed appender is a no-op that returns `true`.
+---@return boolean? success `true` on success
+---@return string? error Error message on failure
 function zip.Appender:close() end
 
 --- ### COVERAGE
