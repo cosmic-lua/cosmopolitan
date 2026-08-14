@@ -191,6 +191,33 @@ assert(cosmo.EncodeJson(sparse, {sparsenull = true}) == "[1,null,3]",
   "sparsenull encodes holes as null")
 assert(cosmo.EncodeJson({1, 2, 3}) == "[1,2,3]",
   "dense arrays are unaffected")
+
+-- sparsenull is bounded by a holes-to-elements ratio: one stray huge
+-- index must not turn the encode into an effectively unbounded null
+-- stream. Small arrays are exempt (the 64 floor), density matters, not
+-- absolute size.
+local stray = {}
+stray[1] = 1
+stray[2 ^ 40] = 2
+local bv, berr = cosmo.EncodeJson(stray, {sparsenull = true})
+assert(bv == nil, "a stray huge index must fail even with sparsenull")
+assert(berr and berr:find("too sparse", 1, true),
+  "the failure names the ratio condition, got: " .. tostring(berr))
+local smallsparse = {}
+smallsparse[1] = 1
+smallsparse[60] = 2
+assert(cosmo.EncodeJson(smallsparse, {sparsenull = true}),
+  "a small sparse array stays under the 64 floor")
+local justover = {}
+justover[1] = 1
+justover[65] = 2  -- max 65 > 64, cnt 2, 65/8 > 2: refused
+local jv = cosmo.EncodeJson(justover, {sparsenull = true})
+assert(jv == nil, "past the floor, the 8x ratio applies")
+local densebig = {}
+for i = 1, 100 do densebig[i] = i end
+densebig[150] = 150  -- max 150, cnt 101: 150/8 < 101
+assert(cosmo.EncodeJson(densebig, {sparsenull = true}),
+  "a big mostly-dense array encodes; the cap is a ratio, not a size")
 assert(cosmo.EncodeJson(cosmo.jsonarray({})) == "[]",
   "marked empty arrays are unaffected")
 

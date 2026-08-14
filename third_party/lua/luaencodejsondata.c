@@ -253,6 +253,17 @@ static int MeasureArray(lua_State *L, struct Serializer *z,
     z->reason = "sparse array (pass sparsenull=true to encode holes as null)";
     return -1;
   }
+  // sparsenull emits one null per hole up to the largest index, so a
+  // single stray huge key ({[1]=1,[2^40]=2}) would make the encode
+  // effectively unbounded. Holes may not outnumber elements 8:1 (small
+  // arrays are exempt: below 64 the worst case is 63 nulls). Ratio, not
+  // an absolute cap, so a dense-ish array of any size still encodes
+  // while hostile or corrupt indices fail loudly.
+  if (max > 64 && max / 8 > cnt) {
+    z->reason = "array too sparse to encode holes as null "
+                "(largest index exceeds 8x the element count)";
+    return -1;
+  }
   *out_len = max;
   return 0;
 }

@@ -98,7 +98,7 @@ arg = nil
 ---@field indent string? defaults to " ". This option controls the indentation of pretty formatting. This field is ignored if pretty isn't true.
 ---@field maxdepth integer? defaults to 64. This option controls the maximum amount of recursion the serializer is allowed to perform. The max is 32767. You might not be able to set it that high if there isn't enough C stack memory. Your serializer checks for this and will return an error rather than crashing.
 ---@field nan cosmo.JsonNanMode? `EncodeJson` only: encode NaN and Infinity as `null` (the v8 behavior) instead of failing with `nil, error`.
----@field sparsenull boolean? `EncodeJson` only: encode array holes as `null` instead of failing the encode with `nil, error`. With it, an array containing JSON `null` round-trips losslessly with `DecodeJson`'s default nil mapping.
+---@field sparsenull boolean? `EncodeJson` only: encode array holes as `null` instead of failing the encode with `nil, error`. With it, an array containing JSON `null` round-trips losslessly with `DecodeJson`'s default nil mapping. Bounded: an array whose largest index exceeds 8x its element count (beyond a 64-element floor) still fails with `nil, error`, so one stray huge index cannot make the encode effectively unbounded.
 
 --- Options for `DecodeJson`, controlling how JSON `null` maps into Lua.
 ---@class cosmo.DecoderOptions
@@ -2381,7 +2381,9 @@ function cosmo.EncodeHex(binary) end
 ---   and Infinity serialize as `null` (the v8 behavior) instead of
 ---   failing the encode.
 --- - `sparsenull`: `(bool=false)` encode array holes as `null` instead
----   of failing the encode.
+---   of failing the encode. Bounded: an array whose largest index
+---   exceeds 8x its element count (beyond a 64-element floor) still
+---   fails, so one stray huge index cannot make the encode unbounded.
 ---
 --- This function will return an error if:
 ---
