@@ -5792,17 +5792,22 @@ function unix.clock_gettime(clock) end
 ---
 --- Returns `EINTR` if a signal was received while waiting. On that
 --- failure the kernel's remainder follows the errno as two further
---- values (`remseconds`, `remnanos`), so an interrupted sleep can be
---- resumed without re-deriving the remainder from a clock. A sleep
---- that completes returns a zero remainder: POSIX leaves the kernel's
---- buffer unspecified on success, and the sleep is over by definition.
+--- values (`eintr_remseconds`, `eintr_remnanos`), so an interrupted
+--- sleep can be resumed without re-deriving the remainder from a
+--- clock. A sleep that completes returns a zero remainder: POSIX
+--- leaves the kernel's buffer unspecified on success, and the sleep
+--- is over by definition.
 ---@param seconds integer
 ---@param nanos integer?
----@return integer|nil remseconds, integer remnanos
----@return string? error
+---@return integer|nil remseconds 0 on success, nil when the call failed
+---@return integer|string remnanos 0 on success, or the error string when
+--- the call failed — failure returns exactly `nil, error, errno`, so the
+--- error lands in this slot, not in a slot of its own
 ---@return unix.Errno? errno
----@return integer? eintr_remseconds
----@return integer? eintr_remnanos
+---@return integer? eintr_remseconds seconds left of the sleep, present
+--- only when the errno is `EINTR`
+---@return integer? eintr_remnanos nanoseconds left of the sleep, present
+--- only when the errno is `EINTR`
 function unix.nanosleep(seconds, nanos) end
 
 --- These functions are used to make programs slower by asking the
