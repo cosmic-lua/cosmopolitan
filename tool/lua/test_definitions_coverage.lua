@@ -929,6 +929,45 @@ local NORETURN_C = set({
   "luaL_error", "luaL_argerror", "lua_error", "luaL_typeerror",
 })
 
+-- Blank out string/char literals and comments, preserving length and
+-- newlines. Without this the return scan below reads statements out of
+-- prose: lunix.c's WARNF("syscall supposed to return 0 / -1 but got %d")
+-- parses as an unresolvable `return`, marking SysretBool's arity unknown
+-- and silently dropping the whole boolean-syscall family (51 bindings)
+-- out of the check.
+local function strip_c_literals(src)
+  local out, i, n = {}, 1, #src
+  while i <= n do
+    local c = src:sub(i, i)
+    local two = src:sub(i, i + 1)
+    if c == '"' or c == "'" then
+      local q, j = c, i + 1
+      while j <= n do
+        local d = src:sub(j, j)
+        if d == "\\" then j = j + 2
+        elseif d == q or d == "\n" then break
+        else j = j + 1 end
+      end
+      out[#out + 1] = q .. string.rep(" ", j - i - 1) .. src:sub(j, j)
+      i = j + 1
+    elseif two == "//" then
+      local j = src:find("\n", i) or n + 1
+      out[#out + 1] = string.rep(" ", j - i)
+      i = j
+    elseif two == "/*" then
+      local j = src:find("*/", i + 2, true)
+      j = j and j + 2 or n + 1
+      out[#out + 1] = src:sub(i, j - 1):gsub("[^\n]", " ")
+      i = j
+    else
+      local j = src:find("[\"'/]", i + 1) or n + 1
+      out[#out + 1] = src:sub(i, j - 1)
+      i = j
+    end
+  end
+  return table.concat(out)
+end
+
 -- Every C function in the loaded sources, as name -> body text. The body
 -- runs to the start of the next function rather than to a matched brace:
 -- a brace inside a string literal or comment cannot then throw the scan
@@ -940,6 +979,7 @@ do
     C_repl, C_cosmo, C_funcs, C_redbean,
   }
   for _, C in ipairs(sources) do
+    C = strip_c_literals(C)
     local starts = {}
     for pos, name in C:gmatch("()\n[%w_]+[%w_ %*]-([%w_]+)%s*%(lua_State%s*%*") do
       starts[#starts + 1] = { pos = pos, name = name }
