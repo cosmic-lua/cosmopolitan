@@ -459,6 +459,15 @@ assert(dok2 == nil and derr2:match("regular"),
 local dupok, duperr = afa:add_file("streamed.txt", src_path)
 assert(dupok == nil and duperr:match("duplicate"),
        "duplicate add_file should fail")
+
+-- a wrongly typed option raises (options are parsed before the source is
+-- opened or read, so the raise cannot leak the staged file buffer), and
+-- the appender stays usable afterwards
+local traise = pcall(function()
+  afa:add_file("badopt.txt", src_path, {mtime = {}})
+end)
+assert(not traise, "table mtime must raise")
+assert(afa:add("after-raise.txt", "still works"))
 afa:close()
 
 -- round-trip: bytes identical to add() of the read contents, and the

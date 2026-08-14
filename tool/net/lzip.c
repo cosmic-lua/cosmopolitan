@@ -1629,16 +1629,77 @@ static int LuaZipAppend(lua_State *L) {
   return 1;
 }
 
+// The parsed form of add()/add_file()'s options table. has_mtime/has_mode
+// say whether the caller gave the field, so each entry point can apply its
+// own defaults (add: now + 0644; add_file: the source file's own stat)
+// after parsing.
+struct AppenderAddOptions {
+  bool force_store;
+  bool force_deflate;
+  bool has_mtime;
+  bool has_mode;
+  int64_t mtime_unix;
+  uint32_t mode;
+};
+
+// Parses the options table at optidx into *o. Returns NULL on success or
+// an error message for ZipError on an invalid value; the luaL_check*
+// calls can also raise on a wrongly typed field, so callers must hold no
+// allocation or file descriptor across this call -- that is the point of
+// parsing options before AppenderAddBytes rather than inside it.
+static const char *AppenderParseOptions(lua_State *L, int optidx,
+                                        struct AppenderAddOptions *o) {
+  memset(o, 0, sizeof(*o));
+
+  if (lua_istable(L, optidx)) {
+    lua_getfield(L, optidx, "method");
+    if (!lua_isnil(L, -1)) {
+      const char *m = luaL_checkstring(L, -1);
+      if (!strcmp(m, "store"))
+        o->force_store = true;
+      else if (!strcmp(m, "deflate"))
+        o->force_deflate = true;
+      else
+        return "unknown method";
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, optidx, "mtime");
+    if (!lua_isnil(L, -1)) {
+      o->mtime_unix = luaL_checkinteger(L, -1);
+      o->has_mtime = true;
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, optidx, "mode");
+    if (!lua_isnil(L, -1)) {
+      o->mode = luaL_checkinteger(L, -1);
+      o->has_mode = true;
+    }
+    lua_pop(L, 1);
+  }
+
+  if (o->has_mode) {
+    if ((o->mode & 0170000) != 0100000 && (o->mode & 0170000) != 0)
+      return "mode must be a regular file";
+    if ((o->mode & 0170000) == 0)
+      o->mode |= 0100000;
+  }
+  return NULL;
+}
+
 // appender:add(name, content, [options]) -> true | nil, error
 // The shared tail of add() and add_file(): validate, compress, and
-// stage one entry from bytes already in hand. optidx names the options
-// table's stack slot; mtime_default/mode_default are the values used
-// when the options omit them (add: now + 0644; add_file: the source
-// file's own stat). Never keeps the content pointer — the bytes are
-// copied or deflated into the pending buffers.
+// stage one entry from bytes already in hand. opts is the already
+// parsed options table (see AppenderParseOptions); mtime_default and
+// mode_default fill the fields the caller omitted. Never keeps the
+// content pointer -- the bytes are copied or deflated into the pending
+// buffers, and nothing here can raise, so a caller may hold a live
+// allocation across the call.
 static int AppenderAddBytes(lua_State *L, struct LuaZipAppender *a,
                             const char *name, size_t namelen,
-                            const char *content, size_t contentlen, int optidx,
+                            const char *content, size_t contentlen,
+                            const struct AppenderAddOptions *opts,
                             int64_t mtime_default, uint32_t mode_default) {
   const char *name_err = ValidateEntryName(name, namelen);
   if (name_err)
@@ -1653,41 +1714,10 @@ static int AppenderAddBytes(lua_State *L, struct LuaZipAppender *a,
   if ((int64_t)contentlen > a->max_file_size)
     return ZipError(L, "content exceeds max_file_size limit");
 
-  // Parse options
-  bool force_store = false;
-  bool force_deflate = false;
-  int64_t mtime_unix = mtime_default;
-  uint32_t mode = mode_default;
-
-  if (lua_istable(L, optidx)) {
-    lua_getfield(L, optidx, "method");
-    if (!lua_isnil(L, -1)) {
-      const char *m = luaL_checkstring(L, -1);
-      if (!strcmp(m, "store"))
-        force_store = true;
-      else if (!strcmp(m, "deflate"))
-        force_deflate = true;
-      else
-        return ZipError(L, "unknown method");
-    }
-    lua_pop(L, 1);
-
-    lua_getfield(L, optidx, "mtime");
-    if (!lua_isnil(L, -1))
-      mtime_unix = luaL_checkinteger(L, -1);
-    lua_pop(L, 1);
-
-    lua_getfield(L, optidx, "mode");
-    if (!lua_isnil(L, -1))
-      mode = luaL_checkinteger(L, -1);
-    lua_pop(L, 1);
-  }
-
-  // Validate mode
-  if ((mode & 0170000) != 0100000 && (mode & 0170000) != 0)
-    return ZipError(L, "mode must be a regular file");
-  if ((mode & 0170000) == 0)
-    mode |= 0100000;
+  bool force_store = opts->force_store;
+  bool force_deflate = opts->force_deflate;
+  int64_t mtime_unix = opts->has_mtime ? opts->mtime_unix : mtime_default;
+  uint32_t mode = opts->has_mode ? opts->mode : mode_default;
 
   // Compute CRC32
   uint32_t crc = crc32_z(0, (const uint8_t *)content, contentlen);
@@ -1778,7 +1808,12 @@ static int LuaZipAppenderAdd(lua_State *L) {
   if (a->fd == -1)
     return ZipError(L, "zip appender is closed");
 
-  return AppenderAddBytes(L, a, name, namelen, content, contentlen, 4,
+  struct AppenderAddOptions opts;
+  const char *opt_err = AppenderParseOptions(L, 4, &opts);
+  if (opt_err)
+    return ZipError(L, opt_err);
+
+  return AppenderAddBytes(L, a, name, namelen, content, contentlen, &opts,
                           time(NULL), 0100644);
 }
 
@@ -1797,6 +1832,14 @@ static int LuaZipAppenderAddFile(lua_State *L) {
 
   if (a->fd == -1)
     return ZipError(L, "zip appender is closed");
+
+  // Parse (and possibly raise on) the options before anything is open or
+  // allocated: luaL_check* longjmps past cleanup, so doing this later
+  // would leak the file buffer or descriptor on a malformed options table.
+  struct AppenderAddOptions opts;
+  const char *opt_err = AppenderParseOptions(L, 4, &opts);
+  if (opt_err)
+    return ZipError(L, opt_err);
 
   int fd = open(src, O_RDONLY);
   if (fd == -1)
@@ -1843,7 +1886,7 @@ static int LuaZipAppenderAddFile(lua_State *L) {
   close(fd);
 
   int nret = AppenderAddBytes(L, a, name, namelen, (const char *)buf,
-                              contentlen, 4, st.st_mtim.tv_sec,
+                              contentlen, &opts, st.st_mtim.tv_sec,
                               (st.st_mode & 0777) | 0100000);
   free(buf);
   return nret;
