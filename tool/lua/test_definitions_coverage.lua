@@ -792,9 +792,7 @@ local QALLOW_NORETURN = set({
   "unix.sync",
   "unix.syslog",
   "unix.verynice",
-  "zip.Appender:close",
   "zip.Reader:close",
-  "zip.Writer:close",
 })
 
 local QALLOW_INLINE = set({
