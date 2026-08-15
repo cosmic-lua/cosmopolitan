@@ -798,7 +798,6 @@ local QALLOW_NORETURN = set({
 local QALLOW_INLINE = set({
   "cosmo.ParseParams",
   "unix.poll",
-  "unix.siocgifconf",
 })
 
 local QALLOW_BARE = set({

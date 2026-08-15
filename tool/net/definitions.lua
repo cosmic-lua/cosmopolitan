@@ -5982,8 +5982,16 @@ function unix.socketpair(family, type, protocol) end
 ---@overload fun(fd: integer, unixpath: string): true
 function unix.bind(fd, ip, port) end
 
----Returns list of network adapter addresses.
----@return {|nil name: string, ip: integer, netmask: integer }[] addresses
+--- One network interface's IPv4 addressing, as returned in the array
+--- `unix.siocgifconf` yields. A plain table, not userdata.
+---@class unix.IfAddr
+---@field name string interface name, e.g. `"lo"`
+---@field ip integer IPv4 address as a uint32, in host byte order
+---@field netmask integer? IPv4 netmask as a uint32 in host byte order; absent when the SIOCGIFNETMASK ioctl fails for the interface
+
+---Returns the list of network adapter addresses, one `unix.IfAddr` per
+---interface. Only AF_INET (IPv4) interfaces are reported.
+---@return unix.IfAddr[]|nil addresses
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard
