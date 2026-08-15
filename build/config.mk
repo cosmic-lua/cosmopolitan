@@ -132,6 +132,13 @@ endif
 ifeq ($(MODE), rel)
 CONFIG_CPPFLAGS += -DNDEBUG -DDWARFLESS
 CONFIG_CCFLAGS += $(BACKTRACES) -O2
+# Pad branches off 32-byte boundaries so the Intel JCC-erratum microcode
+# (Skylake through Cascade Lake) never disables the uop cache for a hot
+# loop's fused cmp+jcc; without ftrace's entry padding, code layout
+# shifts freely between links and whether a loop eats the ~30% legacy-
+# decode penalty is a per-link lottery (whilp/cosmopolitan#262). COPTS,
+# not CCFLAGS: hand-written .S layout (ape.S .org) must stay unpadded.
+CONFIG_COPTS += -Wa,-mbranches-within-32B-boundaries
 PYFLAGS += -O1
 endif
 ifeq ($(MODE), aarch64-rel)
