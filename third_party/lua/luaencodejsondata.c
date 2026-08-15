@@ -35,6 +35,7 @@
 #include "third_party/double-conversion/wrapper.h"
 #include "third_party/lua/cosmo.h"
 #include "third_party/lua/lauxlib.h"
+#include "third_party/lua/ltable.h"
 #include "third_party/lua/lua.h"
 #include "third_party/lua/cosmo.h"
 #include "third_party/lua/visitor.h"
@@ -232,21 +233,37 @@ OnError:
 }
 
 // The true extent of an array-shaped table: the largest positive
-// integer key present, found by walking every key. lua_rawlen only
+// integer key present, found by looking at every key. lua_rawlen only
 // returns *a* border, so a sparse table like {1,[3]=2} can report
-// length 1 and silently truncate — the walk is what makes holes a
-// detectable condition instead of border-dependent data loss.
+// length 1 and silently truncate — the count is what makes holes a
+// detectable condition instead of border-dependent data loss. The
+// table's parts are read directly rather than through a lua_next walk
+// (an API call plus key/value stack traffic per key): integer keys in
+// [1, realasize] live only in the array part, every other key is a
+// hash node, so the two scans see exactly the keys lua_next yields.
 // Returns -1 (sparse, conf.sparsenull unset) or 0 with *out_len set.
 static int MeasureArray(lua_State *L, struct Serializer *z,
                         lua_Unsigned *out_len) {
   lua_Integer k;
   lua_Unsigned max = 0, cnt = 0;
-  lua_pushnil(L);            // +1
-  while (lua_next(L, -2)) {  // key at -2, value at -1
-    lua_pop(L, 1);           // pop the value; the key stays for lua_next
-    if (lua_isinteger(L, -1) && (k = lua_tointeger(L, -1)) >= 1) {
+  unsigned int i, asize;
+  // for a table, lua_topointer returns its GC object, the Table itself
+  const Table *t = lua_topointer(L, -1);
+  asize = luaH_realasize(t);
+  for (i = 0; i < asize; i++) {
+    if (!isempty(&t->array[i])) {
       ++cnt;
-      if ((lua_Unsigned)k > max) max = k;
+      max = i + 1;
+    }
+  }
+  if (!isdummy(t)) {
+    for (i = 0; i < sizenode(t); i++) {
+      const Node *nd = gnode(t, i);
+      if (!isempty(gval(nd)) && keyisinteger(nd) &&
+          (k = keyival(nd)) >= 1) {
+        ++cnt;
+        if ((lua_Unsigned)k > max) max = k;
+      }
     }
   }
   if (cnt < max && !z->conf.sparsenull) {
