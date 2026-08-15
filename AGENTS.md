@@ -39,8 +39,13 @@ the same binary as a plain ELF with symbols — Linux `perf record`/`perf
 report` work on it directly, and every default-mode binary supports
 `--strace` (syscall log) and `--ftrace` (C function call log).
 
-Default mode (`MODE=` empty, -O2 with ftrace hooks and SYSDEBUG) is what
-releases ship; build in default mode unless you have a reason not to.
+Default mode (`MODE=` empty, -O2 with ftrace hooks and SYSDEBUG) is
+what local development uses; build in it unless you have a reason not
+to. The RELEASE `lua` ships as `MODE=rel` (#242: NDEBUG, DWARFLESS, no
+ftrace padding), so `--strace`/`--ftrace` live on the released
+`lua-debug`, which stays default mode. Relative comparisons between two
+default-mode local builds remain representative; rel-vs-rel is the
+closer match to what ships.
 
 ## Performance work
 
