@@ -1,0 +1,318 @@
+cosmo: slim the default config to what the lua fetch/hash client uses (#186)
+
+The lua binary is a TLS *client* (tool/net/lfetch.c) plus a digest
+provider (tool/net/lfuncs.c: MD5/SHA1/SHA2 via the md layer). This
+patch disables, in include/mbedtls/mbedtls_config.h only:
+
+- server-side TLS and DTLS (SSL_SRV_C, PROTO_DTLS + its dependent
+  options, SSL_COOKIE_C, SSL_CACHE_C, SSL_TICKET_C)      [-86 KB]
+- legacy/unused crypto: CAMELLIA, ARIA, DES, RIPEMD160,
+  NIST_KW, CMAC, ECJPAKE                                 [-49 KB]
+- the SSL debug string machinery and self tests
+  (DEBUG_C, SELF_TEST) - no consumer installs a debug
+  callback (ERROR_C / mbedtls_strerror stays)            [-74 KB]
+- PSA persistent key storage (PSA_CRYPTO_STORAGE_C,
+  PSA_ITS_FILE_C) - psa_crypto_init for TLS 1.3 works
+  without it                                             [-4 KB]
+- X.509/PK/PEM writing, CSR/CRL parsing, PKCS7, and the
+  PSK key exchanges a fetch client can never configure   [-4 KB]
+
+Kept deliberately: TLS 1.3 (#185 will unpin it), ECDHE/RSA/DHE key
+exchanges and the AES+GCM/CCM/chacha suites browsers and real servers
+need, PEM/X.509 parsing, ERROR_C.
+
+Measured on x86_64 default mode: o//tool/lua/lua 3,433,476 ->
+3,216,388 bytes (-217 KB, -6.3%). Gates: o//tool/lua/test,
+o//test/net/https3, and a live https fetch all pass.
+diff --git a/third_party/mbedtls3/include/mbedtls/mbedtls_config.h b/third_party/mbedtls3/include/mbedtls/mbedtls_config.h
+index 8fa445a1..39b4f54d 100644
+--- a/third_party/mbedtls3/include/mbedtls/mbedtls_config.h
++++ b/third_party/mbedtls3/include/mbedtls/mbedtls_config.h
+@@ -878,7 +878,7 @@
+  *      MBEDTLS_TLS_PSK_WITH_CAMELLIA_128_GCM_SHA256
+  *      MBEDTLS_TLS_PSK_WITH_CAMELLIA_128_CBC_SHA256
+  */
+-#define MBEDTLS_KEY_EXCHANGE_PSK_ENABLED
++//#define MBEDTLS_KEY_EXCHANGE_PSK_ENABLED
+ 
+ /**
+  * \def MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED
+@@ -907,7 +907,7 @@
+  *             See dhm.h for more details.
+  *
+  */
+-#define MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED
++//#define MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED
+ 
+ /**
+  * \def MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED
+@@ -925,7 +925,7 @@
+  *      MBEDTLS_TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA
+  *      MBEDTLS_TLS_ECDHE_PSK_WITH_CAMELLIA_128_CBC_SHA256
+  */
+-#define MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED
++//#define MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED
+ 
+ /**
+  * \def MBEDTLS_KEY_EXCHANGE_RSA_PSK_ENABLED
+@@ -948,7 +948,7 @@
+  *      MBEDTLS_TLS_RSA_PSK_WITH_CAMELLIA_128_GCM_SHA256
+  *      MBEDTLS_TLS_RSA_PSK_WITH_CAMELLIA_128_CBC_SHA256
+  */
+-#define MBEDTLS_KEY_EXCHANGE_RSA_PSK_ENABLED
++//#define MBEDTLS_KEY_EXCHANGE_RSA_PSK_ENABLED
+ 
+ /**
+  * \def MBEDTLS_KEY_EXCHANGE_RSA_ENABLED
+@@ -1535,7 +1535,7 @@
+  *
+  * Enable the checkup functions (*_self_test).
+  */
+-#define MBEDTLS_SELF_TEST
++//#define MBEDTLS_SELF_TEST
+ 
+ /**
+  * \def MBEDTLS_SHA256_SMALLER
+@@ -1599,7 +1599,7 @@
+  *
+  * Uncomment to enable the Connection ID extension.
+  */
+-#define MBEDTLS_SSL_DTLS_CONNECTION_ID
++//#define MBEDTLS_SSL_DTLS_CONNECTION_ID
+ 
+ 
+ /**
+@@ -1979,7 +1979,7 @@
+  *
+  * Comment this macro to disable support for DTLS
+  */
+-#define MBEDTLS_SSL_PROTO_DTLS
++//#define MBEDTLS_SSL_PROTO_DTLS
+ 
+ /**
+  * \def MBEDTLS_SSL_ALPN
+@@ -2003,7 +2003,7 @@
+  *
+  * Comment this to disable anti-replay in DTLS.
+  */
+-#define MBEDTLS_SSL_DTLS_ANTI_REPLAY
++//#define MBEDTLS_SSL_DTLS_ANTI_REPLAY
+ 
+ /**
+  * \def MBEDTLS_SSL_DTLS_HELLO_VERIFY
+@@ -2021,7 +2021,7 @@
+  *
+  * Comment this to disable support for HelloVerifyRequest.
+  */
+-#define MBEDTLS_SSL_DTLS_HELLO_VERIFY
++//#define MBEDTLS_SSL_DTLS_HELLO_VERIFY
+ 
+ /**
+  * \def MBEDTLS_SSL_DTLS_SRTP
+@@ -2068,7 +2068,7 @@
+  *
+  * Comment this to disable support for clients reusing the source port.
+  */
+-#define MBEDTLS_SSL_DTLS_CLIENT_PORT_REUSE
++//#define MBEDTLS_SSL_DTLS_CLIENT_PORT_REUSE
+ 
+ /**
+  * \def MBEDTLS_SSL_SESSION_TICKETS
+@@ -2594,7 +2594,7 @@
+  *      MBEDTLS_TLS_PSK_WITH_CAMELLIA_128_GCM_SHA256
+  *      MBEDTLS_TLS_PSK_WITH_CAMELLIA_128_CBC_SHA256
+  */
+-#define MBEDTLS_CAMELLIA_C
++//#define MBEDTLS_CAMELLIA_C
+ 
+ /**
+  * \def MBEDTLS_ARIA_C
+@@ -2646,7 +2646,7 @@
+  *      MBEDTLS_TLS_ECDHE_PSK_WITH_ARIA_128_CBC_SHA256
+  *      MBEDTLS_TLS_ECDHE_PSK_WITH_ARIA_256_CBC_SHA384
+  */
+-#define MBEDTLS_ARIA_C
++//#define MBEDTLS_ARIA_C
+ 
+ /**
+  * \def MBEDTLS_CCM_C
+@@ -2723,7 +2723,7 @@
+  * Requires: MBEDTLS_CIPHER_C, MBEDTLS_AES_C or MBEDTLS_DES_C
+  *
+  */
+-#define MBEDTLS_CMAC_C
++//#define MBEDTLS_CMAC_C
+ 
+ /**
+  * \def MBEDTLS_CTR_DRBG_C
+@@ -2769,7 +2769,7 @@
+  *
+  * This module provides debugging functions.
+  */
+-#define MBEDTLS_DEBUG_C
++//#define MBEDTLS_DEBUG_C
+ 
+ /**
+  * \def MBEDTLS_DES_C
+@@ -2785,7 +2785,7 @@
+  * \warning   DES/3DES are considered weak ciphers and their use constitutes a
+  *            security risk. We recommend considering stronger ciphers instead.
+  */
+-#define MBEDTLS_DES_C
++//#define MBEDTLS_DES_C
+ 
+ /**
+  * \def MBEDTLS_DHM_C
+@@ -2864,7 +2864,7 @@
+  * \warning If using a hash that is only provided by PSA drivers, you must
+  * call psa_crypto_init() before doing any EC J-PAKE operations.
+  */
+-#define MBEDTLS_ECJPAKE_C
++//#define MBEDTLS_ECJPAKE_C
+ 
+ /**
+  * \def MBEDTLS_ECP_C
+@@ -3003,7 +3003,7 @@
+  *
+  * Requires: MBEDTLS_AES_C and MBEDTLS_CIPHER_C
+  */
+-#define MBEDTLS_NIST_KW_C
++//#define MBEDTLS_NIST_KW_C
+ 
+ /**
+  * \def MBEDTLS_MD_C
+@@ -3167,7 +3167,7 @@
+  *
+  * This modules adds support for encoding / writing PEM files.
+  */
+-#define MBEDTLS_PEM_WRITE_C
++//#define MBEDTLS_PEM_WRITE_C
+ 
+ /**
+  * \def MBEDTLS_PK_C
+@@ -3214,7 +3214,7 @@
+  *
+  * Uncomment to enable generic public key write functions.
+  */
+-#define MBEDTLS_PK_WRITE_C
++//#define MBEDTLS_PK_WRITE_C
+ 
+ /**
+  * \def MBEDTLS_PKCS5_C
+@@ -3246,7 +3246,7 @@
+  *
+  * This module is required for the PKCS #7 parsing modules.
+  */
+-#define MBEDTLS_PKCS7_C
++//#define MBEDTLS_PKCS7_C
+ 
+ /**
+  * \def MBEDTLS_PKCS12_C
+@@ -3354,7 +3354,7 @@
+  *           either MBEDTLS_PSA_ITS_FILE_C or a native implementation of
+  *           the PSA ITS interface
+  */
+-#define MBEDTLS_PSA_CRYPTO_STORAGE_C
++//#define MBEDTLS_PSA_CRYPTO_STORAGE_C
+ 
+ /**
+  * \def MBEDTLS_PSA_ITS_FILE_C
+@@ -3366,7 +3366,7 @@
+  *
+  * Requires: MBEDTLS_FS_IO
+  */
+-#define MBEDTLS_PSA_ITS_FILE_C
++//#define MBEDTLS_PSA_ITS_FILE_C
+ 
+ /**
+  * \def MBEDTLS_PSA_STATIC_KEY_SLOTS
+@@ -3397,7 +3397,7 @@
+  * Caller:  library/md.c
+  *
+  */
+-#define MBEDTLS_RIPEMD160_C
++//#define MBEDTLS_RIPEMD160_C
+ 
+ /**
+  * \def MBEDTLS_RSA_C
+@@ -3658,7 +3658,7 @@
+  *
+  * Requires: MBEDTLS_SSL_CACHE_C
+  */
+-#define MBEDTLS_SSL_CACHE_C
++//#define MBEDTLS_SSL_CACHE_C
+ 
+ /**
+  * \def MBEDTLS_SSL_COOKIE_C
+@@ -3668,7 +3668,7 @@
+  * Module:  library/ssl_cookie.c
+  * Caller:
+  */
+-#define MBEDTLS_SSL_COOKIE_C
++//#define MBEDTLS_SSL_COOKIE_C
+ 
+ /**
+  * \def MBEDTLS_SSL_TICKET_C
+@@ -3681,7 +3681,7 @@
+  * Requires: (MBEDTLS_CIPHER_C || MBEDTLS_USE_PSA_CRYPTO) &&
+  *           (MBEDTLS_GCM_C || MBEDTLS_CCM_C || MBEDTLS_CHACHAPOLY_C)
+  */
+-#define MBEDTLS_SSL_TICKET_C
++//#define MBEDTLS_SSL_TICKET_C
+ 
+ /**
+  * \def MBEDTLS_SSL_CLI_C
+@@ -3709,7 +3709,7 @@
+  *
+  * This module is required for SSL/TLS server support.
+  */
+-#define MBEDTLS_SSL_SRV_C
++//#define MBEDTLS_SSL_SRV_C
+ 
+ /**
+  * \def MBEDTLS_SSL_TLS_C
+@@ -3860,7 +3860,7 @@
+  *
+  * This module is required for X.509 CRL parsing.
+  */
+-#define MBEDTLS_X509_CRL_PARSE_C
++//#define MBEDTLS_X509_CRL_PARSE_C
+ 
+ /**
+  * \def MBEDTLS_X509_CSR_PARSE_C
+@@ -3874,7 +3874,7 @@
+  *
+  * This module is used for reading X.509 certificate request.
+  */
+-#define MBEDTLS_X509_CSR_PARSE_C
++//#define MBEDTLS_X509_CSR_PARSE_C
+ 
+ /**
+  * \def MBEDTLS_X509_CREATE_C
+@@ -3891,7 +3891,7 @@
+  *
+  * This module is the basis for creating X.509 certificates and CSRs.
+  */
+-#define MBEDTLS_X509_CREATE_C
++//#define MBEDTLS_X509_CREATE_C
+ 
+ /**
+  * \def MBEDTLS_X509_CRT_WRITE_C
+@@ -3904,7 +3904,7 @@
+  *
+  * This module is required for X.509 certificate creation.
+  */
+-#define MBEDTLS_X509_CRT_WRITE_C
++//#define MBEDTLS_X509_CRT_WRITE_C
+ 
+ /**
+  * \def MBEDTLS_X509_CSR_WRITE_C
+@@ -3917,7 +3917,7 @@
+  *
+  * This module is required for X.509 certificate request writing.
+  */
+-#define MBEDTLS_X509_CSR_WRITE_C
++//#define MBEDTLS_X509_CSR_WRITE_C
+ 
+ /** \} name SECTION: Mbed TLS modules */
+ 

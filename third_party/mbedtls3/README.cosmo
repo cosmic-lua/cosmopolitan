@@ -43,10 +43,14 @@ LOCAL CHANGES
     p256-m, psa test drivers -- all disabled in the default config)
     are replaced with #error directives
 
-  The default config (include/mbedtls/mbedtls_config.h) is used
-  unmodified. Any future deviation must be checked into patches/ as
-  a numbered patch and applied by update.sh so that version bumps
-  stay mechanical.
+  The config (include/mbedtls/mbedtls_config.h) deviates from the
+  upstream default via patches/0002-client-config-slim.patch, which
+  disables the subsystems the lua fetch/hash client never uses
+  (server-side TLS, DTLS, legacy ciphers, SSL debug strings, PSA
+  storage, X.509 writing, PSK suites). See the patch preamble for
+  the full list and measured size deltas. Any future deviation must
+  likewise be checked into patches/ as a numbered patch and applied
+  by update.sh so that version bumps stay mechanical.
 
 UPDATING
 
