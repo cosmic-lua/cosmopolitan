@@ -2932,9 +2932,8 @@ cosmo.null = {}
 function cosmo.ParseHost(str) end
 
 --- Converts IPv4 address string to integer, e.g. "1.2.3.4" → 0x01020304.
---- Returns nil, err for invalid inputs (previously it returned the -1
---- sentinel, which `FormatIp` rendered as the broadcast address). See also
---- `FormatIp` for the inverse operation.
+--- Returns nil, err for invalid inputs. See also `FormatIp` for the
+--- inverse operation.
 ---@param ip string
 ---@return integer|nil ip
 ---@return string? error
