@@ -27,9 +27,15 @@ eq("LANDLOCK_ACCESS_FS_RESOLVE_UNIX", 1 << 16)  -- ABI 9
 -- no, rather than failing the suite on a host that cannot answer.
 local abi, err = unix.landlock_create_ruleset()
 if not abi then
-  print("skipping landlock round-trip: " .. tostring(err))
+  print("test_landlock_abi: SKIP (no landlock: " .. tostring(err) .. ")")
   return
 end
+
+-- Which assertions a run actually reached depends on the host's ABI, and
+-- CI logs are the only place anyone can see that. Name the ABI and each
+-- branch taken, so a green run says what it proved instead of leaving
+-- "passed" to mean either "enforced" or "skipped".
+print("test_landlock_abi: kernel landlock abi " .. abi)
 
 -- An fs-only ruleset still succeeds: widening the struct with `scoped`
 -- did not widen the request. This is the size-gating proof, and it
@@ -69,7 +75,8 @@ if abi < 6 then
   assert(rs == nil, "a scoped ruleset must fail below ABI 6")
   assert(serrno == unix.E2BIG,
          "expected E2BIG below ABI 6, got: " .. tostring(serr))
-  print("skipping ABI 6 round-trip: kernel ABI is " .. abi)
+  print("test_landlock_abi: PASS (constants, fs-only create, " ..
+        "scoped rejected E2BIG; no scope round-trip below ABI 6)")
   return
 end
 
@@ -139,3 +146,9 @@ local _, wstatus = assert(unix.wait(pid))
 assert(unix.WIFEXITED(wstatus), "landlock child should exit normally")
 assert(unix.WEXITSTATUS(wstatus) == 0,
        "landlock child failed with status " .. unix.WEXITSTATUS(wstatus))
+
+print("test_landlock_abi: PASS (constants, fs-only create, scoped create, " ..
+      "undefined scope rejected, signal scope enforced" ..
+      (abi >= 5 and "; IOCTL_DEV handled" or "") ..
+      (abi >= 7 and "; ABI 7 log flag accepted" or "") ..
+      (abi >= 9 and "; RESOLVE_UNIX handled" or "") .. ")")
