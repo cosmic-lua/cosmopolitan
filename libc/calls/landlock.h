@@ -36,19 +36,58 @@
  */
 #define LANDLOCK_ACCESS_FS_TRUNCATE 0x4000ul
 
+/**
+ * Control binding a TCP socket to a local port.
+ *
+ * @see https://docs.kernel.org/userspace-api/landlock.html
+ * @note ABI 4+
+ */
+#define LANDLOCK_ACCESS_NET_BIND_TCP 0x0001ul
+
+/**
+ * Control connecting an active TCP socket to a remote port.
+ *
+ * @see https://docs.kernel.org/userspace-api/landlock.html
+ * @note ABI 4+
+ */
+#define LANDLOCK_ACCESS_NET_CONNECT_TCP 0x0002ul
+
 COSMOPOLITAN_C_START_
 
 enum landlock_rule_type {
   LANDLOCK_RULE_PATH_BENEATH = 1,
+  /** @note ABI 4+ */
+  LANDLOCK_RULE_NET_PORT = 2,
 };
 
 struct landlock_ruleset_attr {
   uint64_t handled_access_fs;
+  /** @note ABI 4+; kernels below 6.7 reject a size that includes it */
+  uint64_t handled_access_net;
 };
+
+/**
+ * Size of the landlock_ruleset_attr prefix ending with `member`.
+ *
+ * The kernel infers which ABI a create_ruleset request needs from the
+ * size it is handed, and answers E2BIG for a size covering fields it
+ * does not know. So pass the shortest prefix covering what was set:
+ * handled_access_fs for an ABI 1 request, handled_access_net for an
+ * ABI 4 one. Never sizeof the struct, which grows with each ABI.
+ */
+#define LANDLOCK_RULESET_ATTR_SIZE(member)          \
+  (offsetof(struct landlock_ruleset_attr, member) + \
+   sizeof(((struct landlock_ruleset_attr *)0)->member))
 
 struct thatispacked landlock_path_beneath_attr {
   uint64_t allowed_access;
   int32_t parent_fd;
+};
+
+/** @note ABI 4+ */
+struct landlock_net_port_attr {
+  uint64_t allowed_access;
+  uint64_t port;
 };
 
 int landlock_restrict_self(int, uint32_t);

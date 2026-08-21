@@ -3986,6 +3986,11 @@ unix = {
     LANDLOCK_ACCESS_FS_TRUNCATE = nil,
     LANDLOCK_CREATE_RULESET_VERSION = nil,
     LANDLOCK_RULE_PATH_BENEATH = nil,
+    LANDLOCK_RULE_NET_PORT = nil,
+
+    --- @type integer landlock TCP access-rights bits, ABI 4+
+    LANDLOCK_ACCESS_NET_BIND_TCP = nil,
+    LANDLOCK_ACCESS_NET_CONNECT_TCP = nil,
 
     --- @type integer prctl() options
     PR_CAPBSET_DROP = nil,
@@ -7397,12 +7402,19 @@ function unix.ioctl(fd, request, arg) end
 --- supported ABI version. With `handled_access_fs`, creates a new
 --- ruleset file descriptor that handles the given access categories
 --- (bitwise OR of `unix.LANDLOCK_ACCESS_FS_*`). Linux 5.13+.
+---
+--- `handled_access_net` (bitwise OR of `unix.LANDLOCK_ACCESS_NET_*`)
+--- additionally handles TCP bind/connect and needs ABI 4 (Linux 6.7+).
+--- Passing it widens the request to the ABI 4 struct layout, which
+--- older kernels reject with `E2BIG`; omitting it sends the ABI 1
+--- layout.
 ---@param handled_access_fs integer?
 ---@param flags integer?
+---@param handled_access_net integer?
 ---@return integer|nil fd_or_abi
 ---@return string? error
 ---@return unix.Errno? errno
-function unix.landlock_create_ruleset(handled_access_fs, flags) end
+function unix.landlock_create_ruleset(handled_access_fs, flags, handled_access_net) end
 
 --- Landlock: add a PATH_BENEATH rule granting `allowed` access to the
 --- subtree rooted at `parent_fd` (opened with `unix.O_PATH`). `allowed`
@@ -7415,6 +7427,20 @@ function unix.landlock_create_ruleset(handled_access_fs, flags) end
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.landlock_add_rule(ruleset_fd, parent_fd, allowed, flags) end
+
+--- Landlock: add a NET_PORT rule granting the TCP operations in
+--- `allowed` (bitwise OR of `unix.LANDLOCK_ACCESS_NET_*`, a subset of
+--- the ruleset's handled net set) on `port`, a host-byte-order TCP
+--- port. Needs ABI 4, so the ruleset must have been created with a
+--- `handled_access_net` argument.
+---@param ruleset_fd integer
+---@param port integer
+---@param allowed integer
+---@param flags integer?
+---@return true|nil
+---@return string? error
+---@return unix.Errno? errno
+function unix.landlock_add_net_rule(ruleset_fd, port, allowed, flags) end
 
 --- Landlock: apply the ruleset to the current thread (and its future
 --- children). Caller must set `PR_SET_NO_NEW_PRIVS` first or hold
