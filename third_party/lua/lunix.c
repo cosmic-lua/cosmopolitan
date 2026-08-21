@@ -1088,16 +1088,21 @@ static int LuaUnixCapset(lua_State *L) {
   return SysretBool(L, "capset", olderr, capset(&hdr, data));
 }
 
-// unix.landlock_create_ruleset([handled_access_fs:int[, flags:int]])
+// unix.landlock_create_ruleset([handled_access_fs:int[, flags:int[, handled_access_net:int]]])
 //     ├─→ fd:int      -- ruleset fd (close with unix.close)
 //     ├─→ abi:int     -- when called with no args, returns ABI version
 //     └─→ nil, error:str, errno:int
 //
 // With no arguments, returns the kernel's supported landlock ABI
-// (1 = basic, 2 = REFER, 3 = TRUNCATE, ...). With `handled_access_fs`,
-// creates a new ruleset that *handles* (can restrict) those access
-// categories — bits are LANDLOCK_ACCESS_FS_*. Access categories you
-// don't include are effectively unrestricted.
+// (1 = basic, 2 = REFER, 3 = TRUNCATE, 4 = TCP ports, ...). With
+// `handled_access_fs`, creates a new ruleset that *handles* (can
+// restrict) those access categories — bits are LANDLOCK_ACCESS_FS_*.
+// Access categories you don't include are effectively unrestricted.
+//
+// `handled_access_net` (bits are LANDLOCK_ACCESS_NET_*) additionally
+// handles TCP bind/connect and needs ABI 4. Passing it at all widens
+// the request to the ABI 4 layout, which pre-6.7 kernels reject with
+// E2BIG; omit it and the request is byte-identical to an ABI 1 one.
 //
 //     local abi = assert(unix.landlock_create_ruleset())
 //     local handled = unix.LANDLOCK_ACCESS_FS_READ_FILE
@@ -1120,9 +1125,16 @@ static int LuaUnixLandlockCreateRuleset(lua_State *L) {
       .handled_access_fs = (uint64_t)luaL_checkinteger(L, 1),
     };
     int flags = luaL_optinteger(L, 2, 0);
+    // The size decides which ABI the kernel must understand, so send
+    // the shortest prefix covering what the caller asked for: a call
+    // without a net mask stays byte-identical to an ABI 1 request.
+    size_t size = LANDLOCK_RULESET_ATTR_SIZE(handled_access_fs);
+    if (!lua_isnoneornil(L, 3)) {
+      attr.handled_access_net = (uint64_t)luaL_checkinteger(L, 3);
+      size = LANDLOCK_RULESET_ATTR_SIZE(handled_access_net);
+    }
     return SysretInteger(L, "landlock_create_ruleset", olderr,
-                         landlock_create_ruleset(&attr, sizeof(attr),
-                                                 flags));
+                         landlock_create_ruleset(&attr, size, flags));
   }
 }
 
@@ -1152,6 +1164,33 @@ static int LuaUnixLandlockAddRule(lua_State *L) {
   return SysretBool(L, "landlock_add_rule", olderr,
                     landlock_add_rule(ruleset_fd,
                                       LANDLOCK_RULE_PATH_BENEATH,
+                                      &attr, flags));
+}
+
+// unix.landlock_add_net_rule(ruleset_fd:int, port:int, allowed:int[, flags:int])
+//     ├─→ true
+//     └─→ nil, error:str, errno:int
+//
+// Adds a LANDLOCK_RULE_NET_PORT rule: the TCP operations in `allowed`
+// (bits are LANDLOCK_ACCESS_NET_*, and must be a subset of the
+// ruleset's handled net set) are granted on `port`, a host-byte-order
+// TCP port. Needs ABI 4, so the ruleset must have been created with a
+// `handled_access_net` argument. `flags` is reserved and defaults to 0.
+//
+//     local rs = assert(unix.landlock_create_ruleset(0, 0,
+//                         unix.LANDLOCK_ACCESS_NET_CONNECT_TCP))
+//     assert(unix.landlock_add_net_rule(rs, 443,
+//              unix.LANDLOCK_ACCESS_NET_CONNECT_TCP))
+static int LuaUnixLandlockAddNetRule(lua_State *L) {
+  int olderr = errno;
+  int ruleset_fd = luaL_checkinteger(L, 1);
+  struct landlock_net_port_attr attr = {
+    .port           = (uint64_t)luaL_checkinteger(L, 2),
+    .allowed_access = (uint64_t)luaL_checkinteger(L, 3),
+  };
+  int flags = luaL_optinteger(L, 4, 0);
+  return SysretBool(L, "landlock_add_net_rule", olderr,
+                    landlock_add_rule(ruleset_fd, LANDLOCK_RULE_NET_PORT,
                                       &attr, flags));
 }
 
@@ -4326,6 +4365,7 @@ static const luaL_Reg kLuaUnix[] = {
     {"isatty", LuaUnixIsatty},            // detects pseudoteletypewriters
     {"kill", LuaUnixKill},                // signal child process
     {"killpg", LuaUnixKillpg},            // signal process group
+    {"landlock_add_net_rule", LuaUnixLandlockAddNetRule},     // add a landlock TCP port rule
     {"landlock_add_rule", LuaUnixLandlockAddRule},            // add a landlock rule
     {"landlock_create_ruleset", LuaUnixLandlockCreateRuleset},// create landlock ruleset
     {"landlock_restrict_self", LuaUnixLandlockRestrictSelf},  // apply ruleset to self
@@ -4928,6 +4968,12 @@ int LuaUnix(lua_State *L) {
                  LANDLOCK_ACCESS_FS_REFER);
   LuaSetIntField(L, "LANDLOCK_ACCESS_FS_TRUNCATE",
                  LANDLOCK_ACCESS_FS_TRUNCATE);
+  LuaSetIntField(L, "LANDLOCK_RULE_NET_PORT",
+                 LANDLOCK_RULE_NET_PORT);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_NET_BIND_TCP",
+                 LANDLOCK_ACCESS_NET_BIND_TCP);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_NET_CONNECT_TCP",
+                 LANDLOCK_ACCESS_NET_CONNECT_TCP);
 
   // ioctl(SIOC*) requests for network interface manipulation
   LuaSetIntField(L, "SIOCGIFFLAGS", SIOCGIFFLAGS);
