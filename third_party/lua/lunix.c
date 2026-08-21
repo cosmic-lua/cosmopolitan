@@ -1088,21 +1088,28 @@ static int LuaUnixCapset(lua_State *L) {
   return SysretBool(L, "capset", olderr, capset(&hdr, data));
 }
 
-// unix.landlock_create_ruleset([handled_access_fs:int[, flags:int[, handled_access_net:int]]])
+// unix.landlock_create_ruleset([handled_access_fs:int[, flags:int[, handled_access_net:int[, scoped:int]]]])
 //     ├─→ fd:int      -- ruleset fd (close with unix.close)
 //     ├─→ abi:int     -- when called with no args, returns ABI version
 //     └─→ nil, error:str, errno:int
 //
 // With no arguments, returns the kernel's supported landlock ABI
-// (1 = basic, 2 = REFER, 3 = TRUNCATE, 4 = TCP ports, ...). With
+// (1 = basic, 2 = REFER, 3 = TRUNCATE, 4 = TCP ports, 5 = IOCTL_DEV,
+// 6 = scopes, 7 = audit flags, 8 = TSYNC, 9 = RESOLVE_UNIX, ...). With
 // `handled_access_fs`, creates a new ruleset that *handles* (can
 // restrict) those access categories — bits are LANDLOCK_ACCESS_FS_*.
 // Access categories you don't include are effectively unrestricted.
 //
 // `handled_access_net` (bits are LANDLOCK_ACCESS_NET_*) additionally
-// handles TCP bind/connect and needs ABI 4. Passing it at all widens
-// the request to the ABI 4 layout, which pre-6.7 kernels reject with
-// E2BIG; omit it and the request is byte-identical to an ABI 1 one.
+// handles TCP bind/connect and needs ABI 4. `scoped` (bits are
+// LANDLOCK_SCOPE_*) additionally confines abstract UNIX sockets and
+// signals to the domain, and needs ABI 6.
+//
+// Each of those widens the request to the layout of the ABI that
+// introduced it, and a kernel older than that answers E2BIG. So pass
+// only what you mean: with neither, the request is byte-identical to
+// an ABI 1 one; with `scoped` alone, it is the ABI 6 layout carrying a
+// zero net mask.
 //
 //     local abi = assert(unix.landlock_create_ruleset())
 //     local handled = unix.LANDLOCK_ACCESS_FS_READ_FILE
@@ -1132,6 +1139,10 @@ static int LuaUnixLandlockCreateRuleset(lua_State *L) {
     if (!lua_isnoneornil(L, 3)) {
       attr.handled_access_net = (uint64_t)luaL_checkinteger(L, 3);
       size = LANDLOCK_RULESET_ATTR_SIZE(handled_access_net);
+    }
+    if (!lua_isnoneornil(L, 4)) {
+      attr.scoped = (uint64_t)luaL_checkinteger(L, 4);
+      size = LANDLOCK_RULESET_ATTR_SIZE(scoped);
     }
     return SysretInteger(L, "landlock_create_ruleset", olderr,
                          landlock_create_ruleset(&attr, size, flags));
@@ -1200,7 +1211,12 @@ static int LuaUnixLandlockAddNetRule(lua_State *L) {
 //
 // Apply the ruleset to the current thread (and its future children).
 // Callers must set PR_SET_NO_NEW_PRIVS first or have CAP_SYS_ADMIN.
-// `flags` is reserved and defaults to 0.
+//
+// `flags` defaults to 0 and takes LANDLOCK_RESTRICT_SELF_* bits: the
+// three audit-logging controls added by ABI 7, and TSYNC (ABI 8),
+// which applies the domain to every thread of the process rather than
+// the calling one. A kernel that does not know a flag rejects it with
+// EINVAL, so gate them on the ABI the argless probe reports.
 static int LuaUnixLandlockRestrictSelf(lua_State *L) {
   int olderr = errno;
   int ruleset_fd = luaL_checkinteger(L, 1);
@@ -4974,6 +4990,22 @@ int LuaUnix(lua_State *L) {
                  LANDLOCK_ACCESS_NET_BIND_TCP);
   LuaSetIntField(L, "LANDLOCK_ACCESS_NET_CONNECT_TCP",
                  LANDLOCK_ACCESS_NET_CONNECT_TCP);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_IOCTL_DEV",
+                 LANDLOCK_ACCESS_FS_IOCTL_DEV);
+  LuaSetIntField(L, "LANDLOCK_ACCESS_FS_RESOLVE_UNIX",
+                 LANDLOCK_ACCESS_FS_RESOLVE_UNIX);
+  LuaSetIntField(L, "LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET",
+                 LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
+  LuaSetIntField(L, "LANDLOCK_SCOPE_SIGNAL",
+                 LANDLOCK_SCOPE_SIGNAL);
+  LuaSetIntField(L, "LANDLOCK_RESTRICT_SELF_LOG_SAME_EXEC_OFF",
+                 LANDLOCK_RESTRICT_SELF_LOG_SAME_EXEC_OFF);
+  LuaSetIntField(L, "LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON",
+                 LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON);
+  LuaSetIntField(L, "LANDLOCK_RESTRICT_SELF_LOG_SUBDOMAINS_OFF",
+                 LANDLOCK_RESTRICT_SELF_LOG_SUBDOMAINS_OFF);
+  LuaSetIntField(L, "LANDLOCK_RESTRICT_SELF_TSYNC",
+                 LANDLOCK_RESTRICT_SELF_TSYNC);
 
   // ioctl(SIOC*) requests for network interface manipulation
   LuaSetIntField(L, "SIOCGIFFLAGS", SIOCGIFFLAGS);
