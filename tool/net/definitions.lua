@@ -3992,6 +3992,24 @@ unix = {
     LANDLOCK_ACCESS_NET_BIND_TCP = nil,
     LANDLOCK_ACCESS_NET_CONNECT_TCP = nil,
 
+    --- @type integer landlock device-ioctl access-rights bit, ABI 5+
+    LANDLOCK_ACCESS_FS_IOCTL_DEV = nil,
+
+    --- @type integer landlock scope bits (landlock_create_ruleset), ABI 6+
+    LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET = nil,
+    LANDLOCK_SCOPE_SIGNAL = nil,
+
+    --- @type integer landlock_restrict_self() audit-logging flags, ABI 7+
+    LANDLOCK_RESTRICT_SELF_LOG_SAME_EXEC_OFF = nil,
+    LANDLOCK_RESTRICT_SELF_LOG_NEW_EXEC_ON = nil,
+    LANDLOCK_RESTRICT_SELF_LOG_SUBDOMAINS_OFF = nil,
+
+    --- @type integer landlock_restrict_self() all-threads flag, ABI 8+
+    LANDLOCK_RESTRICT_SELF_TSYNC = nil,
+
+    --- @type integer landlock pathname UNIX socket access-rights bit, ABI 9+
+    LANDLOCK_ACCESS_FS_RESOLVE_UNIX = nil,
+
     --- @type integer prctl() options
     PR_CAPBSET_DROP = nil,
     PR_CAPBSET_READ = nil,
@@ -7405,16 +7423,21 @@ function unix.ioctl(fd, request, arg) end
 ---
 --- `handled_access_net` (bitwise OR of `unix.LANDLOCK_ACCESS_NET_*`)
 --- additionally handles TCP bind/connect and needs ABI 4 (Linux 6.7+).
---- Passing it widens the request to the ABI 4 struct layout, which
---- older kernels reject with `E2BIG`; omitting it sends the ABI 1
---- layout.
+--- `scoped` (bitwise OR of `unix.LANDLOCK_SCOPE_*`) additionally
+--- confines abstract UNIX sockets and signals to the domain, and needs
+--- ABI 6 (Linux 6.12+).
+---
+--- Each widens the request to the struct layout of the ABI that
+--- introduced it, which older kernels reject with `E2BIG`; passing
+--- neither sends the ABI 1 layout.
 ---@param handled_access_fs integer?
 ---@param flags integer?
 ---@param handled_access_net integer?
+---@param scoped integer?
 ---@return integer|nil fd_or_abi
 ---@return string? error
 ---@return unix.Errno? errno
-function unix.landlock_create_ruleset(handled_access_fs, flags, handled_access_net) end
+function unix.landlock_create_ruleset(handled_access_fs, flags, handled_access_net, scoped) end
 
 --- Landlock: add a PATH_BENEATH rule granting `allowed` access to the
 --- subtree rooted at `parent_fd` (opened with `unix.O_PATH`). `allowed`
@@ -7445,6 +7468,11 @@ function unix.landlock_add_net_rule(ruleset_fd, port, allowed, flags) end
 --- Landlock: apply the ruleset to the current thread (and its future
 --- children). Caller must set `PR_SET_NO_NEW_PRIVS` first or hold
 --- `CAP_SYS_ADMIN`. The restriction is irrevocable.
+---
+--- `flags` takes `unix.LANDLOCK_RESTRICT_SELF_*` bits: the three
+--- audit-logging controls (ABI 7, Linux 6.15+) and `TSYNC` (ABI 8),
+--- which applies the domain to every thread of the process. A kernel
+--- that does not know a flag rejects it with `EINVAL`.
 ---@param ruleset_fd integer
 ---@param flags integer?
 ---@return true|nil
