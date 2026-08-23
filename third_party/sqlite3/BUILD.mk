@@ -27,9 +27,11 @@ THIRD_PARTY_SQLITE3_A = o/$(MODE)/third_party/sqlite3/libsqlite3.a
 THIRD_PARTY_SQLITE3_BINS = $(THIRD_PARTY_SQLITE3_COMS) $(THIRD_PARTY_SQLITE3_COMS:%=%.dbg)
 
 THIRD_PARTY_SQLITE3_A_HDRS =					\
+	third_party/sqlite3/qrf.h				\
 	third_party/sqlite3/extensions.h			\
 	third_party/sqlite3/sqlite3.h				\
-	third_party/sqlite3/sqlite3ext.h
+	third_party/sqlite3/sqlite3ext.h			\
+	third_party/sqlite3/tclsqlite.h
 
 THIRD_PARTY_SQLITE3_A_SRCS =					\
 	third_party/sqlite3/sqlite3.c				\
