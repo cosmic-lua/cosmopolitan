@@ -53,10 +53,11 @@ Performance work on this repo is measured and driven from a cosmic
 checkout — its benchmark harness exercises these bindings end to end,
 and its `optimize` skill holds the whole loop, including the C-layer
 chapter for working from a locally built `lua`. Nothing about that loop
-is documented here. What lives here is the backlog: open,
-evidence-backed hypotheses targeting this repo are GitHub issues
-labeled `perf` in whilp/cosmopolitan:
-`gh issue list --repo whilp/cosmopolitan --label perf --state open`.
+is documented here. The backlog does not live here either: open,
+evidence-backed hypotheses targeting this repo are items on cosmic's
+work board (the `work` skill in whilp/cosmic), carrying this repo as
+the item's `--repo`. Legacy `perf`-labeled issues here remain readable
+evidence a board item may link, never duplicate.
 
 ## Conventions
 
