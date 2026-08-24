@@ -1,7 +1,7 @@
 /*-*- mode:c;indent-tabs-mode:nil;c-basic-offset:2;tab-width:8;coding:utf-8 -*-│
 │ vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                               :vi │
 ╞══════════════════════════════════════════════════════════════════════════════╡
-│ Copyright 2026 Justine Alexandra Roberts Tunney                              │
+│ Copyright 2026 Will Maier                                                    │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
@@ -17,6 +17,7 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "tool/net/llua.h"
+#include "libc/assert.h"
 #include "libc/ctype.h"
 #include "libc/intrin/likely.h"
 #include "libc/runtime/stack.h"
@@ -45,7 +46,6 @@
 static const char kErrString[] = "unterminated string";
 static const char kErrLongString[] = "unterminated long string";
 static const char kErrLongComment[] = "unterminated long comment";
-static const char kErrNumber[] = "malformed number";
 static const char kErrReturn[] = "must be exactly `return { ... }`";
 static const char kErrTable[] = "must return a table literal";
 static const char kErrTrailing[] = "ends after its table";
@@ -341,11 +341,16 @@ static const char *NumeralEnd(const char *p, const char *e) {
 // Push the number the numeral at `p` denotes, negated when `neg`. The
 // text is handed to lua_stringtonumber, which is the same conversion
 // `load` performs, so this reader agrees with the runtime it mirrors.
+//
+// Callers reach here only with a digit at `p`, or a `.` with a digit
+// behind it, so the numeral always has a shape: a failure here is the
+// CONVERSION refusing a shape it cannot value (`0x.`), never a missing
+// numeral. There is no refusal class for the latter because no input
+// produces it.
 static struct DecodeLua ScanNumber(struct Ctx *c, const char *p, int neg) {
   lua_State *L = c->L;
   const char *end = NumeralEnd(p, c->e);
-  if (!end)
-    return Fail(c, p, kErrNumber);
+  unassert(end);
   size_t n = (size_t)(end - p);
   const char *z;
   char buf[NUMBUF];
@@ -359,6 +364,9 @@ static struct DecodeLua ScanNumber(struct Ctx *c, const char *p, int neg) {
   }
   size_t got = lua_stringtonumber(L, z);
   if (n >= sizeof(buf))
+    // Drop the copy `z` pointed into. A conversion that read anything
+    // pushed its result above that copy, so the copy is at -2; one that
+    // read nothing pushed nothing, so the copy is still on top.
     lua_remove(L, got ? -2 : -1);
   if (got != n + 1) {
     if (got)

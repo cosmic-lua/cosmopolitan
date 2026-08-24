@@ -152,7 +152,14 @@ end
 local function test_every_byte_in_a_long_bracket()
   local broken = {}
   for b = 0, 255 do
-    if b ~= 13 then  -- a lone \r is line-ending translation, not data
+    -- Byte 13 is the one byte where this parser and the oracle really
+    -- disagree, so it is excluded rather than quietly passing: Lua's
+    -- lexer folds \r, \r\n and \n\r inside a long string to one \n and
+    -- drops one such sequence after the opener, and neither this parser
+    -- nor the Teal reader it mirrors does. Both readers move together
+    -- or the two disagree; cosmic board item 3INGg7XO carries the fix,
+    -- and retiring this exclusion is its acceptance signal.
+    if b ~= 13 then
       local body = string.char(b)
       local src = "return {x = [==[" .. body .. "]==]}"
       local want = load(src)()
