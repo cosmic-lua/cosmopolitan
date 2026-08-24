@@ -22,7 +22,6 @@ struct ZiposUri {
 };
 
 struct ZiposHandle {
-  struct ZiposHandle *next;
   struct Zipos *zipos;
   size_t size;
   size_t mapsize;
