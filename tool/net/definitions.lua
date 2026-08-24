@@ -2395,6 +2395,10 @@ function cosmo.EncodeHex(binary) end
 --- - value is an array with holes and `sparsenull` wasn't given
 --- - Your serializer runs out of C heap memory (setrlimit)
 ---
+--- A float always encodes carrying a `.` or an exponent, even when its value
+--- is integral (`EncodeJson(0.0)` is `"0.0"`), so numbers round-trip through
+--- `DecodeJson` by value AND by Lua number type. Integers are unaffected.
+---
 --- We assume strings in value contain UTF-8. This serializer currently does not
 --- produce UTF-8 output. The output format is right now ASCII. Your UTF-8 data
 --- will be safely transcoded to `\uXXXX` sequences which are UTF-16. Overlong

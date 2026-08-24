@@ -60,6 +60,7 @@ OnError:
 static int SerializeNumber(lua_State *L, char **buf, int idx,
                            struct Serializer *z) {
   double x;
+  char *s;
   char ibuf[128];
   if (lua_isinteger(L, idx)) {
     RETURN_ON_ERROR(appendd(
@@ -73,7 +74,15 @@ static int SerializeNumber(lua_State *L, char **buf, int idx,
       }
       RETURN_ON_ERROR(appendw(buf, READ32LE("null")));
     } else {
-      RETURN_ON_ERROR(appends(buf, DoubleToJson(ibuf, x)));
+      // a float always encodes carrying a `.` or an exponent. the
+      // shortest spelling of an integral double below 1e21 is a bare
+      // digit string, which the decoder reads back as an integer --
+      // losing the number's type, and above ~1e17 its value too.
+      s = DoubleToJson(ibuf, x);
+      RETURN_ON_ERROR(appends(buf, s));
+      if (!strpbrk(s, ".eE")) {
+        RETURN_ON_ERROR(appends(buf, ".0"));
+      }
     }
   }
   return 0;
