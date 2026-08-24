@@ -58,9 +58,9 @@ assert(DecodeJson('"\xc2\x80"'))
 
 assert(EncodeJson(assert(DecodeJson[[ -9223372036854775808  ]])) == '-9223372036854775808')  -- minimum 64-bit integer
 assert(EncodeJson(assert(DecodeJson[[  9223372036854775807  ]])) ==  '9223372036854775807')  -- maximum 64-bit integer
-assert(EncodeJson(assert(DecodeJson[[  9223372036854775808  ]])) ==  '9223372036854776000')  -- switches to double due to integer overflow
-assert(EncodeJson(assert(DecodeJson[[ -9223372036854775809  ]])) == '-9223372036854776000')  -- switches to double due to integer underflow
-assert(EncodeJson(assert(DecodeJson[[ 9223372036854775807.0 ]])) ==  '9223372036854776000')  -- switches to double due to period mark
+assert(EncodeJson(assert(DecodeJson[[  9223372036854775808  ]])) ==  '9223372036854776000.0')  -- switches to double due to integer overflow
+assert(EncodeJson(assert(DecodeJson[[ -9223372036854775809  ]])) == '-9223372036854776000.0')  -- switches to double due to integer underflow
+assert(EncodeJson(assert(DecodeJson[[ 9223372036854775807.0 ]])) ==  '9223372036854776000.0')  -- switches to double due to period mark
 assert(EncodeJson(assert(DecodeJson[[ 2.7182818284590452354 ]])) == '2.718281828459045')     -- euler constant w/ 17 digit precision
 assert( EncodeLua(assert(DecodeJson[[ 2.7182818284590452354 ]])) == '2.718281828459045')     -- euler constant w/ 17 digit precision
 

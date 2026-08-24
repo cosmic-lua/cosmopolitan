@@ -242,4 +242,47 @@ assert(cosmo.DecodeJson("null") == nil, "default null mapping is still nil")
 local hole = assert(cosmo.DecodeJson("[1,null,2]"))
 assert(hole[2] == nil, "default decode still leaves a hole")
 
+--------------------------------------------------------------------------------
+-- 5. EncodeJson spells a float with a `.` or an exponent, so numbers
+--    round-trip by value and by Lua number type (whilp/cosmopolitan#265)
+--------------------------------------------------------------------------------
+
+-- the minimal repro: below 1e21 the shortest spelling of an integral
+-- double is a bare digit string, which the decoder used to read back as
+-- an integer -- and above ~1e17 that changed the value too
+local lossy = 1.775015055792255e18
+local back = assert(cosmo.DecodeJson(assert(cosmo.EncodeJson(lossy))))
+assert(back == lossy, "large integral float must round-trip by value")
+assert(math.type(back) == "float", "...and stay a float, got: " ..
+  tostring(math.type(back)))
+
+-- the edges of the band: 2^53 is where a double stops being able to
+-- name every integer, 2^63 is where an integer-shaped token overflows
+for _, edge in ipairs({2 ^ 53, -2 ^ 53, 2 ^ 63, -2 ^ 63}) do
+  local round = assert(cosmo.DecodeJson(assert(cosmo.EncodeJson(edge))))
+  assert(round == edge, "edge float round-trips by value: " .. tostring(edge))
+  assert(math.type(round) == "float",
+    "edge float round-trips as a float: " .. tostring(edge))
+end
+
+-- the spelling rule itself, including zero
+assert(cosmo.EncodeJson(5.0) == "5.0", "an integral float carries .0")
+assert(cosmo.EncodeJson(0.0) == "0.0", "zero is not an exception")
+assert(cosmo.EncodeJson(-0.0) == "0.0", "negative zero encodes as 0.0")
+assert(cosmo.EncodeJson(1.5) == "1.5", "a float that already has a . is left alone")
+assert(cosmo.EncodeJson(1e-12) == "1e-12", "an exponent counts, no .0 appended")
+
+-- integers are untouched by the rule
+assert(cosmo.EncodeJson(5) == "5", "an integer stays a bare digit string")
+assert(cosmo.EncodeJson(0) == "0", "integer zero stays 0")
+assert(cosmo.EncodeJson(math.maxinteger) == "9223372036854775807",
+  "maxinteger encodes exactly")
+local maxint = assert(cosmo.DecodeJson(assert(cosmo.EncodeJson(math.maxinteger))))
+assert(maxint == math.maxinteger and math.type(maxint) == "integer",
+  "maxinteger round-trips as an integer")
+
+-- the rule holds inside containers too, since one serializer emits both
+assert(cosmo.EncodeJson({1.0, 2, 3.5}) == "[1.0,2,3.5]",
+  "array elements follow the same spelling rule")
+
 print("test_data_formats: PASS")

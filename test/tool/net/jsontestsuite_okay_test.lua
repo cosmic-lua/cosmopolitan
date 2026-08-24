@@ -173,7 +173,7 @@ assert(DecodeJson(' [-123123123123123123123123123123] '))
 -- [jart] once again consistent with v8
 -- https://github.com/nst/JSONTestSuite/tree/d64aefb55228d9584d3e5b2433f720ea8fd00c82/test_parsing/i_number_real_underflow.json
 assert(DecodeJson(' [123e-10000000] '))
-assert(EncodeJson(DecodeJson(' [123e-10000000] ')) == '[0]')
+assert(EncodeJson(DecodeJson(' [123e-10000000] ')) == '[0.0]')
 assert(EncodeLua(DecodeJson(' [123e-10000000] ')) == '{0.}')
 
 -- [whilp] doubles that overflow to Infinity during the decode can no
@@ -204,4 +204,4 @@ assert(EncodeJson(DecodeJson(' [0.4e00669999999999999999999999999999999999999999
 -- [jart] consistent with v8 we encode underflow as 0
 -- https://github.com/nst/JSONTestSuite/tree/d64aefb55228d9584d3e5b2433f720ea8fd00c82/test_parsing/i_number_double_huge_neg_exp.json
 assert(DecodeJson(' [123.456e-789] '))
-assert(EncodeJson(DecodeJson(' [123.456e-789] ')) == '[0]')
+assert(EncodeJson(DecodeJson(' [123.456e-789] ')) == '[0.0]')
