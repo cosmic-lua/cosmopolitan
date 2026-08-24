@@ -29,6 +29,7 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/net/lpath.o					\
 	o/$(MODE)/tool/net/lre.o					\
 	o/$(MODE)/tool/net/ljson.o					\
+	o/$(MODE)/tool/net/llua.o					\
 	o/$(MODE)/tool/net/lsqlite3.o					\
 	o/$(MODE)/tool/net/largon2.o					\
 	o/$(MODE)/tool/net/lfetch.o					\
@@ -130,6 +131,10 @@ o/$(MODE)/tool/lua/test_data_formats.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/tes
 	$< tool/lua/test_data_formats.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_llua.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_llua.lua
+	$< tool/lua/test_llua.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_sentinels.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sentinels.lua
 	$< tool/lua/test_sentinels.lua
 	@touch $@
@@ -221,6 +226,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_argon2.ok				\
 	o/$(MODE)/tool/lua/test_lfuncs_errors.ok			\
 	o/$(MODE)/tool/lua/test_data_formats.ok				\
+	o/$(MODE)/tool/lua/test_llua.ok					\
 	o/$(MODE)/tool/lua/test_sentinels.ok				\
 	o/$(MODE)/tool/lua/test_slurp_barf.ok				\
 	o/$(MODE)/tool/lua/test_strftime.ok				\

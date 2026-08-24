@@ -24,6 +24,7 @@
 #include "tool/net/lfuncs.h"
 #include "tool/net/lpath.h"
 #include "tool/net/ljson.h"
+#include "tool/net/llua.h"
 #include "tool/net/lfetch.h"
 #include "tool/net/lgetopt.h"
 #include "tool/net/lzip.h"
@@ -75,6 +76,27 @@ static int LuaDecodeJson(lua_State *L) {
     lua_pushnil(L);
     lua_pushstring(L, "junk after expression");
     return 2;
+  }
+  return 1;
+}
+
+// Reads a Lua literal file's table without running it. Returns the
+// table, or nil plus the refusal and the 1-based byte offset it happened
+// at. The offset is what a caller turns into a line number, once, on the
+// error path, so no line counting happens while the source is parsed.
+static int LuaDecodeLua(lua_State *L) {
+  size_t n;
+  const char *p;
+  struct DecodeLua r;
+  char err[LLUA_ERRMAX];
+  p = luaL_checklstring(L, 1, &n);
+  err[0] = 0;
+  r = DecodeLua(L, p, n, err, sizeof(err));
+  if (r.rc == -1) {
+    lua_pushnil(L);
+    lua_pushstring(L, err);
+    lua_pushinteger(L, (lua_Integer)(r.p - p) + 1);
+    return 3;
   }
   return 1;
 }
@@ -221,6 +243,7 @@ static const luaL_Reg kCosmoFuncs[] = {
     {"DecodeHex", LuaDecodeHex},
     {"DecodeJson", LuaDecodeJson},
     {"DecodeLatin1", LuaDecodeLatin1},
+    {"DecodeLua", LuaDecodeLua},
     {"Deflate", LuaDeflate},
     {"EncodeBase32", LuaEncodeBase32},
     {"EncodeBase64", LuaEncodeBase64},
