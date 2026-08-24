@@ -2262,6 +2262,32 @@ function cosmo.DecodeHex(ascii) end
 ---@nodiscard
 function cosmo.DecodeJson(input, options) end
 
+--- Reads the table a Lua literal file returns, without running it.
+---
+--- The grammar is `return { ... }` whose entries are `name = <literal>`
+--- or `["name"] = <literal>`, and whose values are nested tables,
+--- strings, numerals, an optional `-` before a numeral, or `true` /
+--- `false`. Comments and long bracket strings at any level are
+--- admitted. Variables, calls, concatenation and every other expression
+--- are refused, so reading a file cannot run one.
+---
+--- Values equal what executing the same source would return: escapes
+--- are decoded as Lua decodes them, numerals are converted by the same
+--- routine `load` uses, and a key repeated inside one table is refused
+--- rather than resolved. Tables nest at most 32 deep.
+---
+--- On failure the second result describes the refusal and the third is
+--- the 1-based byte offset it happened at. Reporting an offset rather
+--- than a line is what keeps line counting off the parse: a caller that
+--- wants a line counts newlines up to the offset, once, on the error
+--- path.
+---@param input string
+---@return table<string, any>|nil
+---@return string? error
+---@return integer? offset
+---@nodiscard
+function cosmo.DecodeLua(input) end
+
 --- Turns ISO-8859-1 string into UTF-8.
 ---@param iso_8859_1 string
 ---@return string UTF8
