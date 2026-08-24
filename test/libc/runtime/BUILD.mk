@@ -53,6 +53,7 @@ o/$(MODE)/test/libc/runtime/%.dbg:					\
 		$(TEST_LIBC_RUNTIME_DEPS)				\
 		o/$(MODE)/test/libc/mem/prog/life.elf.zip.o		\
 		o/$(MODE)/test/libc/runtime/prog/ftraceasm.txt.zip.o	\
+		o/$(MODE)/test/libc/runtime/prog/stored_smoke.txt.zip.o	\
 		o/$(MODE)/test/libc/runtime/%.o				\
 		o/$(MODE)/test/libc/runtime/runtime.pkg			\
 		o/$(MODE)/test/libc/runtime/runtime.pkg			\
@@ -99,6 +100,13 @@ o/$(MODE)/test/libc/runtime/prog/ftraceasm.txt:				\
 o/$(MODE)/test/libc/runtime/prog/ftraceasm.txt.zip.o: private		\
 		ZIPOBJ_FLAGS +=						\
 			-B
+
+# ship stored (uncompressed) so it reaches zipos-open.c:127 where the
+# handle recycler pops from __zipos_free[]. TEST(zipos, storedRecycleConcurrent)
+# is the concurrency gate on that lock-free array.
+o/$(MODE)/test/libc/runtime/prog/stored_smoke.txt.zip.o: private	\
+		ZIPOBJ_FLAGS +=						\
+			-0
 
 .PHONY: o/$(MODE)/test/libc/runtime
 o/$(MODE)/test/libc/runtime:						\

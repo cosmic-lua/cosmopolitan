@@ -41,6 +41,33 @@
 #include "libc/sysv/pib.h"
 #include "libc/zip.h"
 
+// Recycles the fixed-size handle the stored-member path allocates.
+//
+// Every open() of a STORED zip member asks __zipos_alloc() for zero
+// bytes of trailing data, so its mapping is exactly sizeof(struct
+// ZiposHandle) and every such handle is interchangeable. Keeping a few
+// of them across close/open removes an mmap/munmap pair, along with the
+// four sigprocmask calls nested inside those two wrappers.
+//
+// It is an array of slots rather than a linked list because there is
+// only one size class, so there is nothing to search and nothing to
+// order. Each slot is claimed and released with a single atomic word
+// operation: a pop is an exchange, which takes ownership outright and
+// so cannot observe a recycled pointer through a stale read, and a push
+// is one compare-and-swap against null. That keeps the push legal on
+// the @asyncsignalsafe __zipos_close() path, where a mutex would not
+// be, and it means fork() has no half-finished publication to inherit
+// and no lock to inherit held, so no atfork handler is needed.
+//
+// The array size is the whole reclamation policy: a push that finds no
+// empty slot munmaps as before, so at most ZIPOS_FREE_SLOTS handles are
+// ever retained no matter how many members a program opens. Four suits
+// a boot path that opens and closes its modules one at a time, and each
+// slot costs one allocation granule of retained address space, which is
+// 64kb on Windows.
+#define ZIPOS_FREE_SLOTS 4
+static _Atomic(struct ZiposHandle *) __zipos_free[ZIPOS_FREE_SLOTS];
+
 struct ZiposHandle *__zipos_keep(struct ZiposHandle *h) {
   atomic_fetch_add_explicit(&h->refs, 1, memory_order_relaxed);
   return h;
@@ -50,21 +77,40 @@ void __zipos_drop(struct ZiposHandle *h) {
   if (atomic_fetch_sub_explicit(&h->refs, 1, memory_order_release))
     return;
   atomic_thread_fence(memory_order_acquire);
+  if (h->mapsize == sizeof(struct ZiposHandle))
+    for (int i = 0; i < ZIPOS_FREE_SLOTS; ++i) {
+      struct ZiposHandle *empty = 0;
+      if (atomic_compare_exchange_strong_explicit(&__zipos_free[i], &empty, h,
+                                                  memory_order_release,
+                                                  memory_order_relaxed))
+        return;
+    }
   munmap((char *)h, h->mapsize);
 }
 
 static struct ZiposHandle *__zipos_alloc(struct Zipos *zipos, size_t size) {
   size_t mapsize;
-  struct ZiposHandle *h;
+  struct ZiposHandle *h = 0;
   mapsize = sizeof(struct ZiposHandle) + size;
-  if ((h = mmap(0, mapsize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
-                -1, 0)) != MAP_FAILED) {
-    h->size = size;
-    h->zipos = zipos;
-    h->mapsize = mapsize;
-  } else {
-    h = 0;
+  // a vforked child shares the parent's address space, so a handle it
+  // took here would be lost to the parent when the child execs
+  if (!size && !__vforked)
+    for (int i = 0; i < ZIPOS_FREE_SLOTS; ++i)
+      if ((h = atomic_exchange_explicit(&__zipos_free[i], 0,
+                                        memory_order_acquire)))
+        break;
+  if (h) {
+    // fresh mappings arrive zeroed, but __zipos_drop() leaves the
+    // refcount it decremented at SIZE_MAX, so a recycled handle has to
+    // be told it is unreferenced or it would never be released again
+    atomic_store_explicit(&h->refs, 0, memory_order_relaxed);
+  } else if ((h = mmap(0, mapsize, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) == MAP_FAILED) {
+    return 0;
   }
+  h->size = size;
+  h->zipos = zipos;
+  h->mapsize = mapsize;
   return h;
 }
 
