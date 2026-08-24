@@ -66,6 +66,41 @@ TEST(zipos, test) {
     EXPECT_SYS(0, 0, pthread_join(t[i], 0));
 }
 
+// concurrency gate on the __zipos_free[] slot array in zipos-open.c.
+// opens a STORED zip member (size==0 alloc), so every open pops from
+// or falls through to mmap of a sizeof(struct ZiposHandle) mapping and
+// every close pushes into the array or munmaps. hyperion.txt above is
+// deflated; only a stored member reaches the recycle path.
+static const char kStoredSmoke[] = "stored recycle smoke test\n";
+#define kStoredSmokeSize (sizeof(kStoredSmoke) - 1)
+
+void *StoredWorker(void *arg) {
+  int i, fd;
+  char buf[64];
+  for (i = 0; i < 20; ++i) {
+    ASSERT_EQ(0, errno);
+    ASSERT_NE(-1, (fd = open("/zip/test/libc/runtime/prog/stored_smoke.txt",
+                             O_RDONLY)));
+    ASSERT_EQ(0, errno);
+    ASSERT_EQ(kStoredSmokeSize, read(fd, buf, sizeof(buf)));
+    ASSERT_EQ(0, errno);
+    ASSERT_EQ(0, memcmp(buf, kStoredSmoke, kStoredSmokeSize));
+    ASSERT_EQ(0, errno);
+    ASSERT_SYS(0, 0, close(fd));
+  }
+  return 0;
+}
+
+TEST(zipos, storedRecycleConcurrent) {
+  int i, n = 16;
+  pthread_t *t = gc(malloc(sizeof(pthread_t) * n));
+  ASSERT_EQ(0, errno);
+  for (i = 0; i < n; ++i)
+    ASSERT_SYS(0, 0, pthread_create(t + i, 0, StoredWorker, 0));
+  for (i = 0; i < n; ++i)
+    EXPECT_SYS(0, 0, pthread_join(t[i], 0));
+}
+
 TEST(zipos, erofs) {
   ASSERT_SYS(EROFS, -1, creat("/zip/foo.txt", 0644));
 }
