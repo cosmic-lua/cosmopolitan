@@ -120,4 +120,29 @@ local rip, rerr = cosmo.ResolveIp("cosmo-test-name.invalid", 2000)
 assert(rip == nil, "unresolvable name should fail")
 assert(type(rerr) == "string", "failure should carry a string error")
 
+-- cosmo.EncodeLua's literal mode refuses a reserved word as a key,
+-- because the bare {k=v} spelling it would otherwise emit is source no
+-- reader parses. The set is exactly lua's 22 keywords: a key that
+-- merely contains or extends one, or differs in case, is an ordinary
+-- identifier and encodes.
+local keywords = {
+  "and", "break", "do", "else", "elseif", "end", "false", "for",
+  "function", "goto", "if", "in", "local", "nil", "not", "or",
+  "repeat", "return", "then", "true", "until", "while",
+}
+assert(#keywords == 22, "lua has 22 reserved words")
+for _, kw in ipairs(keywords) do
+  local ok, why = cosmo.EncodeLua({[kw] = 1},
+                                  {sorted = true, literal = true, maxdepth = 32})
+  assert(ok == nil, "literal mode should refuse the key " .. kw)
+  assert(why == "reserved word as key",
+         "wrong refusal for " .. kw .. ": " .. tostring(why))
+end
+for _, near in ipairs({"ending", "en", "endx", "And", "NIL", "function1",
+                       "_end", "end_"}) do
+  local ok = cosmo.EncodeLua({[near] = 1},
+                             {sorted = true, literal = true, maxdepth = 32})
+  assert(type(ok) == "string", "literal mode should accept the key " .. near)
+end
+
 print("all tests passed")
