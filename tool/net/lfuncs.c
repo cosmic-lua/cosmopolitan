@@ -51,6 +51,7 @@
 #include "libc/str/strwidth.h"
 #include "libc/str/tab.h"
 #include "libc/sysv/consts/af.h"
+#include "libc/sysv/consts/clock.h"
 #include "libc/sysv/consts/ipproto.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/rusage.h"
