@@ -5840,15 +5840,14 @@ function unix.syslog(priority, msg) end
 ---   was actively scheduled. This is similar to getrusage() and clock().
 ---   Cosmopoiltan guarantees this clock will never raise `EINVAL`.
 ---
---- Returns `EINVAL` if clock isn't supported on platform.
----
---- This function only fails if `clock` is invalid.
+--- An invalid clock id, or one this platform cannot serve (the `_COARSE`
+--- clocks on extremely old Linux distros), raises a bad-argument error —
+--- wrap the call in `pcall` to feature-probe a nonstandard clock. The
+--- per-clock guarantees above name the clocks that can never fail.
 ---
 --- This function goes fastest on Linux and Windows.
 ---@param clock? integer
----@return integer|nil seconds, integer nanos
----@return string? error
----@return unix.Errno? errno
+---@return integer seconds, integer nanos
 ---@nodiscard
 function unix.clock_gettime(clock) end
 
