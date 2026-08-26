@@ -137,6 +137,10 @@ static int LuaEncodeSmth(lua_State *L, int Encoder(lua_State *, char **, int,
     if (!lua_isnoneornil(L, -1)) {
       conf.sparsenull = lua_toboolean(L, -1);
     }
+    lua_getfield(L, 2, "literal");
+    if (!lua_isnoneornil(L, -1)) {
+      conf.literal = lua_toboolean(L, -1);
+    }
     lua_getfield(L, 2, "pretty");
     if (!lua_isnoneornil(L, -1)) {
       conf.pretty = lua_toboolean(L, -1);

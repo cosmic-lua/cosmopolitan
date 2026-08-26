@@ -99,6 +99,7 @@ arg = nil
 ---@field maxdepth integer? defaults to 64. This option controls the maximum amount of recursion the serializer is allowed to perform. The max is 32767. You might not be able to set it that high if there isn't enough C stack memory. Your serializer checks for this and will return an error rather than crashing.
 ---@field nan cosmo.JsonNanMode? `EncodeJson` only: encode NaN and Infinity as `null` (the v8 behavior) instead of failing with `nil, error`.
 ---@field sparsenull boolean? `EncodeJson` only: encode array holes as `null` instead of failing the encode with `nil, error`. With it, an array containing JSON `null` round-trips losslessly with `DecodeJson`'s default nil mapping. Bounded: an array whose largest index exceeds 8x its element count (beyond a 64-element floor) still fails with `nil, error`, so one stray huge index cannot make the encode effectively unbounded.
+---@field literal boolean? `EncodeLua` only: fail with `nil, reason` on any value outside the literal-data domain, instead of spelling it as something a literal reader turns down. Refused with it: a non-string or reserved-word table key, byte 27 in a key or string, `math.mininteger`, NaN and the infinities, a function, thread, userdata or light userdata, a cyclic table, and nesting past `maxdepth` — every one of which is otherwise written as arithmetic, a global read, an escape, or a `"kind@pointer"` placeholder. The reason is a non-empty string whose exact wording is unspecified. Without it the encode is byte-identical to what it has always produced.
 
 --- Options for `DecodeJson`, controlling how JSON `null` maps into Lua.
 ---@class cosmo.DecoderOptions
@@ -2484,6 +2485,15 @@ function cosmo.EncodeLatin1(utf8, flags) end
 ---   the serializer is allowed to perform. The max is 32767. You might not be able
 ---   to set it that high if there isn't enough C stack memory. Your serializer
 ---   checks for this and will return an error rather than crashing.
+--- - `literal`: `(bool=false)` Fail with `nil, reason` on any value outside the
+---   literal-data domain, rather than spelling it as something a literal reader
+---   turns down. This turns every accommodation described below into a refusal:
+---   the `"kind@pointer"` placeholder for threads, functions and userdata, the
+---   same placeholder for a cyclic table and for nesting past `maxdepth`, the
+---   arithmetic `math.mininteger` and the non-finite numbers are written as, and
+---   the `\e` escape for byte 27. A non-string or reserved-word table key is
+---   refused too — the latter is spelled bare, which does not parse. Use this
+---   when the output has to be read back as data rather than looked at.
 ---
 --- If a user data object has a `__repr` or `__tostring` meta method, then that'll
 --- be used to encode the Lua code.

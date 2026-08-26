@@ -12,6 +12,9 @@ struct EncoderConfig {
   bool pretty;
   bool nannull;    // json: encode non-finite numbers as null instead of erroring
   bool sparsenull; // json: encode array holes as null instead of erroring
+  bool literal;    // lua: fail with nil, reason on anything outside the
+                   // literal-data domain, rather than spelling it as
+                   // arithmetic, a global read, or a pointer string
   const char *indent;
 };
 

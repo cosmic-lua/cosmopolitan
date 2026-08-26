@@ -49,6 +49,71 @@ static bool IsLuaIdentifier(lua_State *L, int idx) {
   return true;
 }
 
+static const char *const kLuaKeywords[] = {
+    "and",   "break", "do",     "else", "elseif", "end",    "false", "for",
+    "function", "goto", "if",   "in",   "local",  "nil",    "not",   "or",
+    "repeat", "return", "then", "true", "until",  "while",
+};
+
+// returns true if the string at idx is one of lua's reserved words
+//
+// these pass IsLuaIdentifier, so they are the one key shape the bare
+// {𝑘=𝑣} spelling cannot carry. literal mode refuses them rather than
+// emitting a table constructor that will not parse.
+static bool IsLuaKeyword(lua_State *L, int idx) {
+  size_t i, n;
+  const char *p;
+  p = lua_tolstring(L, idx, &n);
+  for (i = 0; i < sizeof(kLuaKeywords) / sizeof(*kLuaKeywords); ++i) {
+    if (!strncmp(p, kLuaKeywords[i], n) && !kLuaKeywords[i][n]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// why literal mode refuses the key at idx, or null when it accepts it
+//
+// a literal table constructor spells a key either bare or bracketed, and
+// the reader on the other side takes string keys only. anything else is
+// a value this encoder can write but that reader cannot read back.
+static const char *LiteralKeyRefusal(lua_State *L, int idx) {
+  if (lua_type(L, idx) != LUA_TSTRING) {
+    return "non-string key";
+  }
+  if (IsLuaIdentifier(L, idx) && IsLuaKeyword(L, idx)) {
+    return "reserved word as key";
+  }
+  return 0;
+}
+
+// why literal mode refuses the scalar at idx, or null when it accepts it
+//
+// the three refusals are the values this encoder spells as something
+// other than a literal: math.mininteger has no positive counterpart so
+// it is written as a subtraction, the non-finite numbers are written as
+// arithmetic and a global read, and byte 27 is spelled \e, which lua's
+// own loader accepts but a literal-data reader does not.
+static const char *LiteralScalarRefusal(lua_State *L, int idx) {
+  size_t n;
+  const char *s;
+  if (lua_type(L, idx) == LUA_TNUMBER) {
+    if (lua_isinteger(L, idx)) {
+      if (luaL_checkinteger(L, idx) == -9223372036854775807 - 1) {
+        return "mininteger is written as arithmetic";
+      }
+    } else if (!isfinite(lua_tonumber(L, idx))) {
+      return "nan and the infinities are written as arithmetic";
+    }
+  } else if (lua_type(L, idx) == LUA_TSTRING) {
+    s = lua_tolstring(L, idx, &n);
+    if (memchr(s, 27, n)) {
+      return "byte 27 in string";
+    }
+  }
+  return 0;
+}
+
 // returns true if table at index -1 is an array
 //
 // for the purposes of lua serialization, we can only serialize using
@@ -251,8 +316,12 @@ OnError:
 static int SerializeArray(lua_State *L, char **buf, struct Serializer *z,
                           int depth) {
   size_t i, n;
-  RETURN_ON_ERROR(appendw(buf, '{'));
   n = lua_rawlen(L, -1);
+  if (z->conf.literal && n) {
+    z->reason = "non-string key";
+    return -1;
+  }
+  RETURN_ON_ERROR(appendw(buf, '{'));
   for (i = 1; i <= n; i++) {
     lua_rawgeti(L, -1, i);
     if (i > 1) RETURN_ON_ERROR(appendw(buf, READ16LE(", ")));
@@ -283,6 +352,13 @@ static int SerializeObject(lua_State *L, char **buf, struct Serializer *z,
     } else {
       comma = true;
     }
+    if (z->conf.literal) {
+      const char *why = LiteralKeyRefusal(L, -2);
+      if (why) {
+        z->reason = why;
+        goto OnError;
+      }
+    }
     if (lua_type(L, -2) == LUA_TSTRING && IsLuaIdentifier(L, -2)) {
       // use {𝑘=𝑣′} syntax when 𝑘 is a legal lua identifier
       s = lua_tolstring(L, -2, &n);
@@ -312,6 +388,13 @@ static int SerializeSorted(lua_State *L, char **buf, struct Serializer *z,
   lua_pushnil(L);
   while (lua_next(L, -2)) {
     RETURN_ON_ERROR(i = AppendStrList(&sl));
+    if (z->conf.literal) {
+      const char *why = LiteralKeyRefusal(L, -2);
+      if (why) {
+        z->reason = why;
+        goto OnError;
+      }
+    }
     if (lua_type(L, -2) == LUA_TSTRING && IsLuaIdentifier(L, -2)) {
       // use {𝑘=𝑣′} syntax when 𝑘 is a legal lua identifier
       s = lua_tolstring(L, -2, &n);
@@ -356,7 +439,13 @@ static int SerializeTable(lua_State *L, char **buf, int idx,
     return -1;
   }
   RETURN_ON_ERROR(rc = LuaPushVisit(&z->visited, lua_topointer(L, idx)));
-  if (rc) return SerializeOpaque(L, buf, idx, "cyclic");
+  if (rc) {
+    if (z->conf.literal) {
+      z->reason = "cyclic table";
+      return -1;
+    }
+    return SerializeOpaque(L, buf, idx, "cyclic");
+  }
   lua_pushvalue(L, idx);  // idx becomes invalid once we change stack
   if (IsLuaArray(L)) {
     RETURN_ON_ERROR(SerializeArray(L, buf, z, depth));
@@ -378,6 +467,18 @@ OnError:
 static int Serialize(lua_State *L, char **buf, int idx, struct Serializer *z,
                      int depth) {
   if (depth < z->conf.maxdepth) {
+    // in literal mode the scalars this encoder spells as arithmetic, a
+    // global read or an escape the reader turns down are refused before
+    // they are written, and the opaque kinds — which are written as a
+    // "kind@pointer" string standing in for a value that cannot be
+    // spelled at all — are refused outright.
+    if (z->conf.literal) {
+      const char *why = LiteralScalarRefusal(L, idx);
+      if (why) {
+        z->reason = why;
+        return -1;
+      }
+    }
     switch (lua_type(L, idx)) {
       case LUA_TNIL:
         return SerializeNil(L, buf);
@@ -390,17 +491,28 @@ static int Serialize(lua_State *L, char **buf, int idx, struct Serializer *z,
       case LUA_TTABLE:
         return SerializeTable(L, buf, idx, z, depth);
       case LUA_TUSERDATA:
+        if (z->conf.literal) break;
         return SerializeUserData(L, buf, idx);
       case LUA_TFUNCTION:
+        if (z->conf.literal) break;
         return SerializeOpaque(L, buf, idx, "func");
       case LUA_TLIGHTUSERDATA:
+        if (z->conf.literal) break;
         return SerializeOpaque(L, buf, idx, "light");
       case LUA_TTHREAD:
+        if (z->conf.literal) break;
         return SerializeOpaque(L, buf, idx, "thread");
       default:
+        if (z->conf.literal) break;
         return SerializeOpaque(L, buf, idx, "unsupported");
     }
+    z->reason = "value is not literal data";
+    return -1;
   } else {
+    if (z->conf.literal) {
+      z->reason = "too deep";
+      return -1;
+    }
     return SerializeOpaque(L, buf, idx, "greatdepth");
   }
 }
