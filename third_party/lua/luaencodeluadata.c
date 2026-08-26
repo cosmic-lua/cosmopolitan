@@ -55,17 +55,77 @@ static const char *const kLuaKeywords[] = {
     "repeat", "return", "then", "true", "until",  "while",
 };
 
+// kLuaKeywords again, split by length: 4+5+4+5+3+1 is all 22 of them.
+// no reserved word is one, seven, or nine-or-more bytes long, so the
+// length of a candidate turns most keys away before any comparison and
+// leaves at most five to test.
+static const char *const kLuaKeywords2[] = {"do", "if", "in", "or"};
+static const char *const kLuaKeywords3[] = {"and", "end", "for", "nil",
+                                            "not"};
+static const char *const kLuaKeywords4[] = {"else", "goto", "then", "true"};
+static const char *const kLuaKeywords5[] = {"break", "false", "local",
+                                            "until", "while"};
+static const char *const kLuaKeywords6[] = {"elseif", "repeat", "return"};
+static const char *const kLuaKeywords8[] = {"function"};
+
+// kLuaKeywords stays the one statement of the set, and this is what
+// keeps the buckets answering to it: a word added there without a
+// bucket to hold it fails the build rather than becoming a keyword the
+// encoder silently accepts as a bare key.
+_Static_assert(sizeof(kLuaKeywords2) / sizeof(*kLuaKeywords2) +
+                       sizeof(kLuaKeywords3) / sizeof(*kLuaKeywords3) +
+                       sizeof(kLuaKeywords4) / sizeof(*kLuaKeywords4) +
+                       sizeof(kLuaKeywords5) / sizeof(*kLuaKeywords5) +
+                       sizeof(kLuaKeywords6) / sizeof(*kLuaKeywords6) +
+                       sizeof(kLuaKeywords8) / sizeof(*kLuaKeywords8) ==
+                   sizeof(kLuaKeywords) / sizeof(*kLuaKeywords),
+               "the length buckets must hold every one of lua's reserved words");
+
 // returns true if the string at idx is one of lua's reserved words
 //
 // these pass IsLuaIdentifier, so they are the one key shape the bare
 // {𝑘=𝑣} spelling cannot carry. literal mode refuses them rather than
 // emitting a table constructor that will not parse.
+//
+// this runs for every identifier-shaped key an encode visits and says
+// no to nearly all of them, so it is dispatched on length: the words of
+// the candidate's own length are the only ones that can match, and they
+// are all that length, so memcmp of exactly n bytes decides each.
 static bool IsLuaKeyword(lua_State *L, int idx) {
-  size_t i, n;
+  size_t i, n, count;
   const char *p;
+  const char *const *words;
   p = lua_tolstring(L, idx, &n);
-  for (i = 0; i < sizeof(kLuaKeywords) / sizeof(*kLuaKeywords); ++i) {
-    if (!strncmp(p, kLuaKeywords[i], n) && !kLuaKeywords[i][n]) {
+  switch (n) {
+    case 2:
+      words = kLuaKeywords2;
+      count = sizeof(kLuaKeywords2) / sizeof(*kLuaKeywords2);
+      break;
+    case 3:
+      words = kLuaKeywords3;
+      count = sizeof(kLuaKeywords3) / sizeof(*kLuaKeywords3);
+      break;
+    case 4:
+      words = kLuaKeywords4;
+      count = sizeof(kLuaKeywords4) / sizeof(*kLuaKeywords4);
+      break;
+    case 5:
+      words = kLuaKeywords5;
+      count = sizeof(kLuaKeywords5) / sizeof(*kLuaKeywords5);
+      break;
+    case 6:
+      words = kLuaKeywords6;
+      count = sizeof(kLuaKeywords6) / sizeof(*kLuaKeywords6);
+      break;
+    case 8:
+      words = kLuaKeywords8;
+      count = sizeof(kLuaKeywords8) / sizeof(*kLuaKeywords8);
+      break;
+    default:
+      return false;
+  }
+  for (i = 0; i < count; ++i) {
+    if (!memcmp(p, words[i], n)) {
       return true;
     }
   }
