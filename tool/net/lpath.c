@@ -106,14 +106,15 @@ static int LuaPathJoin(lua_State *L) {
     }
     if (gotstr) {
       luaL_pushresult(&b);
-    } else {
-      lua_pushnil(L);
+      return 1;
     }
-    return 1;
-  } else {
-    luaL_error(L, "missing argument");
-    __builtin_unreachable();
   }
+  // No arguments, or exclusively nil ones, is the same caller error and
+  // raises the same way. Returning nil for the all-nil case would make
+  // the return type a union for every caller, to describe a degenerate
+  // input none of them passes.
+  luaL_error(L, "missing argument");
+  __builtin_unreachable();
 }
 
 static int CheckPath(lua_State *L, int type, int flags) {
