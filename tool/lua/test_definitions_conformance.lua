@@ -251,6 +251,7 @@ probe("path.basename", path.basename, "/a/b/c.tl")
 probe("path.dirname", path.dirname, "/a/b/c.tl")
 probe("path.join", path.join, "a", "b")
 probe("unix.getpid", unix.getpid)
+probe("unix.clock_gettime", unix.clock_gettime)
 
 -- --- the pure surface -------------------------------------------------
 -- Every binding in the modules whose functions are side-effect free is
@@ -390,6 +391,11 @@ assert(not pcall(path.join, nil), "join(nil) must raise")
 assert(not pcall(path.join, nil, nil), "join(nil, nil) must raise")
 assert(path.join("") == "", "join('') stays the empty string")
 assert(path.join("a", nil) == "a", "interior nil still skipped")
+
+-- clock_gettime's only failure is a clock id the platform cannot serve,
+-- so it raises rather than declaring an error slot.
+assert(not pcall(unix.clock_gettime, -1),
+  "clock_gettime of an invalid clock id must raise")
 
 -- Every declared error slot needs a probe that fills it, or the
 -- slot-observation ratchet at the bottom of this file cannot tell a

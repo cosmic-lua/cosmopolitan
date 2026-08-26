@@ -1622,17 +1622,22 @@ static int LuaUnixFutimens(lua_State *L) {
 
 // unix.clock_gettime([clock:int])
 //     ├─→ seconds:int, nanos:int
-//     └─→ nil, error:str, errno:int
+//     └─→ raises on an invalid or unsupported clock id
 static int LuaUnixGettime(lua_State *L) {
   struct timespec ts;
   int olderr = errno;
-  if (!clock_gettime(luaL_optinteger(L, 1, CLOCK_REALTIME), &ts)) {
+  int clock = luaL_optinteger(L, 1, CLOCK_REALTIME);
+  if (!clock_gettime(clock, &ts)) {
     lua_pushinteger(L, ts.tv_sec);
     lua_pushinteger(L, ts.tv_nsec);
     return 2;
-  } else {
-    return LuaUnixSysretErrno(L, "clock_gettime", olderr);
   }
+  // The only failure is a clock id this platform cannot serve, which is
+  // a bad argument rather than an environmental condition. Raising keeps
+  // the success shape two plain integers for every caller.
+  errno = olderr;
+  return luaL_argerror(
+      L, 1, lua_pushfstring(L, "invalid or unsupported clock id %d", clock));
 }
 
 // unix.nanosleep(seconds:int[, nanos:int])
