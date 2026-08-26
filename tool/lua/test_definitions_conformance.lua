@@ -381,6 +381,16 @@ local hv, herr = probe("cosmo.GetCryptoHash", cosmo.GetCryptoHash,
 assert(hv == nil and type(herr) == "string",
   "GetCryptoHash failure must be nil, string")
 
+-- path.join raises on a degenerate call rather than returning nil, so
+-- its declared return is a plain string. The two shapes that raise are
+-- the same caller error; the two that do not pin that per-argument nil
+-- skipping and empty-string coercion are unchanged by that.
+assert(not pcall(path.join), "join() must raise")
+assert(not pcall(path.join, nil), "join(nil) must raise")
+assert(not pcall(path.join, nil, nil), "join(nil, nil) must raise")
+assert(path.join("") == "", "join('') stays the empty string")
+assert(path.join("a", nil) == "a", "interior nil still skipped")
+
 -- Every declared error slot needs a probe that fills it, or the
 -- slot-observation ratchet at the bottom of this file cannot tell a
 -- real one from a phantom.

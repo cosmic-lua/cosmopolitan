@@ -1679,13 +1679,12 @@ function path.basename(str) end
 ---
 --- You may specify 1+ arguments.
 ---
---- Specifying no arguments will raise an error. If `nil` arguments are specified,
---- then they're skipped over. If exclusively `nil` arguments are passed, then `nil`
---- is returned. Empty strings behave similarly to `nil`, but unlike `nil` may
---- coerce a trailing slash.
+--- Specifying no arguments, or exclusively `nil` arguments, raises an error.
+--- `nil` arguments are otherwise skipped over. Empty strings behave similarly to
+--- `nil`, but unlike `nil` may coerce a trailing slash.
 ---@param str string?
 ---@param ... string?
----@return string?
+---@return string
 ---@nodiscard
 function path.join(str, ...) end
 
