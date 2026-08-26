@@ -285,4 +285,69 @@ assert(maxint == math.maxinteger and math.type(maxint) == "integer",
 assert(cosmo.EncodeJson({1.0, 2, 3.5}) == "[1.0,2,3.5]",
   "array elements follow the same spelling rule")
 
+
+--------------------------------------------------------------------------------
+-- 4. EncodeLua's literal option refuses what a literal reader turns down
+--------------------------------------------------------------------------------
+
+-- Without the option EncodeLua describes a value: it spells the things it
+-- cannot write as a literal — arithmetic, a global read, an escape, a
+-- "kind@pointer" placeholder — because showing most things imperfectly beats
+-- crashing. With literal=true the same encoder refuses them instead, so a
+-- caller serializing data to be read back needs no pre-walk of its own.
+
+local function refuses(value, what)
+  local off = cosmo.EncodeLua(value, {sorted = true})
+  assert(off ~= nil, what .. ": must still encode without the option")
+  local on, why = cosmo.EncodeLua(value, {sorted = true, literal = true})
+  assert(on == nil, what .. ": literal=true must refuse it, got " .. tostring(on))
+  assert(type(why) == "string" and #why > 0,
+    what .. ": the refusal must carry a reason")
+  return off
+end
+
+-- keys: a table constructor spells a key bare or bracketed, and the reader on
+-- the other side takes string keys only. the reserved word is the sharper case
+-- -- it is spelled bare, so the output does not even parse.
+assert(refuses({["end"] = 1}, "reserved word key") == "{end=1}")
+assert(refuses({["function"] = 2}, "reserved word key 2") == "{function=2}")
+assert(refuses({[1.5] = "x"}, "non-string key") == '{[1.5]="x"}')
+assert(refuses({1, 2, 3}, "array") == "{1, 2, 3}")
+
+-- strings: byte 27 is spelled \e, which load() accepts and a literal reader
+-- does not.
+assert(refuses({a = "x\27y"}, "byte 27 in a value") == '{a="x\\ey"}')
+assert(refuses({["k\27"] = 1}, "byte 27 in a key") == '{["k\\e"]=1}')
+
+-- numbers: these three are written as arithmetic and a global read.
+assert(refuses({a = math.mininteger}, "mininteger") ==
+  "{a=-9223372036854775807 - 1}")
+assert(refuses({a = 0 / 0}, "nan") == "{a=0/0}")
+assert(refuses({a = math.huge}, "inf") == "{a=math.huge}")
+assert(refuses({a = -math.huge}, "-inf") == "{a=-math.huge}")
+
+-- values with no literal spelling at all, written as a pointer placeholder.
+refuses({a = print}, "function value")
+refuses({a = coroutine.create(function() end)}, "thread value")
+
+-- the two structural placeholders.
+local cyclic = {}
+cyclic.self = cyclic
+refuses(cyclic, "cyclic table")
+local deep = {a = {b = {c = 1}}}
+local capped, why = cosmo.EncodeLua(deep, {literal = true, maxdepth = 2})
+assert(capped == nil and type(why) == "string" and #why > 0,
+  "nesting past maxdepth must refuse rather than emit a placeholder")
+
+-- what the domain admits still encodes, and encodes identically either way.
+local ok = {a = {b = {c = 1}}, d = "e", f = true, g = 1.5, ending = 1, en = 2}
+assert(cosmo.EncodeLua(ok, {sorted = true, literal = true}) ==
+  cosmo.EncodeLua(ok, {sorted = true}),
+  "a value inside the domain encodes to the same bytes with or without it")
+assert(cosmo.EncodeLua({}, {sorted = true, literal = true}) == "{}",
+  "the empty table is inside the domain")
+assert(cosmo.EncodeLua(ok, {sorted = true, literal = true}) ==
+  '{a={b={c=1}}, d="e", en=2, ending=1, f=true, g=1.5}',
+  "and it is the ordinary sorted spelling")
+
 print("test_data_formats: PASS")
