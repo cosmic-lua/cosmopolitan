@@ -64,6 +64,15 @@ char *DecodeBase64(const char *data, size_t size, size_t *out_size) {
     q = r;
     p = data;
     pe = p + size;
+    // The quantum loop below is the decoder's whole hot path, and its
+    // throughput depends on where its head lands relative to 64-byte
+    // instruction fetch blocks — the same placement sensitivity
+    // IsBase64's alphabet scan shows, measured there at ±93% across
+    // otherwise identical builds. This directive pins the loop head so
+    // code motion elsewhere in the image cannot re-roll it; the
+    // padding it emits runs once per call, against a walk over the
+    // whole input.
+    asm volatile(".balign 64");
     for (;;) {
       do {
         if (p == pe)
