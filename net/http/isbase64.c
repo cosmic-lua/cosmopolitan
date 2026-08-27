@@ -68,6 +68,15 @@ bool32 IsBase64(const char *data, size_t size, bool32 urlsafe) {
     size = data ? strlen(data) : 0;
   p = data;
   pe = data + size;
+  // The alphabet scan below is twenty-four bytes of hot loop, and its
+  // throughput depends on those bytes fitting inside one 64-byte
+  // instruction fetch block. Aligning the function ENTRY does not
+  // achieve that — a 64-aligned entry puts the loop head at +0x30,
+  // from where twenty-four bytes cross the next boundary — and neither
+  // -falign-loops nor -falign-functions moves it. This directive pins
+  // the loop itself; the padding it emits runs once per call, against
+  // a scan that walks tens of kilobytes.
+  asm volatile(".balign 64");
   while (p < pe && (kBase64Alpha[*p & 255] & mask))
     ++p;
   if (pe - p > 2)
