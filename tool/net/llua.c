@@ -221,10 +221,12 @@ static struct DecodeLua ScanShortString(struct Ctx *c, const char *p) {
       luaL_addchar(&b, (char)(hi * 16 + lo));
       q += 3;
     } else if (esc == 'z') {
-      // Skips the whitespace that follows, but a raw newline still ends
-      // the string: this grammar's short strings never span lines.
+      // Skips the whitespace that follows, newlines included — that is
+      // what the escape is for, and what load accepts. A raw newline
+      // not behind \z still ends the string (the check at the top of
+      // the scan).
       ++q;
-      while (q < e && isspace((unsigned char)*q) && *q != '\n')
+      while (q < e && isspace((unsigned char)*q))
         ++q;
     } else if (esc == 'u') {
       const char *r = q + 1;
