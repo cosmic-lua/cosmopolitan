@@ -269,8 +269,11 @@ static struct DecodeLua ScanShortString(struct Ctx *c, const char *p) {
 }
 
 // Push the value of the long bracket string that opens at `p`. It takes
-// no escapes, and a newline right after the opening delimiter is Lua's
-// to drop.
+// no escapes; Lua's lexer normalizes the four line-ending forms (\n,
+// \r, \r\n, \n\r) to one \n while reading the body and drops one such
+// sequence right after the opening delimiter (read_long_string +
+// inclinenumber), so this copy does the same or a CRLF checkout feeds
+// callers bytes load would never return.
 static struct DecodeLua ScanLongString(struct Ctx *c, const char *p,
                                        int level) {
   const char *end = LongBracketEnd(p, c->e, level);
@@ -280,9 +283,23 @@ static struct DecodeLua ScanLongString(struct Ctx *c, const char *p,
   }
   const char *body = p + level + 2;
   const char *stop = end - (level + 2);
-  if (body < stop && *body == '\n')
-    ++body;
-  lua_pushlstring(c->L, body, (size_t)(stop - body));
+  if (body < stop && (*body == '\n' || *body == '\r')) {
+    char first = *body++;
+    if (body < stop && (*body == '\n' || *body == '\r') && *body != first)
+      ++body;
+  }
+  luaL_Buffer b;
+  luaL_buffinit(c->L, &b);
+  while (body < stop) {
+    char ch = *body++;
+    if (ch == '\n' || ch == '\r') {
+      if (body < stop && (*body == '\n' || *body == '\r') && *body != ch)
+        ++body;
+      ch = '\n';
+    }
+    luaL_addchar(&b, ch);
+  }
+  luaL_pushresult(&b);
   return (struct DecodeLua){1, end};
 }
 
