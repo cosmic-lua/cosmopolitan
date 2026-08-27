@@ -61,7 +61,11 @@ static const unsigned char kBase64Alpha[256] = {
  *     (rfc4648 §4) when false
  * @return true if input is valid base64 in the selected alphabet
  */
-bool32 IsBase64(const char *data, size_t size, bool32 urlsafe) {
+// The entry is pinned to a fetch-block boundary: this hot loop's
+// throughput is layout-sensitive, and code motion elsewhere in the
+// image must not re-roll its alignment.
+forcealign(64) bool32 IsBase64(const char *data, size_t size,
+                               bool32 urlsafe) {
   const char *p, *pe;
   unsigned mask = urlsafe ? 1 | 4 : 1 | 2;
   if (size == -1)

@@ -53,7 +53,11 @@ static const signed char kBase64[256] = {
  * @param out_size if non-NULL receives output length
  * @return allocated NUL-terminated buffer, or NULL w/ errno
  */
-char *DecodeBase64(const char *data, size_t size, size_t *out_size) {
+// The entry is pinned to a fetch-block boundary: this hot loop's
+// throughput is layout-sensitive, and code motion elsewhere in the
+// image must not re-roll its alignment.
+forcealign(64) char *DecodeBase64(const char *data, size_t size,
+                                  size_t *out_size) {
   size_t n;
   char *r, *q;
   int a, b, c, d, w;
