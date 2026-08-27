@@ -152,26 +152,40 @@ end
 local function test_every_byte_in_a_long_bracket()
   local broken = {}
   for b = 0, 255 do
-    -- Byte 13 is the one byte where this parser and the oracle really
-    -- disagree, so it is excluded rather than quietly passing: Lua's
-    -- lexer folds \r, \r\n and \n\r inside a long string to one \n and
-    -- drops one such sequence after the opener, and neither this parser
-    -- nor the Teal reader it mirrors does. Both readers move together
-    -- or the two disagree; cosmic board item 3INGg7XO carries the fix,
-    -- and retiring this exclusion is its acceptance signal.
-    if b ~= 13 then
-      local body = string.char(b)
-      local src = "return {x = [==[" .. body .. "]==]}"
-      local want = load(src)()
-      local got = cosmo.DecodeLua(src)
-      if type(got) ~= "table" or got.x ~= want.x then
-        broken[#broken + 1] = b
-      end
+    local body = string.char(b)
+    local src = "return {x = [==[" .. body .. "]==]}"
+    local want = load(src)()
+    local got = cosmo.DecodeLua(src)
+    if type(got) ~= "table" or got.x ~= want.x then
+      broken[#broken + 1] = b
     end
   end
   assert(#broken == 0,
          "bytes that did not survive a long bracket: " ..
          table.concat(broken, ","))
+end
+
+local function test_long_bracket_line_endings_match_load()
+  -- Lua's lexer folds \r, \r\n and \n\r inside a long bracket to one
+  -- \n and drops one such sequence right after the opener; the copy
+  -- must agree with load on every form or a CRLF checkout reads
+  -- differently than it executes.
+  local cases = {
+    "return {x = [[a\r\nb]]}",
+    "return {x = [[a\rb]]}",
+    "return {x = [[a\n\rb]]}",
+    "return {x = [[\r\nleading is dropped]]}",
+    "return {x = [[\rz\r\r\nq\n\r]]}",
+  }
+  for _, src in ipairs(cases) do
+    local want = load(src)()
+    local got = cosmo.DecodeLua(src)
+    assert(type(got) == "table" and got.x == want.x,
+           "long-bracket line endings disagree with load for <" ..
+           src:gsub("\r", "\\r"):gsub("\n", "\\n") .. ">: got " ..
+           tostring(got and got.x):gsub("\r", "\\r"):gsub("\n", "\\n") ..
+           " want " .. want.x:gsub("\r", "\\r"):gsub("\n", "\\n"))
+  end
 end
 
 local function check_refusals(cases)
@@ -259,6 +273,7 @@ test_agrees_with_load()
 test_skips_a_shebang_line()
 test_every_byte_before_a_digit()
 test_every_byte_in_a_long_bracket()
+test_long_bracket_line_endings_match_load()
 test_refusals_are_classified_and_positioned()
 test_duplicate_is_scoped_to_one_table()
 test_depth_cap()
