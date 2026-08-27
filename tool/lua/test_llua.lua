@@ -223,11 +223,15 @@ local function test_depth_cap()
 end
 
 local function test_a_short_string_never_spans_a_line()
-  -- `\z` skips the whitespace that follows, but this grammar's short
-  -- strings still end at a raw newline, so the two together are refused
-  -- rather than joined.
-  local got = cosmo.DecodeLua("return {a = \"x\\z\ny\"}")
+  -- A raw newline still ends a short string...
+  local got = cosmo.DecodeLua("return {a = \"x\ny\"}")
   assert(got == nil, "a raw newline inside a short string must be refused")
+  -- ...except behind `\z`, which skips the whitespace that follows it,
+  -- newlines included — that is what the escape is for, and load
+  -- agrees: load("return {a = \"x\\z\ny\"}")().a == "xy".
+  local spanned = cosmo.DecodeLua("return {a = \"x\\z\n   y\"}")
+  assert(spanned and spanned.a == "xy",
+    "\\z must skip a newline and the indent after it")
 end
 
 local function test_rejects_what_it_must_not_run()
