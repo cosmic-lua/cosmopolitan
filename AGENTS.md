@@ -2,10 +2,10 @@
 
 ## What this repository is
 
-whilp/cosmopolitan is a fork of
+cosmic-lua/cosmopolitan is a fork of
 [jart/cosmopolitan](https://github.com/jart/cosmopolitan) slimmed to its
 C core. Its primary downstream consumer is
-[whilp/cosmic](https://github.com/whilp/cosmic), a batteries-included
+[cosmic-lua/cosmic](https://github.com/cosmic-lua/cosmic), a batteries-included
 Lua/Teal distribution: every release of this repo publishes a `cosmos.zip`
 (fat `lua`, `lua-debug`, `zip`, `unzip` binaries) that cosmic pins by
 version + sha256 and wraps with its typed standard library.
@@ -55,7 +55,7 @@ and its `optimize` skill holds the whole loop, including the C-layer
 chapter for working from a locally built `lua`. Nothing about that loop
 is documented here. The backlog does not live here either: open,
 evidence-backed hypotheses targeting this repo are items on cosmic's
-work board (the `work` skill in whilp/cosmic), carrying this repo as
+work board (the `work` skill in cosmic-lua/cosmic), carrying this repo as
 the item's `--repo`. Legacy `perf`-labeled issues here remain readable
 evidence a board item may link, never duplicate.
 
