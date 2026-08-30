@@ -219,6 +219,10 @@ o/$(MODE)/tool/lua/test_ssl_roots.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_s
 	$< tool/lua/test_ssl_roots.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_unix_misc.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_misc.lua
+	$< tool/lua/test_unix_misc.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -237,6 +241,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_unix_proc.ok				\
 	o/$(MODE)/tool/lua/test_unix_errno.ok				\
 	o/$(MODE)/tool/lua/test_unix_ifflags.ok				\
+	o/$(MODE)/tool/lua/test_unix_misc.ok				\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
