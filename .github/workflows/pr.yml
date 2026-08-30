@@ -4,6 +4,11 @@ on:
   pull_request:
     branches:
       - master
+  # The merge queue's own trigger: master's ruleset requires the build
+  # check on each queued merge candidate, and a check run fired by this
+  # event attaches to the candidate's own head. Without it a candidate
+  # runs nothing and every queue entry times out.
+  merge_group:
 
 jobs:
   build:
