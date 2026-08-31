@@ -1,4 +1,4 @@
-# cosmo build adaptation: makes the pristine Lua 5.4 sources buildable inside
+# cosmo build adaptation: makes the pristine Lua sources buildable inside
 # this hermetic monorepo. quoted includes of sibling headers already carry
 # full repo paths (done mechanically by update.sh); this patch swaps the
 # remaining system C-library includes (<string.h>, <stdio.h>, <errno.h>, ...)
@@ -6,12 +6,14 @@
 # header already pulls in what's needed), adds __static_yoink("lua_notice")
 # so the linker keeps lua_ident/lua_notice in binaries that never reference
 # it directly, and re-flows blank lines and continuation-backslash alignment
-# left ragged by those edits. no functional change.
+# left ragged by those edits. lapi.h's api_check gate (LUA_USE_APICHECK ->
+# IsModeDbg()) rides along here too, since upstream inlined it from
+# luaconf.h's old luai_apicheck indirection. no other functional change.
 # regenerate by diffing against the pristine mechanically-rewritten sources
 # (run update.sh with patches/ moved aside).
 --- a/third_party/lua/lapi.h
 +++ b/third_party/lua/lapi.h
-@@ -1,7 +1,6 @@
+@@ -1,13 +1,11 @@
  #ifndef lapi_h
  #define lapi_h
  
@@ -19,24 +21,13 @@
  #include "third_party/lua/llimits.h"
  #include "third_party/lua/lstate.h"
  
-@@ -9,7 +8,7 @@
- /* Increments 'L->top.p', checking for stack overflows */
- #define api_incr_top(L)	{L->top.p++; \
- 			 api_check(L, L->top.p <= L->ci->top.p, \
--					"stack overflow");}
-+				"stack overflow");}
  
- 
- /*
-@@ -25,7 +24,7 @@
- /* Ensure the stack has at least 'n' elements */
- #define api_checknelems(L,n) \
- 	api_check(L, (n) < (L->top.p - L->ci->func.p), \
--			  "not enough elements in the stack")
-+				  "not enough elements in the stack")
- 
- 
- /*
+-#if defined(LUA_USE_APICHECK)
+-#include <assert.h>
++#if IsModeDbg()
+ #define api_check(l,e,msg)	assert(e)
+ #else	/* for testing */
+ #define api_check(l,e,msg)	((void)(l), lua_assert((e) && msg))
 --- a/third_party/lua/lauxlib.h
 +++ b/third_party/lua/lauxlib.h
 @@ -1,13 +1,10 @@
@@ -56,7 +47,7 @@
  
  
  /* global table */
-@@ -108,6 +105,9 @@
+@@ -113,6 +110,9 @@
  LUALIB_API void (luaL_traceback) (lua_State *L, lua_State *L1,
                                    const char *msg, int level);
  
@@ -66,27 +57,15 @@
  LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,
                                   lua_CFunction openf, int glb);
  
-@@ -166,10 +166,10 @@
- #if !defined(lua_assert)
- 
- #if defined LUAI_ASSERT
--  #include <assert.h>
-   #define lua_assert(c)		assert(c)
- #else
--  #define lua_assert(c)		((void)0)
-+  // [jart]
-+  #define lua_assert(c)		unassert(c)
- #endif
- 
- #endif
 --- a/third_party/lua/lbaselib.c
 +++ b/third_party/lua/lbaselib.c
-@@ -28,18 +28,13 @@
+@@ -28,19 +28,14 @@
  #define lbaselib_c
  #define LUA_LIB
  
 +#include "libc/str/str.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -100,11 +79,12 @@
 -#include "third_party/lua/lauxlib.h"
 +#include "libc/ctype.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  static int luaB_print (lua_State *L) {
-@@ -206,8 +201,8 @@
+@@ -208,8 +203,8 @@
    if (oldmode == -1)
      luaL_pushfail(L);  /* invalid call to 'lua_gc' */
    else
@@ -147,23 +127,24 @@
 +__static_yoink("lua_notice");
  
  
- /* Maximum number of registers in a Lua function (must fit in 8 bits) */
-@@ -626,7 +620,7 @@
-   lua_Integer ik;
-   setfltvalue(&o, r);
-   if (!luaV_flttointeger(r, &ik, F2Ieq))  /* not an integral value? */
--    return addk(fs, &o, &o);  /* use number itself as key */
-+  return addk(fs, &o, &o);  /* use number itself as key */
-   else {  /* must build an alternative key */
-     const int nbm = l_floatatt(MANT_DIG);
-     const lua_Number q = l_mathop(ldexp)(l_mathop(1.0), -nbm + 1);
+ /* (note that expressions VJMP also have jumps.) */
+@@ -1947,7 +1941,7 @@
+ ** Do a final pass over the code of a function, doing small peephole
+ ** optimizations and adjustments.
+ */
+-#include "lopnames.h"
++#include "third_party/lua/lopnames.inc"
+ void luaK_finish (FuncState *fs) {
+   int i;
+   Proto *p = fs->f;
 --- a/third_party/lua/lcorolib.c
 +++ b/third_party/lua/lcorolib.c
-@@ -28,15 +28,11 @@
+@@ -28,16 +28,12 @@
  #define lcorolib_c
  #define LUA_LIB
  
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -173,18 +154,20 @@
 -
 -#include "third_party/lua/lauxlib.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  static lua_State *getco (lua_State *L) {
 --- a/third_party/lua/ldblib.c
 +++ b/third_party/lua/ldblib.c
-@@ -28,17 +28,12 @@
+@@ -28,18 +28,13 @@
  #define ldblib_c
  #define LUA_LIB
  
 +#include "libc/str/str.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -196,6 +179,7 @@
 -
 -#include "third_party/lua/lauxlib.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
@@ -234,15 +218,15 @@
  
  
  
-@@ -56,7 +51,7 @@
- 
+@@ -58,7 +53,7 @@
+ static const char strupval[] = "upvalue";
  
  static const char *funcnamefromcall (lua_State *L, CallInfo *ci,
 -                                                   const char **name);
 +                                    const char **name);
  
- static const char strlocal[] = "local";
- static const char strupval[] = "upvalue";
+ 
+ static int currentpc (CallInfo *ci) {
 --- a/third_party/lua/ldo.h
 +++ b/third_party/lua/ldo.h
 @@ -1,8 +1,6 @@
@@ -256,7 +240,7 @@
  #include "third_party/lua/lzio.h"
 --- a/third_party/lua/ldump.c
 +++ b/third_party/lua/ldump.c
-@@ -28,17 +28,12 @@
+@@ -28,20 +28,15 @@
  #define ldump_c
  #define LUA_CORE
  
@@ -268,9 +252,12 @@
 -
 -#include "third_party/lua/lua.h"
 -
+ #include "third_party/lua/lapi.h"
+ #include "third_party/lua/lgc.h"
  #include "third_party/lua/lobject.h"
 +#include "third_party/lua/lprefix.h"
  #include "third_party/lua/lstate.h"
+ #include "third_party/lua/ltable.h"
 +#include "third_party/lua/lua.h"
  #include "third_party/lua/lundump.h"
 +__static_yoink("lua_notice");
@@ -317,13 +304,12 @@
  
 --- a/third_party/lua/lgc.c
 +++ b/third_party/lua/lgc.c
-@@ -28,24 +28,20 @@
+@@ -28,23 +28,20 @@
  #define lgc_c
  #define LUA_CORE
  
 -#include "third_party/lua/lprefix.h"
 -
--#include <stdio.h>
 -#include <string.h>
 -
 -
@@ -348,9 +334,9 @@
  /*
 --- a/third_party/lua/lgc.h
 +++ b/third_party/lua/lgc.h
-@@ -1,10 +1,10 @@
- #ifndef lgc_h
- #define lgc_h
+@@ -4,10 +4,10 @@
+ 
+ #include <stddef.h>
  
 -
  #include "third_party/lua/lobject.h"
@@ -362,7 +348,7 @@
  ** the object is not marked; gray, which means the object is marked, but
 --- a/third_party/lua/linit.c
 +++ b/third_party/lua/linit.c
-@@ -25,7 +25,6 @@
+@@ -25,21 +25,15 @@
  │  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                      │
  │                                                                              │
  ╚─────────────────────────────────────────────────────────────────────────────*/
@@ -370,11 +356,9 @@
  #define linit_c
  #define LUA_LIB
  
-@@ -45,15 +44,11 @@
- **  lua_pop(L, 1);  // remove PRELOAD table
- */
- 
+-
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -384,13 +368,14 @@
 -
  #include "third_party/lua/lualib.h"
 -#include "third_party/lua/lauxlib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  /*
 --- a/third_party/lua/liolib.c
 +++ b/third_party/lua/liolib.c
-@@ -28,22 +28,18 @@
+@@ -28,21 +28,19 @@
  #define liolib_c
  #define LUA_LIB
  
@@ -401,6 +386,7 @@
 +#include "libc/temp.h"
 +#include "libc/str/str.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -416,15 +402,14 @@
 -#include "third_party/lua/lauxlib.h"
 +#include "libc/ctype.h"
  #include "third_party/lua/lualib.h"
--
--
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  /*
-@@ -138,8 +134,6 @@
+@@ -137,8 +135,6 @@
  
- #if defined(LUA_USE_POSIX)	/* { */
+ #if defined(LUA_USE_POSIX) || defined(LUA_USE_OFF_T)	/* { */
  
 -#include <sys/types.h>
 -
@@ -458,7 +443,7 @@
  #include "third_party/lua/lua.h"
  
  
-@@ -72,7 +69,7 @@
+@@ -71,7 +68,7 @@
  */
  #if !defined(LUA_USE_C89) && defined(__STDC_VERSION__) && \
      __STDC_VERSION__ >= 199901L
@@ -467,17 +452,44 @@
  #if defined(UINTPTR_MAX)  /* even in C99 this type is optional */
  #define L_P2I	uintptr_t
  #else  /* no 'intptr'? */
-@@ -96,7 +93,6 @@
+@@ -95,15 +92,17 @@
  */
  #if defined LUAI_ASSERT
  #undef NDEBUG
 -#include <assert.h>
  #define lua_assert(c)           assert(c)
+ #define assert_code(c)		c
  #endif
  
+ #if defined(lua_assert)
+ #else
+-#define lua_assert(c)		((void)0)
+-#define assert_code(c)		((void)0)
++// [jart] soft assertions stay active outside LUAI_ASSERT builds, so code
++//        that only exists to feed one (guarded with assert_code) must run
++//        too, or the assert's own expression stops compiling.
++#define lua_assert(c)		unassert(c)
++#define assert_code(c)		c
+ #endif
+ 
+ #define check_exp(c,e)		(lua_assert(c), (e))
+@@ -305,13 +304,7 @@
+ ** change to the default definition.
+ */
+ #if !defined(LUAI_FUNC)
+-
+-#if defined(__GNUC__) && ((__GNUC__*100 + __GNUC_MINOR__) >= 302) && \
+-    (defined(__ELF__) || defined(__MACH__))
+-#define LUAI_FUNC	__attribute__((visibility("internal"))) extern
+-#else
+ #define LUAI_FUNC	extern
+-#endif
+ 
+ #define LUAI_DDEC(dec)	LUAI_FUNC dec
+ #define LUAI_DDEF	/* empty */
 --- a/third_party/lua/lmathlib.c
 +++ b/third_party/lua/lmathlib.c
-@@ -28,19 +28,14 @@
+@@ -28,20 +28,15 @@
  #define lmathlib_c
  #define LUA_LIB
  
@@ -485,6 +497,7 @@
 +#include "libc/math.h"
 +#include "libc/nt/struct/msg.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -498,6 +511,7 @@
 -
 -#include "third_party/lua/lauxlib.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
@@ -528,7 +542,7 @@
 +__static_yoink("lua_notice");
  
  
- /* ORDER OP */
+ #define opmode(mm,ot,it,t,a,m)  \
 --- a/third_party/lua/lparser.c
 +++ b/third_party/lua/lparser.c
 @@ -28,14 +28,7 @@
@@ -560,7 +574,7 @@
 +__static_yoink("lua_notice");
  
  
- /* maximum number of local variables per function (must be smaller
+ /* maximum number of variable declarations per function (must be
 --- a/third_party/lua/lprefix.h
 +++ b/third_party/lua/lprefix.h
 @@ -5,35 +5,34 @@
@@ -610,7 +624,7 @@
 -
 --- a/third_party/lua/lstate.c
 +++ b/third_party/lua/lstate.c
-@@ -28,14 +28,8 @@
+@@ -28,14 +28,7 @@
  #define lstate_c
  #define LUA_CORE
  
@@ -623,11 +637,10 @@
 -#include "third_party/lua/lua.h"
 -
 +#include "libc/str/str.h"
-+#include "libc/time.h"
  #include "third_party/lua/lapi.h"
  #include "third_party/lua/ldebug.h"
  #include "third_party/lua/ldo.h"
-@@ -43,11 +37,13 @@
+@@ -43,11 +36,13 @@
  #include "third_party/lua/lgc.h"
  #include "third_party/lua/llex.h"
  #include "third_party/lua/lmem.h"
@@ -641,17 +654,8 @@
 +__static_yoink("lua_notice");
  
  
- /*
-@@ -78,8 +74,6 @@
- */
- #if !defined(luai_makeseed)
- 
--#include <time.h>
--
- /*
- ** Compute an initial seed with some level of randomness.
- ** Rely on Address Space Layout Randomization (if present) and
-@@ -311,6 +305,16 @@
+ #define fromstate(L)	(cast(LX *, cast(lu_byte *, (L)) - offsetof(LX, l)))
+@@ -296,6 +291,16 @@
  }
  
  
@@ -726,10 +730,11 @@
  /*
 --- a/third_party/lua/ltable.c
 +++ b/third_party/lua/ltable.c
-@@ -28,7 +28,18 @@
+@@ -28,7 +28,19 @@
  #define ltable_c
  #define LUA_CORE
  
++#include "libc/str/str.h"
 +#include "third_party/lua/ldebug.h"
 +#include "third_party/lua/ldo.h"
 +#include "third_party/lua/lgc.h"
@@ -745,12 +750,13 @@
  
  
  /*
-@@ -44,21 +55,6 @@
+@@ -44,22 +56,6 @@
  ** Hence even when the load factor reaches 100%, performance remains good.
  */
  
 -#include <math.h>
 -#include <limits.h>
+-#include <string.h>
 -
 -#include "third_party/lua/lua.h"
 -
@@ -766,10 +772,10 @@
 -
  
  /*
- ** MAXABITS is the largest integer such that MAXASIZE fits in an
+ ** Only hash parts with at least 2^LIMFORLAST have a 'lastfree' field
 --- a/third_party/lua/ltablib.c
 +++ b/third_party/lua/ltablib.c
-@@ -28,17 +28,14 @@
+@@ -28,18 +28,15 @@
  #define ltablib_c
  #define LUA_LIB
  
@@ -777,6 +783,7 @@
 +#include "libc/calls/weirdtypes.h"
 +#include "libc/str/str.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -788,19 +795,11 @@
 -
 -#include "third_party/lua/lauxlib.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  /*
-@@ -253,8 +250,6 @@
- */
- #if !defined(l_randomizePivot)		/* { */
- 
--#include <time.h>
--
- /* size of 'e' measured in number of 'unsigned int's */
- #define sof(e)		(sizeof(e) / sizeof(unsigned int))
- 
 --- a/third_party/lua/ltests.h
 +++ b/third_party/lua/ltests.h
 @@ -1,9 +1,8 @@
@@ -858,7 +857,7 @@
  ╚──────────────────────────────────────────────────────────────────────────────╝
  │                                                                              │
  │  Lua                                                                         │
-@@ -28,22 +28,18 @@
+@@ -28,23 +28,19 @@
  #define lundump_c
  #define LUA_CORE
  
@@ -878,6 +877,7 @@
  #include "third_party/lua/lobject.h"
 +#include "third_party/lua/lprefix.h"
  #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
 +#include "third_party/lua/lua.h"
  #include "third_party/lua/lundump.h"
  #include "third_party/lua/lzio.h"
@@ -894,15 +894,15 @@
  ╚──────────────────────────────────────────────────────────────────────────────╝
  │                                                                              │
  │  Lua                                                                         │
-@@ -28,18 +28,11 @@
+@@ -28,18 +28,12 @@
  #define lutf8lib_c
  #define LUA_LIB
  
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
--#include <assert.h>
 -#include <limits.h>
 -#include <stdlib.h>
 -#include <string.h>
@@ -911,13 +911,14 @@
 -
 -#include "third_party/lua/lauxlib.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  #define MAXUNICODE	0x10FFFFu
 --- a/third_party/lua/lvm.c
 +++ b/third_party/lua/lvm.c
-@@ -28,28 +28,21 @@
+@@ -28,17 +28,7 @@
  #define lvm_c
  #define LUA_CORE
  
@@ -933,9 +934,10 @@
 -#include "third_party/lua/lua.h"
 -
 +#include "libc/str/str.h"
+ #include "third_party/lua/lapi.h"
  #include "third_party/lua/ldebug.h"
  #include "third_party/lua/ldo.h"
- #include "third_party/lua/lfunc.h"
+@@ -46,11 +36,14 @@
  #include "third_party/lua/lgc.h"
  #include "third_party/lua/lobject.h"
  #include "third_party/lua/lopcodes.h"
@@ -950,73 +952,7 @@
  
  
  /*
-@@ -1041,18 +1034,18 @@
- */
- #define op_order(L,opi,opn,other) {  \
-   StkId ra = RA(i); \
--  int cond;  \
--  TValue *rb = vRB(i);  \
--  if (ttisinteger(s2v(ra)) && ttisinteger(rb)) {  \
--    lua_Integer ia = ivalue(s2v(ra));  \
--    lua_Integer ib = ivalue(rb);  \
--    cond = opi(ia, ib);  \
--  }  \
--  else if (ttisnumber(s2v(ra)) && ttisnumber(rb))  \
--    cond = opn(s2v(ra), rb);  \
--  else  \
--    Protect(cond = other(L, s2v(ra), rb));  \
--  docondjump(); }
-+        int cond;  \
-+        TValue *rb = vRB(i);  \
-+        if (ttisinteger(s2v(ra)) && ttisinteger(rb)) {  \
-+          lua_Integer ia = ivalue(s2v(ra));  \
-+          lua_Integer ib = ivalue(rb);  \
-+          cond = opi(ia, ib);  \
-+        }  \
-+        else if (ttisnumber(s2v(ra)) && ttisnumber(rb))  \
-+          cond = opn(s2v(ra), rb);  \
-+        else  \
-+          Protect(cond = other(L, s2v(ra), rb));  \
-+        docondjump(); }
- 
- 
- /*
-@@ -1061,20 +1054,20 @@
- */
- #define op_orderI(L,opi,opf,inv,tm) {  \
-   StkId ra = RA(i); \
--  int cond;  \
--  int im = GETARG_sB(i);  \
--  if (ttisinteger(s2v(ra)))  \
--    cond = opi(ivalue(s2v(ra)), im);  \
--  else if (ttisfloat(s2v(ra))) {  \
--    lua_Number fa = fltvalue(s2v(ra));  \
--    lua_Number fim = cast_num(im);  \
--    cond = opf(fa, fim);  \
--  }  \
--  else {  \
--    int isf = GETARG_C(i);  \
--    Protect(cond = luaT_callorderiTM(L, s2v(ra), im, inv, isf, tm));  \
--  }  \
--  docondjump(); }
-+        int cond;  \
-+        int im = GETARG_sB(i);  \
-+        if (ttisinteger(s2v(ra)))  \
-+          cond = opi(ivalue(s2v(ra)), im);  \
-+        else if (ttisfloat(s2v(ra))) {  \
-+          lua_Number fa = fltvalue(s2v(ra));  \
-+          lua_Number fim = cast_num(im);  \
-+          cond = opf(fa, fim);  \
-+        }  \
-+        else {  \
-+          int isf = GETARG_C(i);  \
-+          Protect(cond = luaT_callorderiTM(L, s2v(ra), im, inv, isf, tm));  \
-+        }  \
-+        docondjump(); }
- 
- /* }================================================================== */
- 
-@@ -1184,7 +1177,7 @@
+@@ -1229,7 +1222,7 @@
    const Instruction *pc;
    int trap;
  #if LUA_USE_JUMPTABLE
@@ -1025,6 +961,15 @@
  #endif
   startfunc:
    trap = L->hookmask;
+@@ -1246,7 +1239,7 @@
+     vmfetch();
+     #if 0
+     { /* low-level line tracing for debugging Lua */
+-      #include "lopnames.h"
++      #include "third_party/lua/lopnames.inc"
+       int pcrel = pcRel(pc, cl->p);
+       printf("line: %d; %s (%d)\n", luaG_getfuncline(cl->p, pcrel),
+              opnames[GET_OPCODE(i)], pcrel);
 --- a/third_party/lua/lvm.h
 +++ b/third_party/lua/lvm.h
 @@ -1,7 +1,6 @@
@@ -1037,7 +982,7 @@
  #include "third_party/lua/ltm.h"
 --- a/third_party/lua/lzio.c
 +++ b/third_party/lua/lzio.c
-@@ -28,17 +28,14 @@
+@@ -28,18 +28,15 @@
  #define lzio_c
  #define LUA_CORE
  
@@ -1049,6 +994,7 @@
 -#include "third_party/lua/lua.h"
 -
 +#include "libc/str/str.h"
+ #include "third_party/lua/lapi.h"
  #include "third_party/lua/llimits.h"
  #include "third_party/lua/lmem.h"
 +#include "third_party/lua/lprefix.h"
