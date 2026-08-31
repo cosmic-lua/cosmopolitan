@@ -799,6 +799,7 @@ function lsqlite3.Database:db_filename(name) end
 function lsqlite3.Database:deserialize(s) end
 
 ---@return lsqlite3.ResultCode error the numerical result code (or extended result code) for the most recent failed call associated with database db.
+--- See https://lua.sqlite.org/home/doc/tip/doc/lsqlite3.wiki#numerical_error_and_result_codes for details.
 ---@nodiscard
 function lsqlite3.Database:errcode() end
 
