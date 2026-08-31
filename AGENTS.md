@@ -71,6 +71,18 @@ evidence a board item may link, never duplicate.
 - correctness gates before any PR: `make -j$(nproc) o//tool/lua/test`.
   Changes outside the Lua surface should also build and run the tests
   of the subsystem they touch (`make o//test/libc/...`).
+- a binding's contract shape follows one rule: an argument-shape
+  error — a degenerate input no correct program passes (zero or
+  all-nil components, an invalid clock or fd constant, a malformed
+  flags value) — raises through `luaL_argerror`/`luaL_error` (PR
+  #276, PR #277). A failure a correct caller can meet at runtime —
+  bad input DATA or a changed ENVIRONMENT (ENOENT, EINTR, a truncated
+  buffer) — returns the fallible tuple `value|nil, err:string,
+  errno?`, the error always in slot 2 and nothing else sharing a slot
+  (issue #151). When slot 1 of a declared return admits nil, slot 2
+  is the error — an annotation that deviates is a bug, and a contract
+  change to conform is made deliberately (`definitions.lua` same
+  commit, conformance probe same PR), never inside another change.
 
 ## Releases and the cosmic pin
 
