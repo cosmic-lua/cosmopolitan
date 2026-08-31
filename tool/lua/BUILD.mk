@@ -251,6 +251,14 @@ o/$(MODE)/tool/lua/test_fetchstream_edge.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua
 	$< tool/lua/test_fetchstream_edge.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_encodejson_default.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_encodejson_default.lua
+	$< tool/lua/test_encodejson_default.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_encodelua_default.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_encodelua_default.lua
+	$< tool/lua/test_encodelua_default.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -277,6 +285,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_unix_daemon.ok				\
 	o/$(MODE)/tool/lua/test_lua_extensions.ok			\
 	o/$(MODE)/tool/lua/test_fetchstream_edge.ok			\
+	o/$(MODE)/tool/lua/test_encodejson_default.ok			\
+	o/$(MODE)/tool/lua/test_encodelua_default.ok			\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
