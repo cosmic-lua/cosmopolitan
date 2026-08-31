@@ -307,6 +307,18 @@ o/$(MODE)/tool/lua/test_lfuncs_values.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/te
 	$< tool/lua/test_lfuncs_values.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_path_values.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_path_values.lua
+	$< tool/lua/test_path_values.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_unix_readlink.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_readlink.lua
+	$< tool/lua/test_unix_readlink.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_slurp_ranges.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_slurp_ranges.lua
+	$< tool/lua/test_slurp_ranges.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -337,6 +349,9 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_encodelua_default.ok			\
 	o/$(MODE)/tool/lua/test_base64_vectors.ok			\
 	o/$(MODE)/tool/lua/test_lfuncs_values.ok			\
+	o/$(MODE)/tool/lua/test_path_values.ok				\
+	o/$(MODE)/tool/lua/test_unix_readlink.ok			\
+	o/$(MODE)/tool/lua/test_slurp_ranges.ok				\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
