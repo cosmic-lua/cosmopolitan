@@ -43,6 +43,11 @@
 // before start(). snapshot() returns a fresh table each call;
 // collection keeps running. The hook allocates outside the Lua heap
 // and never raises.
+//
+// The hook can also carry one optional instruction budget
+// (budget(n)), so a caller that needs to bound a chunk's VM
+// instructions does not have to take the debug-hook slot away from
+// the collector to do it.
 
 #define COV_BUCKETS 512      // chunk-name hash buckets (power of two)
 #define COV_MAX_LINE 1048576 // ignore absurd line numbers, don't alloc for them
@@ -59,6 +64,7 @@ static struct {
   const char *last_src;      // source pointer the hook saw last
   struct CovRec *last_rec;   // its record: consecutive lines in one
                              // chunk cost a pointer compare, not a walk
+  long budget;               // instructions left on the armed count hook; 0 = none
   struct CovRec *buckets[COV_BUCKETS];
 } g_cov;
 
@@ -92,6 +98,14 @@ static void CovHook(lua_State *L, lua_Debug *ar) {
   int line;
   const char *src;
   struct CovRec *r;
+  if (ar->event == LUA_HOOKCOUNT) {
+    // Re-arm line-only first: the budget is one-shot, so it must not
+    // fire again while lua_error unwinds through this same hook.
+    lua_sethook(L, CovHook, LUA_MASKLINE, 0);
+    g_cov.budget = 0;
+    lua_pushliteral(L, "cosmo.cov: instruction budget exceeded");
+    lua_error(L);
+  }
   if (ar->event != LUA_HOOKLINE) return;
   line = ar->currentline;
   if (line <= 0 || line > COV_MAX_LINE) return;
@@ -119,6 +133,27 @@ static void CovHook(lua_State *L, lua_Debug *ar) {
     r->cap = ncap;
   }
   r->counts[line]++;
+}
+
+// cov.budget(n) -> boolean
+//
+// Arms an instruction budget on the calling thread's collection: the
+// hook raises "cosmo.cov: instruction budget exceeded" once n VM
+// instructions have executed. n nil or 0 clears it. Returns false,
+// changing nothing, when this thread's hook is not the collector's —
+// the caller then falls back to its own debug.sethook budget.
+static int LuaCovBudget(lua_State *L) {
+  lua_Integer n = luaL_optinteger(L, 1, 0);
+  if (lua_gethook(L) != CovHook) {
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  g_cov.budget = (long)n;
+  // Re-arming is what restarts Lua's internal instruction counter, so
+  // each call gives a fresh budget rather than continuing the last one.
+  lua_sethook(L, CovHook, LUA_MASKLINE | (n > 0 ? LUA_MASKCOUNT : 0), (int)n);
+  lua_pushboolean(L, 1);
+  return 1;
 }
 
 // cov.start()
@@ -218,6 +253,7 @@ static int LuaCovReset(lua_State *L) {
 // clang-format off
 static const luaL_Reg kLuaCov[] = {
     {"arm", LuaCovArm},
+    {"budget", LuaCovBudget},
     {"reset", LuaCovReset},
     {"running", LuaCovRunning},
     {"snapshot", LuaCovSnapshot},

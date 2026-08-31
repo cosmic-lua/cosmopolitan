@@ -146,5 +146,38 @@ do
   end
 end
 
+-- budget() arms and fires: the hook raises once the budget is spent,
+-- and collection survives it (one-shot, not a stop())
+do
+  cov.reset()
+  cov.start()
+  cov.budget(10000)
+  local ok, err = pcall(function()
+    while true do end
+  end)
+  assert(not ok, "budget did not stop the runaway loop")
+  assert(err == "cosmo.cov: instruction budget exceeded",
+    "unexpected error: " .. tostring(err))
+  assert(cov.running(), "budget firing should not have disarmed the collector")
+  local run = load_chunk("local e = 5\n", "@covtest_budget.lua")
+  run()
+  cov.stop()
+  local snap = cov.snapshot()
+  local hits = snap["@covtest_budget.lua"]
+  assert(hits and hits[1] == 1, "collection did not survive a fired budget")
+end
+
+-- budget() refuses a foreign slot, leaving it alone
+do
+  cov.reset()
+  local foreign = function() end
+  debug.sethook(foreign, "l")
+  local armed = cov.budget(10000)
+  assert(armed == false, "budget() should refuse a foreign hook")
+  local hook = debug.gethook()
+  assert(hook == foreign, "budget() disturbed the foreign hook")
+  debug.sethook()
+end
+
 cov.reset()
 print("test_cov: PASS")
