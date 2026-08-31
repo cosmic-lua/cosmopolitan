@@ -10,8 +10,17 @@
 #   The upstream two-file amalgamation is compiled twice: sqlite3.o
 #   with the library define set below (linked into libsqlite3.a for
 #   the lua bindings et al) and sqlite3.shell.o with the shell's
-#   larger feature set (fts3/4/5, rtree, geopoly, zlib) for the
-#   sqlite3 command line shell.
+#   larger feature set (fts3/4, rtree, geopoly, zlib) for the sqlite3
+#   command line shell.
+#
+#   FTS5 is the one shell-only feature promoted to the library build:
+#   measured standalone (o//tool/lua/lua, default mode), it costs
+#   ~208KiB and gives every lua binding a full-text index over its own
+#   data with two statements. The others stay shell-only because
+#   nothing in the library surface needs them yet and their audience
+#   is narrower: RTREE ~44KiB, RTREE+GEOPOLY ~64KiB, DBSTAT_VTAB
+#   ~8KiB, FTS4 (which pulls in FTS3) ~216KiB for a pair FTS5
+#   supersedes. Revisit if a concrete need for one shows up.
 #
 #   Please be warned that locks currently do nothing on Windows since
 #   figuring out how to polyfill them correctly is a work in progress
@@ -135,6 +144,7 @@ THIRD_PARTY_SQLITE3_FLAGS =					\
 	-DSQLITE_ENABLE_PREUPDATE_HOOK				\
 	-DSQLITE_ENABLE_SESSION					\
 	-DSQLITE_ENABLE_BATCH_ATOMIC_WRITE			\
+	-DSQLITE_ENABLE_FTS5					\
 
 ifeq ($(MODE),dbg)
 THIRD_PARTY_SQLITE3_CPPFLAGS_DEBUG = -DSQLITE_DEBUG
@@ -164,7 +174,6 @@ $(THIRD_PARTY_SQLITE3_SHELL_OBJS): private			\
 			-DSQLITE_ENABLE_DESERIALIZE		\
 			-DSQLITE_ENABLE_FTS3			\
 			-DSQLITE_ENABLE_FTS4			\
-			-DSQLITE_ENABLE_FTS5			\
 			-DSQLITE_ENABLE_RTREE			\
 			-DSQLITE_ENABLE_GEOPOLY			\
 			-DHAVE_LINENOISE
