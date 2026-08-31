@@ -18,28 +18,14 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/mem/mem.h"
 #include "net/http/escape.h"
-#include "net/http/http.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
+#include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
 
-int LuaPushHeaders(lua_State *L, struct HttpMessage *m, const char *b) {
-  char *s;
-  size_t i, h;
-  struct HttpHeader *x;
-  lua_newtable(L);
-  for (h = 0; h < kHttpHeadersMax; ++h) {
-    if (m->headers[h].a) {
-      LuaPushHeader(L, m, b, h);
-      lua_setfield(L, -2, GetHttpHeaderName(h));
-    }
-  }
-  for (i = 0; i < m->xheaders.n; ++i) {
-    x = m->xheaders.p + i;
-    if ((h = GetHttpHeader(b + x->v.a, x->v.b - x->v.a)) == -1) {
-      LuaPushLatin1(L, b + x->v.a, x->v.b - x->v.a);
-      lua_setfield(L, -2, (s = DecodeLatin1(b + x->k.a, x->k.b - x->k.a, 0)));
-      free(s);
-    }
-  }
-  return 1;
+void LuaPushLatin1(lua_State *L, const char *s, size_t n) {
+  char *t;
+  size_t m;
+  t = DecodeLatin1(s, n, &m);
+  lua_pushlstring(L, t, m);
+  free(t);
 }

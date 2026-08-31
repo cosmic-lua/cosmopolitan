@@ -16,53 +16,19 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/log/rop.internal.h"
-#include "libc/stdio/append.h"
-#include "third_party/lua/cosmo.h"
-#include "third_party/lua/lua.h"
+#include "libc/thread/thread.h"
+#include "third_party/lua/cosmo/lrepl.h"
 
-bool LuaHasMultipleItems(lua_State *L) {
-  int i;
-  lua_pushnil(L);
-  for (i = 0; lua_next(L, -2); ++i) {
-    if (i > 0) {
-      lua_pop(L, 2);
-      return true;
-    }
-    lua_pop(L, 1);
-  }
-  return false;
+static pthread_mutex_t lua_repl_lock_obj = PTHREAD_MUTEX_INITIALIZER;
+
+void lua_repl_wock(void) {
+  lua_repl_lock_obj = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
 }
 
-int SerializeObjectIndent(char **buf, struct Serializer *z, int depth) {
-  int i;
-  RETURN_ON_ERROR(appendw(buf, '\n'));
-  for (i = 0; i < depth; ++i) {
-    RETURN_ON_ERROR(appends(buf, z->conf.indent));
-  }
-  return 0;
-OnError:
-  return -1;
+void lua_repl_lock(void) {
+  pthread_mutex_lock(&lua_repl_lock_obj);
 }
 
-int SerializeObjectStart(char **buf, struct Serializer *z, int depth,
-                         bool multi) {
-  RETURN_ON_ERROR(appendw(buf, '{'));
-  if (multi) {
-    RETURN_ON_ERROR(SerializeObjectIndent(buf, z, depth + 1));
-  }
-  return 0;
-OnError:
-  return -1;
-}
-
-int SerializeObjectEnd(char **buf, struct Serializer *z, int depth,
-                       bool multi) {
-  if (multi) {
-    RETURN_ON_ERROR(SerializeObjectIndent(buf, z, depth));
-  }
-  RETURN_ON_ERROR(appendw(buf, '}'));
-  return 0;
-OnError:
-  return -1;
+void lua_repl_unlock(void) {
+  pthread_mutex_unlock(&lua_repl_lock_obj);
 }

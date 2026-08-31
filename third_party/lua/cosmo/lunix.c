@@ -16,7 +16,7 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "third_party/lua/lunix.h"
+#include "third_party/lua/cosmo/lunix.h"
 #include "libc/assert.h"
 #include "libc/atomic.h"
 #include "libc/calls/calls.h"
@@ -116,7 +116,7 @@
 #include "libc/thread/thread.h"
 #include "libc/time.h"
 #include "libc/x/x.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lgc.h"
 #include "third_party/lua/lua.h"

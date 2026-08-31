@@ -17,6 +17,15 @@ PROVENANCE
 
   luac.c needed to be sourced from:
   https://www.lua.org/ftp/lua-5.4.6.tar.gz
+  sha256 7d5ea1b9cb6aa0b59ca3dde1c6adcb57ef83a1ba8e5432c0ecd06bf439b3ad88
+
+  third_party/lua/update.sh reproduces every stock file in this directory
+  mechanically from that tarball -- plus ltests.c/ltests.h, which lua.org's
+  release archives don't carry, fetched verbatim from the matching tag in
+  the upstream git mirror -- and then applies the numbered patches under
+  third_party/lua/patches/. Running it pinned at 5.4.6 reproduces this tree
+  byte for byte; that's the thing to check before trusting it for a real
+  version bump. See its header comment for the exact mechanism and usage.
 
 LOCAL MODIFICATIONS
 

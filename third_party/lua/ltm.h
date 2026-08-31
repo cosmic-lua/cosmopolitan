@@ -4,7 +4,7 @@
 #include "third_party/lua/lobject.h"
 #include "third_party/lua/lstate.h"
 #include "third_party/lua/luaconf.h"
-#include "third_party/lua/tms.h"
+#include "third_party/lua/cosmo/tms.h"
 
 
 /*

@@ -20,7 +20,7 @@
 #include "libc/str/str.h"
 #include "libc/x/x.h"
 #include "net/http/url.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
 

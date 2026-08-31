@@ -8,7 +8,7 @@ typedef struct CallInfo CallInfo;
 #include "third_party/lua/lobject.h"
 #include "third_party/lua/lua.h"
 #include "third_party/lua/lzio.h"
-#include "third_party/lua/tms.h"
+#include "third_party/lua/cosmo/tms.h"
 
 
 /*

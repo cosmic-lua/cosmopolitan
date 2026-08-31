@@ -17,20 +17,16 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/mem/mem.h"
-#include "net/http/http.h"
-#include "third_party/lua/cosmo.h"
-#include "third_party/lua/lauxlib.h"
+#include "libc/stdio/stdio.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lua.h"
 
-int LuaPushHeader(lua_State *L, struct HttpMessage *m, const char *b, int h) {
-  char *val;
-  size_t vallen;
-  if (!kHttpRepeatable[h]) {
-    LuaPushLatin1(L, b + m->headers[h].a, m->headers[h].b - m->headers[h].a);
-  } else {
-    val = FoldHeader(m, b, h, &vallen);
-    LuaPushLatin1(L, val, vallen);
-    free(val);
-  }
-  return 1;
+/**
+ * Development tool for quickly viewing the Lua stack.
+ */
+void LuaPrintStack(lua_State *L) {
+  char *s = LuaFormatStack(L);
+  fputs(s, stderr);
+  fputc('\n', stderr);
+  free(s);
 }

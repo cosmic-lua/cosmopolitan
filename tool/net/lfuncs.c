@@ -64,11 +64,11 @@
 #include "net/http/http.h"
 #include "net/http/ip.h"
 #include "net/http/url.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
 #include "third_party/lua/luaconf.h"
-#include "third_party/lua/lunix.h"
+#include "third_party/lua/cosmo/lunix.h"
 #ifdef USE_MBEDTLS3
 #include "libc/str/blake2.h"
 #include "third_party/mbedtls3/include/mbedtls/md.h"

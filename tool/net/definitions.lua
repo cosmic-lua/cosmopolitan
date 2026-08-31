@@ -4372,7 +4372,7 @@ unix = {
 
 --- The numeric errno value carried as the third return of every
 --- fallible unix.* call (see LuaUnixSysretErrno in
---- third_party/lua/lunix.c): always one of the exported E* constants
+--- third_party/lua/cosmo/lunix.c): always one of the exported E* constants
 --- (unix.EINTR, unix.ENOENT, ...). An alias rather than a checked
 --- enum: Teal enums are string-only.
 ---@alias unix.Errno integer

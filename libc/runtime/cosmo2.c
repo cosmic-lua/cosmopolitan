@@ -39,7 +39,7 @@
 #include "libc/sysv/pib.h"
 #include "libc/thread/thread.h"
 #include "libc/thread/tls.h"
-#include "third_party/lua/lunix.h"
+#include "third_party/lua/cosmo/lunix.h"
 #ifndef __x86_64__
 
 /**

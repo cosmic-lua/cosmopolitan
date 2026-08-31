@@ -446,7 +446,7 @@ local CONST_MODULES = {
 -- absent at runtime. A RATCHET: an entry may only be removed. Anything else
 -- that goes missing is a binding that silently vanished, and fails below.
 local CONST_ABSENT = {
-  ["unix.WCONTINUED"] = "#ifdef WCONTINUED in third_party/lua/lunix.c",
+  ["unix.WCONTINUED"] = "#ifdef WCONTINUED in third_party/lua/cosmo/lunix.c",
 }
 
 local nconst, nabsent = 0, 0
