@@ -299,6 +299,14 @@ o/$(MODE)/tool/lua/test_encodelua_default.ok: o/$(MODE)/tool/lua/lua.dbg tool/lu
 	$< tool/lua/test_encodelua_default.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_base64_vectors.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_base64_vectors.lua
+	$< tool/lua/test_base64_vectors.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_lfuncs_values.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_lfuncs_values.lua
+	$< tool/lua/test_lfuncs_values.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -327,6 +335,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_fetchstream_edge.ok			\
 	o/$(MODE)/tool/lua/test_encodejson_default.ok			\
 	o/$(MODE)/tool/lua/test_encodelua_default.ok			\
+	o/$(MODE)/tool/lua/test_base64_vectors.ok			\
+	o/$(MODE)/tool/lua/test_lfuncs_values.ok			\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
