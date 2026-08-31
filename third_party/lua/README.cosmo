@@ -9,21 +9,21 @@ PROVENANCE
 
   https://github.com/lua/lua/
 
-  commit 6443185167c77adcc8552a3fee7edab7895db1a9
+  commit 2f8fe031c75d925e01aedc49507e247657d751fb
   Author: Roberto Ierusalimschy <roberto@inf.puc-rio.br>
-  Date:   May 2, 2023 at 3:44 PM EDT
+  Date:   July 24, 2026 at 11:39 AM
 
-      New release number (5.4.6)
+      New release number (5.4.9)
 
   luac.c needed to be sourced from:
-  https://www.lua.org/ftp/lua-5.4.6.tar.gz
-  sha256 7d5ea1b9cb6aa0b59ca3dde1c6adcb57ef83a1ba8e5432c0ecd06bf439b3ad88
+  https://www.lua.org/ftp/lua-5.4.9.tar.gz
+  sha256 2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6
 
   third_party/lua/update.sh reproduces every stock file in this directory
   mechanically from that tarball -- plus ltests.c/ltests.h, which lua.org's
   release archives don't carry, fetched verbatim from the matching tag in
   the upstream git mirror -- and then applies the numbered patches under
-  third_party/lua/patches/. Running it pinned at 5.4.6 reproduces this tree
+  third_party/lua/patches/. Running it pinned at 5.4.9 reproduces this tree
   byte for byte; that's the thing to check before trusting it for a real
   version bump. See its header comment for the exact mechanism and usage.
 

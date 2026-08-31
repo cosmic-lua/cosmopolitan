@@ -148,7 +148,7 @@
  
  
  /* Maximum number of registers in a Lua function (must fit in 8 bits) */
-@@ -625,7 +619,7 @@
+@@ -626,7 +620,7 @@
    lua_Integer ik;
    setfltvalue(&o, r);
    if (!luaV_flttointeger(r, &ik, F2Ieq))  /* not an integral value? */
@@ -219,7 +219,7 @@
  #include "third_party/lua/lapi.h"
  #include "third_party/lua/lcode.h"
  #include "third_party/lua/ldebug.h"
-@@ -44,19 +36,21 @@
+@@ -44,11 +36,14 @@
  #include "third_party/lua/lfunc.h"
  #include "third_party/lua/lobject.h"
  #include "third_party/lua/lopcodes.h"
@@ -230,19 +230,19 @@
  #include "third_party/lua/ltm.h"
 +#include "third_party/lua/lua.h"
  #include "third_party/lua/lvm.h"
--
 +__static_yoink("lua_notice");
  
  
- #define noLuaClosure(f)		((f) == NULL || (f)->c.tt == LUA_VCCL)
+ 
+@@ -56,7 +51,7 @@
  
  
  static const char *funcnamefromcall (lua_State *L, CallInfo *ci,
 -                                                   const char **name);
 +                                    const char **name);
  
- 
- static int currentpc (CallInfo *ci) {
+ static const char strlocal[] = "local";
+ static const char strupval[] = "upvalue";
 --- a/third_party/lua/ldo.h
 +++ b/third_party/lua/ldo.h
 @@ -1,8 +1,6 @@
@@ -651,7 +651,7 @@
  /*
  ** Compute an initial seed with some level of randomness.
  ** Rely on Address Space Layout Randomization (if present) and
-@@ -304,6 +298,16 @@
+@@ -311,6 +305,16 @@
  }
  
  
@@ -686,7 +686,7 @@
 -#include "third_party/lua/ltm.h"
 +#include "third_party/lua/lua.h"
  #include "third_party/lua/lzio.h"
-+#include "third_party/lua/tms.h"
++#include "third_party/lua/cosmo/tms.h"
  
  
  /*
@@ -950,7 +950,7 @@
  
  
  /*
-@@ -1028,18 +1021,18 @@
+@@ -1041,18 +1034,18 @@
  */
  #define op_order(L,opi,opn,other) {  \
    StkId ra = RA(i); \
@@ -981,7 +981,7 @@
  
  
  /*
-@@ -1048,20 +1041,20 @@
+@@ -1061,20 +1054,20 @@
  */
  #define op_orderI(L,opi,opf,inv,tm) {  \
    StkId ra = RA(i); \
@@ -1016,7 +1016,7 @@
  
  /* }================================================================== */
  
-@@ -1171,7 +1164,7 @@
+@@ -1184,7 +1177,7 @@
    const Instruction *pc;
    int trap;
  #if LUA_USE_JUMPTABLE
