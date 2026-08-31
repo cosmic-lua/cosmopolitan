@@ -10,7 +10,7 @@
 --
 -- Covered modules (see MODULES below):
 --   * cosmo      tool/lua/lcosmo.c            kCosmoFuncs[]
---   * unix       third_party/lua/lunix.c      kLuaUnix[] + constants + methods
+--   * unix       third_party/lua/cosmo/lunix.c      kLuaUnix[] + constants + methods
 --   * path       tool/net/lpath.c             kLuaPath[]
 --   * re         tool/net/lre.c               kLuaRe[] + constants + methods
 --   * argon2     tool/net/largon2.c           largon2[]
@@ -18,7 +18,7 @@
 --   * getopt     tool/net/lgetopt.c           kLuaGetopt[]
 --   * zip        tool/net/lzip.c              kLuaZip[] + Reader/Writer/Appender
 --   * cov        tool/net/lcov.c              kLuaCov[]
---   * repl       third_party/lua/lreplmod.c   kReplFuncs[]
+--   * repl       third_party/lua/cosmo/lreplmod.c   kReplFuncs[]
 --
 -- unix constants are registered two ways, both covered here:
 --   * literal LuaSetIntField(L, "NAME", ...) calls, and
@@ -187,7 +187,7 @@ end
 
 -- ===== per-module registered surfaces =====
 
-local C_unix = slurp("third_party/lua/lunix.c")
+local C_unix = slurp("third_party/lua/cosmo/lunix.c")
 local C_path = slurp("tool/net/lpath.c")
 local C_re = slurp("tool/net/lre.c")
 local C_argon2 = slurp("tool/net/largon2.c")
@@ -200,7 +200,7 @@ local C_sqlite = (slurp("tool/net/lsqlite3.c")
 local C_getopt = slurp("tool/net/lgetopt.c")
 local C_zip = slurp("tool/net/lzip.c")
 local C_cov = slurp("tool/net/lcov.c")
-local C_repl = slurp("third_party/lua/lreplmod.c")
+local C_repl = slurp("third_party/lua/cosmo/lreplmod.c")
 local C_cosmo = slurp("tool/lua/lcosmo.c")
 -- kCosmoFuncs[] registers names whose implementations live here, so the
 -- return-arity scan below needs this source to resolve them.

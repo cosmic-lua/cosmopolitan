@@ -17,16 +17,44 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/mem/mem.h"
-#include "libc/stdio/stdio.h"
-#include "third_party/lua/cosmo.h"
+#include "net/http/url.h"
+#include "third_party/lua/cosmo/cosmo.h"
+#include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
 
-/**
- * Development tool for quickly viewing the Lua stack.
- */
-void LuaPrintStack(lua_State *L) {
-  char *s = LuaFormatStack(L);
-  fputs(s, stderr);
-  fputc('\n', stderr);
-  free(s);
+static void LuaPushUrlView(lua_State *L, struct UrlView *v) {
+  if (v->p) {
+    lua_pushlstring(L, v->p, v->n);
+  } else {
+    lua_pushnil(L);
+  }
+}
+
+static void LuaSetUrlView(lua_State *L, struct UrlView *v, const char *k) {
+  LuaPushUrlView(L, v);
+  lua_setfield(L, -2, k);
+}
+
+int LuaParseUrl(lua_State *L) {
+  int f;
+  void *m;
+  size_t n;
+  struct Url h;
+  const char *p;
+  p = luaL_checklstring(L, 1, &n);
+  f = luaL_optinteger(L, 2, 0);
+  m = ParseUrl(p, n, &h, f);
+  lua_newtable(L);
+  LuaSetUrlView(L, &h.scheme, "scheme");
+  LuaSetUrlView(L, &h.user, "user");
+  LuaSetUrlView(L, &h.pass, "pass");
+  LuaSetUrlView(L, &h.host, "host");
+  LuaSetUrlView(L, &h.port, "port");
+  LuaSetUrlView(L, &h.path, "path");
+  LuaSetUrlView(L, &h.fragment, "fragment");
+  LuaPushUrlParams(L, &h.params);
+  lua_setfield(L, -2, "params");
+  free(h.params.p);
+  free(m);
+  return 1;
 }

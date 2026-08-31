@@ -30,11 +30,11 @@
 #include "libc/sysv/consts/auxv.h"
 #include "libc/x/x.h"
 #include "third_party/double-conversion/wrapper.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lctype.h"
 #include "third_party/lua/lua.h"
-#include "third_party/lua/visitor.h"
+#include "third_party/lua/cosmo/visitor.h"
 
 static int Serialize(lua_State *, char **, int, struct Serializer *, int);
 

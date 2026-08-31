@@ -16,19 +16,21 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/thread/thread.h"
-#include "third_party/lua/lrepl.h"
+#include "libc/mem/mem.h"
+#include "net/http/http.h"
+#include "third_party/lua/cosmo/cosmo.h"
+#include "third_party/lua/lauxlib.h"
+#include "third_party/lua/lua.h"
 
-static pthread_mutex_t lua_repl_lock_obj = PTHREAD_MUTEX_INITIALIZER;
-
-void lua_repl_wock(void) {
-  lua_repl_lock_obj = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
-}
-
-void lua_repl_lock(void) {
-  pthread_mutex_lock(&lua_repl_lock_obj);
-}
-
-void lua_repl_unlock(void) {
-  pthread_mutex_unlock(&lua_repl_lock_obj);
+int LuaPushHeader(lua_State *L, struct HttpMessage *m, const char *b, int h) {
+  char *val;
+  size_t vallen;
+  if (!kHttpRepeatable[h]) {
+    LuaPushLatin1(L, b + m->headers[h].a, m->headers[h].b - m->headers[h].a);
+  } else {
+    val = FoldHeader(m, b, h, &vallen);
+    LuaPushLatin1(L, val, vallen);
+    free(val);
+  }
+  return 1;
 }

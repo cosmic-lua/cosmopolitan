@@ -26,7 +26,7 @@
 │                                                                              │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #define lua_c
-#include "third_party/lua/lrepl.h"
+#include "third_party/lua/cosmo/lrepl.h"
 #include "libc/calls/calls.h"
 #include "libc/calls/struct/sigaction.h"
 #include "libc/errno.h"
@@ -45,7 +45,7 @@
 #include "libc/sysv/consts/sig.h"
 #include "libc/thread/thread.h"
 #include "third_party/linenoise/linenoise.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lprefix.h"
 #include "third_party/lua/lua.h"

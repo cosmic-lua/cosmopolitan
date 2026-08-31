@@ -16,44 +16,22 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/assert.h"
-#include "libc/mem/mem.h"
-#include "third_party/lua/visitor.h"
+#include "net/http/url.h"
+#include "third_party/lua/cosmo/cosmo.h"
+#include "third_party/lua/lauxlib.h"
+#include "third_party/lua/lua.h"
 
-static inline bool IsVisited(struct LuaVisited *v, const void *p) {
-  int i;
-  for (i = 0; i < v->i; ++i) {
-    if (v->p[i] == p) {
-      return true;
+void LuaPushUrlParams(lua_State *L, struct UrlParams *h) {
+  size_t i;
+  lua_newtable(L);
+  for (i = 0; i < h->n; ++i) {
+    lua_newtable(L);
+    lua_pushlstring(L, h->p[i].key.p, h->p[i].key.n);
+    lua_seti(L, -2, 1);
+    if (h->p[i].val.p) {
+      lua_pushlstring(L, h->p[i].val.p, h->p[i].val.n);
+      lua_seti(L, -2, 2);
     }
+    lua_seti(L, -2, i + 1);
   }
-  return false;
-}
-
-static inline int Visit(struct LuaVisited *v, const void *p) {
-  int n2;
-  const void **p2;
-  if (v->i == v->n) {
-    n2 = v->n;
-    if (!n2) n2 = 2;
-    n2 += n2 >> 1;
-    if ((p2 = realloc(v->p, n2 * sizeof(*p2)))) {
-      v->p = p2;
-      v->n = n2;
-    } else {
-      return -1;
-    }
-  }
-  v->p[v->i++] = p;
-  return 0;
-}
-
-int LuaPushVisit(struct LuaVisited *v, const void *p) {
-  if (IsVisited(v, p)) return 1;
-  return Visit(v, p);
-}
-
-void LuaPopVisit(struct LuaVisited *v) {
-  assert(v->i > 0);
-  --v->i;
 }

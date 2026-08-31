@@ -25,9 +25,9 @@
 │  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                      │
 │                                                                              │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "third_party/lua/lreplmod.h"
+#include "third_party/lua/cosmo/lreplmod.h"
 #include "third_party/lua/lauxlib.h"
-#include "third_party/lua/lrepl.h"
+#include "third_party/lua/cosmo/lrepl.h"
 
 static int LuaRepl(lua_State *L) {
   lua_doREPL(L);

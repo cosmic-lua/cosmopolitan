@@ -40,14 +40,14 @@
 #include "libc/sysv/consts/exit.h"
 #include "libc/x/x.h"
 #include "third_party/linenoise/linenoise.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lprefix.h"
-#include "third_party/lua/lrepl.h"
+#include "third_party/lua/cosmo/lrepl.h"
 #include "third_party/lua/lualib.h"
-#include "third_party/lua/lunix.h"
+#include "third_party/lua/cosmo/lunix.h"
 #ifdef LUA_COSMO
-#include "third_party/lua/lcosmo.h"
+#include "third_party/lua/cosmo/lcosmo.h"
 /* Forward declarations for cosmo submodules */
 int LuaPath(lua_State *);
 int LuaRe(lua_State *);

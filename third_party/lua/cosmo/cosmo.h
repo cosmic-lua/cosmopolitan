@@ -3,7 +3,7 @@
 #include "net/http/http.h"
 #include "net/http/url.h"
 #include "third_party/lua/lauxlib.h"
-#include "third_party/lua/visitor.h"
+#include "third_party/lua/cosmo/visitor.h"
 COSMOPOLITAN_C_START_
 
 struct EncoderConfig {

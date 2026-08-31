@@ -16,22 +16,53 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "net/http/url.h"
-#include "third_party/lua/cosmo.h"
-#include "third_party/lua/lauxlib.h"
+#include "libc/log/rop.internal.h"
+#include "libc/stdio/append.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lua.h"
 
-void LuaPushUrlParams(lua_State *L, struct UrlParams *h) {
-  size_t i;
-  lua_newtable(L);
-  for (i = 0; i < h->n; ++i) {
-    lua_newtable(L);
-    lua_pushlstring(L, h->p[i].key.p, h->p[i].key.n);
-    lua_seti(L, -2, 1);
-    if (h->p[i].val.p) {
-      lua_pushlstring(L, h->p[i].val.p, h->p[i].val.n);
-      lua_seti(L, -2, 2);
+bool LuaHasMultipleItems(lua_State *L) {
+  int i;
+  lua_pushnil(L);
+  for (i = 0; lua_next(L, -2); ++i) {
+    if (i > 0) {
+      lua_pop(L, 2);
+      return true;
     }
-    lua_seti(L, -2, i + 1);
+    lua_pop(L, 1);
   }
+  return false;
+}
+
+int SerializeObjectIndent(char **buf, struct Serializer *z, int depth) {
+  int i;
+  RETURN_ON_ERROR(appendw(buf, '\n'));
+  for (i = 0; i < depth; ++i) {
+    RETURN_ON_ERROR(appends(buf, z->conf.indent));
+  }
+  return 0;
+OnError:
+  return -1;
+}
+
+int SerializeObjectStart(char **buf, struct Serializer *z, int depth,
+                         bool multi) {
+  RETURN_ON_ERROR(appendw(buf, '{'));
+  if (multi) {
+    RETURN_ON_ERROR(SerializeObjectIndent(buf, z, depth + 1));
+  }
+  return 0;
+OnError:
+  return -1;
+}
+
+int SerializeObjectEnd(char **buf, struct Serializer *z, int depth,
+                       bool multi) {
+  if (multi) {
+    RETURN_ON_ERROR(SerializeObjectIndent(buf, z, depth));
+  }
+  RETURN_ON_ERROR(appendw(buf, '}'));
+  return 0;
+OnError:
+  return -1;
 }

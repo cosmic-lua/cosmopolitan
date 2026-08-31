@@ -75,7 +75,7 @@ TOOL_LUA_DIRECTDEPS =							\
 TOOL_LUA_DEPS :=							\
 	$(call uniq,$(foreach x,$(TOOL_LUA_DIRECTDEPS),$($(x))))
 
-o/$(MODE)/tool/lua/lua.main.o: third_party/lua/lua.main.c
+o/$(MODE)/tool/lua/lua.main.o: third_party/lua/cosmo/lua.main.c
 	@$(COMPILE) -AOBJECTIFY.c $(OBJECTIFY.c) $(OUTPUT_OPTION) -DLUA_COSMO $<
 
 TOOL_LUA_ASSETS =							\
@@ -207,7 +207,7 @@ o/$(MODE)/tool/lua/test_landlock_abi.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/tes
 	$< tool/lua/test_landlock_abi.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua tool/net/definitions.lua tool/lua/lcosmo.c third_party/lua/lunix.c third_party/lua/lreplmod.c tool/net/lpath.c tool/net/lre.c tool/net/largon2.c tool/net/lsqlite3.c tool/net/lgetopt.c tool/net/lzip.c tool/net/lcov.c libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
+o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua tool/net/definitions.lua tool/lua/lcosmo.c third_party/lua/cosmo/lunix.c third_party/lua/cosmo/lreplmod.c tool/net/lpath.c tool/net/lre.c tool/net/largon2.c tool/net/lsqlite3.c tool/net/lgetopt.c tool/net/lzip.c tool/net/lcov.c libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
 	$< tool/lua/test_definitions_coverage.lua
 	@touch $@
 

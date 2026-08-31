@@ -16,45 +16,24 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/mem/mem.h"
-#include "net/http/url.h"
-#include "third_party/lua/cosmo.h"
+#include "libc/stdio/append.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
-#include "third_party/lua/lua.h"
 
-static void LuaPushUrlView(lua_State *L, struct UrlView *v) {
-  if (v->p) {
-    lua_pushlstring(L, v->p, v->n);
-  } else {
-    lua_pushnil(L);
+__wur char *LuaFormatStack(lua_State *L) {
+  int i, top;
+  char *b = 0;
+  struct EncoderConfig conf = {
+      .maxdepth = 64,
+      .sorted = true,
+      .pretty = false,
+      .indent = "  ",
+  };
+  top = lua_gettop(L);
+  for (i = 1; i <= top; i++) {
+    if (i > 1) appendw(&b, '\n');
+    appendf(&b, "\t%d\t%s\t", i, luaL_typename(L, i));
+    LuaEncodeLuaData(L, &b, i, conf);
   }
-}
-
-static void LuaSetUrlView(lua_State *L, struct UrlView *v, const char *k) {
-  LuaPushUrlView(L, v);
-  lua_setfield(L, -2, k);
-}
-
-int LuaParseUrl(lua_State *L) {
-  int f;
-  void *m;
-  size_t n;
-  struct Url h;
-  const char *p;
-  p = luaL_checklstring(L, 1, &n);
-  f = luaL_optinteger(L, 2, 0);
-  m = ParseUrl(p, n, &h, f);
-  lua_newtable(L);
-  LuaSetUrlView(L, &h.scheme, "scheme");
-  LuaSetUrlView(L, &h.user, "user");
-  LuaSetUrlView(L, &h.pass, "pass");
-  LuaSetUrlView(L, &h.host, "host");
-  LuaSetUrlView(L, &h.port, "port");
-  LuaSetUrlView(L, &h.path, "path");
-  LuaSetUrlView(L, &h.fragment, "fragment");
-  LuaPushUrlParams(L, &h.params);
-  lua_setfield(L, -2, "params");
-  free(h.params.p);
-  free(m);
-  return 1;
+  return b;
 }

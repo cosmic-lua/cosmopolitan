@@ -2,7 +2,7 @@
 #define COSMOPOLITAN_TOOL_NET_LUACHECK_H_
 #include "libc/log/log.h"
 #include "libc/mem/mem.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lua.h"
 COSMOPOLITAN_C_START_
 

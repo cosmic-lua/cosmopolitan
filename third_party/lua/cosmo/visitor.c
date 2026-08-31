@@ -16,24 +16,44 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/stdio/append.h"
-#include "third_party/lua/cosmo.h"
-#include "third_party/lua/lauxlib.h"
+#include "libc/assert.h"
+#include "libc/mem/mem.h"
+#include "third_party/lua/cosmo/visitor.h"
 
-__wur char *LuaFormatStack(lua_State *L) {
-  int i, top;
-  char *b = 0;
-  struct EncoderConfig conf = {
-      .maxdepth = 64,
-      .sorted = true,
-      .pretty = false,
-      .indent = "  ",
-  };
-  top = lua_gettop(L);
-  for (i = 1; i <= top; i++) {
-    if (i > 1) appendw(&b, '\n');
-    appendf(&b, "\t%d\t%s\t", i, luaL_typename(L, i));
-    LuaEncodeLuaData(L, &b, i, conf);
+static inline bool IsVisited(struct LuaVisited *v, const void *p) {
+  int i;
+  for (i = 0; i < v->i; ++i) {
+    if (v->p[i] == p) {
+      return true;
+    }
   }
-  return b;
+  return false;
+}
+
+static inline int Visit(struct LuaVisited *v, const void *p) {
+  int n2;
+  const void **p2;
+  if (v->i == v->n) {
+    n2 = v->n;
+    if (!n2) n2 = 2;
+    n2 += n2 >> 1;
+    if ((p2 = realloc(v->p, n2 * sizeof(*p2)))) {
+      v->p = p2;
+      v->n = n2;
+    } else {
+      return -1;
+    }
+  }
+  v->p[v->i++] = p;
+  return 0;
+}
+
+int LuaPushVisit(struct LuaVisited *v, const void *p) {
+  if (IsVisited(v, p)) return 1;
+  return Visit(v, p);
+}
+
+void LuaPopVisit(struct LuaVisited *v) {
+  assert(v->i > 0);
+  --v->i;
 }
