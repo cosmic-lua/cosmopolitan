@@ -1,0 +1,1075 @@
+# cosmo build adaptation: makes the pristine Lua 5.4 sources buildable inside
+# this hermetic monorepo. quoted includes of sibling headers already carry
+# full repo paths (done mechanically by update.sh); this patch swaps the
+# remaining system C-library includes (<string.h>, <stdio.h>, <errno.h>, ...)
+# for their cosmopolitan libc/* equivalents (or drops them where a sibling
+# header already pulls in what's needed), adds __static_yoink("lua_notice")
+# so the linker keeps lua_ident/lua_notice in binaries that never reference
+# it directly, and re-flows blank lines and continuation-backslash alignment
+# left ragged by those edits. no functional change.
+# regenerate by diffing against the pristine mechanically-rewritten sources
+# (run update.sh with patches/ moved aside).
+--- a/third_party/lua/lapi.h
++++ b/third_party/lua/lapi.h
+@@ -1,7 +1,6 @@
+ #ifndef lapi_h
+ #define lapi_h
+ 
+-
+ #include "third_party/lua/llimits.h"
+ #include "third_party/lua/lstate.h"
+ 
+@@ -9,7 +8,7 @@
+ /* Increments 'L->top.p', checking for stack overflows */
+ #define api_incr_top(L)	{L->top.p++; \
+ 			 api_check(L, L->top.p <= L->ci->top.p, \
+-					"stack overflow");}
++				"stack overflow");}
+ 
+ 
+ /*
+@@ -25,7 +24,7 @@
+ /* Ensure the stack has at least 'n' elements */
+ #define api_checknelems(L,n) \
+ 	api_check(L, (n) < (L->top.p - L->ci->func.p), \
+-			  "not enough elements in the stack")
++				  "not enough elements in the stack")
+ 
+ 
+ /*
+--- a/third_party/lua/lauxlib.h
++++ b/third_party/lua/lauxlib.h
+@@ -1,13 +1,10 @@
+-
+ #ifndef lauxlib_h
+ #define lauxlib_h
+ 
+-
+-#include <stddef.h>
+-#include <stdio.h>
+-
+-#include "third_party/lua/luaconf.h"
++#include "libc/assert.h"
++#include "libc/stdio/stdio.h"
+ #include "third_party/lua/lua.h"
++#include "third_party/lua/luaconf.h"
+ 
+ 
+ /* global table */
+@@ -108,6 +105,9 @@
+ LUALIB_API void (luaL_traceback) (lua_State *L, lua_State *L1,
+                                   const char *msg, int level);
+ 
++LUALIB_API void (luaL_traceback2) (lua_State *L, lua_State *L1,
++                                   const char *msg, int level);
++
+ LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,
+                                  lua_CFunction openf, int glb);
+ 
+@@ -166,10 +166,10 @@
+ #if !defined(lua_assert)
+ 
+ #if defined LUAI_ASSERT
+-  #include <assert.h>
+   #define lua_assert(c)		assert(c)
+ #else
+-  #define lua_assert(c)		((void)0)
++  // [jart]
++  #define lua_assert(c)		unassert(c)
+ #endif
+ 
+ #endif
+--- a/third_party/lua/lbaselib.c
++++ b/third_party/lua/lbaselib.c
+@@ -28,18 +28,13 @@
+ #define lbaselib_c
+ #define LUA_LIB
+ 
++#include "libc/str/str.h"
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <ctype.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-
+ #include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/lauxlib.h"
++#include "libc/ctype.h"
+ #include "third_party/lua/lualib.h"
++__static_yoink("lua_notice");
+ 
+ 
+ static int luaB_print (lua_State *L) {
+@@ -206,8 +201,8 @@
+   if (oldmode == -1)
+     luaL_pushfail(L);  /* invalid call to 'lua_gc' */
+   else
+-    lua_pushstring(L, (oldmode == LUA_GCINC) ? "incremental"
+-                                             : "generational");
++  lua_pushstring(L, (oldmode == LUA_GCINC) ? "incremental"
++                                           : "generational");
+   return 1;
+ }
+ 
+--- a/third_party/lua/lcode.c
++++ b/third_party/lua/lcode.c
+@@ -28,16 +28,7 @@
+ #define lcode_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <float.h>
+-#include <limits.h>
+-#include <math.h>
+-#include <stdlib.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/fmt/conv.h"
+ #include "third_party/lua/lcode.h"
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+@@ -47,9 +38,12 @@
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/lopcodes.h"
+ #include "third_party/lua/lparser.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lvm.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /* Maximum number of registers in a Lua function (must fit in 8 bits) */
+@@ -625,7 +619,7 @@
+   lua_Integer ik;
+   setfltvalue(&o, r);
+   if (!luaV_flttointeger(r, &ik, F2Ieq))  /* not an integral value? */
+-    return addk(fs, &o, &o);  /* use number itself as key */
++  return addk(fs, &o, &o);  /* use number itself as key */
+   else {  /* must build an alternative key */
+     const int nbm = l_floatatt(MANT_DIG);
+     const lua_Number q = l_mathop(ldexp)(l_mathop(1.0), -nbm + 1);
+--- a/third_party/lua/lcorolib.c
++++ b/third_party/lua/lcorolib.c
+@@ -28,15 +28,11 @@
+ #define lcorolib_c
+ #define LUA_LIB
+ 
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <stdlib.h>
+-
+ #include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lualib.h"
++__static_yoink("lua_notice");
+ 
+ 
+ static lua_State *getco (lua_State *L) {
+--- a/third_party/lua/ldblib.c
++++ b/third_party/lua/ldblib.c
+@@ -28,17 +28,12 @@
+ #define ldblib_c
+ #define LUA_LIB
+ 
++#include "libc/str/str.h"
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-
+ #include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lualib.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+--- a/third_party/lua/ldebug.c
++++ b/third_party/lua/ldebug.c
+@@ -28,15 +28,7 @@
+ #define ldebug_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <stdarg.h>
+-#include <stddef.h>
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
+ #include "third_party/lua/lapi.h"
+ #include "third_party/lua/lcode.h"
+ #include "third_party/lua/ldebug.h"
+@@ -44,19 +36,21 @@
+ #include "third_party/lua/lfunc.h"
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/lopcodes.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
+ #include "third_party/lua/ltm.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lvm.h"
+-
++__static_yoink("lua_notice");
+ 
+ 
+ #define noLuaClosure(f)		((f) == NULL || (f)->c.tt == LUA_VCCL)
+ 
+ 
+ static const char *funcnamefromcall (lua_State *L, CallInfo *ci,
+-                                                   const char **name);
++                                    const char **name);
+ 
+ 
+ static int currentpc (CallInfo *ci) {
+--- a/third_party/lua/ldo.h
++++ b/third_party/lua/ldo.h
+@@ -1,8 +1,6 @@
+ #ifndef ldo_h
+ #define ldo_h
+ 
+-
+-#include "third_party/lua/llimits.h"
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lzio.h"
+--- a/third_party/lua/ldump.c
++++ b/third_party/lua/ldump.c
+@@ -28,17 +28,12 @@
+ #define ldump_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <limits.h>
+-#include <stddef.h>
+-
+-#include "third_party/lua/lua.h"
+-
+ #include "third_party/lua/lobject.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lundump.h"
++__static_yoink("lua_notice");
+ 
+ 
+ typedef struct {
+--- a/third_party/lua/lfunc.c
++++ b/third_party/lua/lfunc.c
+@@ -28,21 +28,17 @@
+ #define lfunc_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <stddef.h>
+-
+-#include "third_party/lua/lua.h"
+-
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+ #include "third_party/lua/lfunc.h"
+ #include "third_party/lua/lgc.h"
+ #include "third_party/lua/lmem.h"
+ #include "third_party/lua/lobject.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+-
++#include "third_party/lua/ltm.h"
++#include "third_party/lua/lua.h"
++__static_yoink("lua_notice");
+ 
+ 
+ CClosure *luaF_newCclosure (lua_State *L, int nupvals) {
+--- a/third_party/lua/lfunc.h
++++ b/third_party/lua/lfunc.h
+@@ -1,7 +1,6 @@
+ #ifndef lfunc_h
+ #define lfunc_h
+ 
+-
+ #include "third_party/lua/lobject.h"
+ 
+ 
+--- a/third_party/lua/lgc.c
++++ b/third_party/lua/lgc.c
+@@ -28,24 +28,20 @@
+ #define lgc_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-#include <stdio.h>
+-#include <string.h>
+-
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+ #include "third_party/lua/lfunc.h"
+ #include "third_party/lua/lgc.h"
+ #include "third_party/lua/lmem.h"
+ #include "third_party/lua/lobject.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
+ #include "third_party/lua/ltm.h"
++#include "third_party/lua/lua.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+--- a/third_party/lua/lgc.h
++++ b/third_party/lua/lgc.h
+@@ -1,10 +1,10 @@
+ #ifndef lgc_h
+ #define lgc_h
+ 
+-
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/lstate.h"
+ 
++
+ /*
+ ** Collectable objects may have one of three colors: white, which means
+ ** the object is not marked; gray, which means the object is marked, but
+--- a/third_party/lua/linit.c
++++ b/third_party/lua/linit.c
+@@ -25,7 +25,6 @@
+ │  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                      │
+ │                                                                              │
+ ╚─────────────────────────────────────────────────────────────────────────────*/
+-
+ #define linit_c
+ #define LUA_LIB
+ 
+@@ -45,15 +44,11 @@
+ **  lua_pop(L, 1);  // remove PRELOAD table
+ */
+ 
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <stddef.h>
+-
+ #include "third_party/lua/lua.h"
+-
+ #include "third_party/lua/lualib.h"
+-#include "third_party/lua/lauxlib.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+--- a/third_party/lua/liolib.c
++++ b/third_party/lua/liolib.c
+@@ -28,22 +28,18 @@
+ #define liolib_c
+ #define LUA_LIB
+ 
++#include "libc/calls/calls.h"
++#include "libc/calls/weirdtypes.h"
++#include "libc/errno.h"
++#include "libc/stdio/stdio.h"
++#include "libc/temp.h"
++#include "libc/str/str.h"
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <ctype.h>
+-#include <errno.h>
+-#include <locale.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-
+ #include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/lauxlib.h"
++#include "libc/ctype.h"
+ #include "third_party/lua/lualib.h"
+-
+-
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+@@ -138,8 +134,6 @@
+ 
+ #if defined(LUA_USE_POSIX)	/* { */
+ 
+-#include <sys/types.h>
+-
+ #define l_fseek(f,o,w)		fseeko(f,o,w)
+ #define l_ftell(f)		ftello(f)
+ #define l_seeknum		off_t
+--- a/third_party/lua/llex.h
++++ b/third_party/lua/llex.h
+@@ -1,8 +1,6 @@
+ #ifndef llex_h
+ #define llex_h
+ 
+-#include <limits.h>
+-
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/lzio.h"
+ 
+--- a/third_party/lua/llimits.h
++++ b/third_party/lua/llimits.h
+@@ -1,11 +1,8 @@
+ #ifndef llimits_h
+ #define llimits_h
+ 
+-
+-#include <limits.h>
+-#include <stddef.h>
+-
+-
++#include "libc/limits.h"
++#include "libc/math.h"
+ #include "third_party/lua/lua.h"
+ 
+ 
+@@ -72,7 +69,7 @@
+ */
+ #if !defined(LUA_USE_C89) && defined(__STDC_VERSION__) && \
+     __STDC_VERSION__ >= 199901L
+-#include <stdint.h>
++
+ #if defined(UINTPTR_MAX)  /* even in C99 this type is optional */
+ #define L_P2I	uintptr_t
+ #else  /* no 'intptr'? */
+@@ -96,7 +93,6 @@
+ */
+ #if defined LUAI_ASSERT
+ #undef NDEBUG
+-#include <assert.h>
+ #define lua_assert(c)           assert(c)
+ #endif
+ 
+--- a/third_party/lua/lmathlib.c
++++ b/third_party/lua/lmathlib.c
+@@ -28,19 +28,14 @@
+ #define lmathlib_c
+ #define LUA_LIB
+ 
++#include "libc/calls/calls.h"
++#include "libc/math.h"
++#include "libc/nt/struct/msg.h"
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <float.h>
+-#include <limits.h>
+-#include <math.h>
+-#include <stdlib.h>
+-#include <time.h>
+-
+ #include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lualib.h"
++__static_yoink("lua_notice");
+ 
+ 
+ #undef PI
+--- a/third_party/lua/lmem.h
++++ b/third_party/lua/lmem.h
+@@ -1,9 +1,6 @@
+ #ifndef lmem_h
+ #define lmem_h
+ 
+-
+-#include <stddef.h>
+-
+ #include "third_party/lua/llimits.h"
+ #include "third_party/lua/lua.h"
+ 
+--- a/third_party/lua/lopcodes.c
++++ b/third_party/lua/lopcodes.c
+@@ -28,10 +28,9 @@
+ #define lopcodes_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+ #include "third_party/lua/lopcodes.h"
++#include "third_party/lua/lprefix.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /* ORDER OP */
+--- a/third_party/lua/lparser.c
++++ b/third_party/lua/lparser.c
+@@ -28,14 +28,7 @@
+ #define lparser_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <limits.h>
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
+ #include "third_party/lua/lcode.h"
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+@@ -45,10 +38,12 @@
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/lopcodes.h"
+ #include "third_party/lua/lparser.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
+-
++#include "third_party/lua/lua.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /* maximum number of local variables per function (must be smaller
+--- a/third_party/lua/lprefix.h
++++ b/third_party/lua/lprefix.h
+@@ -5,35 +5,34 @@
+ /*
+ ** Allows POSIX/XSI stuff
+ */
+-#if !defined(LUA_USE_C89)	/* { */
++#if !defined(LUA_USE_C89) /* { */
+ 
+ #if !defined(_XOPEN_SOURCE)
+-#define _XOPEN_SOURCE           600
++#define _XOPEN_SOURCE 600
+ #elif _XOPEN_SOURCE == 0
+-#undef _XOPEN_SOURCE  /* use -D_XOPEN_SOURCE=0 to undefine it */
++#undef _XOPEN_SOURCE /* use -D_XOPEN_SOURCE=0 to undefine it */
+ #endif
+ 
+ /*
+ ** Allows manipulation of large files in gcc and some other compilers
+ */
+ #if !defined(LUA_32BITS) && !defined(_FILE_OFFSET_BITS)
+-#define _LARGEFILE_SOURCE       1
+-#define _FILE_OFFSET_BITS       64
++#define _LARGEFILE_SOURCE 1
++#define _FILE_OFFSET_BITS 64
+ #endif
+ 
+-#endif				/* } */
++#endif /* } */
+ 
+ 
+ /*
+ ** Windows stuff
+ */
+-#if defined(_WIN32)	/* { */
++#if defined(_WIN32) /* { */
+ 
+ #if !defined(_CRT_SECURE_NO_WARNINGS)
+-#define _CRT_SECURE_NO_WARNINGS  /* avoid warnings about ISO C functions */
++#define _CRT_SECURE_NO_WARNINGS /* avoid warnings about ISO C functions */
+ #endif
+ 
+-#endif			/* } */
++#endif /* } */
+ 
+ #endif
+-
+--- a/third_party/lua/lstate.c
++++ b/third_party/lua/lstate.c
+@@ -28,14 +28,8 @@
+ #define lstate_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <stddef.h>
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
++#include "libc/time.h"
+ #include "third_party/lua/lapi.h"
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+@@ -43,11 +37,13 @@
+ #include "third_party/lua/lgc.h"
+ #include "third_party/lua/llex.h"
+ #include "third_party/lua/lmem.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
+ #include "third_party/lua/ltm.h"
+-
++#include "third_party/lua/lua.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+@@ -78,8 +74,6 @@
+ */
+ #if !defined(luai_makeseed)
+ 
+-#include <time.h>
+-
+ /*
+ ** Compute an initial seed with some level of randomness.
+ ** Rely on Address Space Layout Randomization (if present) and
+@@ -304,6 +298,16 @@
+ }
+ 
+ 
++/**
++ * lua_newthread [-0, +1, m]
++ *
++ * Creates a new thread, pushes it on the stack, and returns a pointer to a
++ * lua_State that represents this new thread. The new thread returned by this
++ * function shares with the original thread its global environment, but has
++ * an independent execution stack.
++ *
++ * Threads are subject to garbage collection, like any Lua object.
++ */
+ LUA_API lua_State *lua_newthread (lua_State *L) {
+   global_State *g = G(L);
+   GCObject *o;
+--- a/third_party/lua/lstate.h
++++ b/third_party/lua/lstate.h
+@@ -1,16 +1,14 @@
+ #ifndef lstate_h
+ #define lstate_h
+ 
+-#include "third_party/lua/lua.h"
+-
+-
+ /* Some header files included here need this definition */
+ typedef struct CallInfo CallInfo;
+ 
+-
++#include "libc/calls/calls.h"
+ #include "third_party/lua/lobject.h"
+-#include "third_party/lua/ltm.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lzio.h"
++#include "third_party/lua/tms.h"
+ 
+ 
+ /*
+@@ -121,7 +119,6 @@
+ ** is thread safe
+ */
+ #if !defined(l_signalT)
+-#include <signal.h>
+ #define l_signalT	sig_atomic_t
+ #endif
+ 
+--- a/third_party/lua/lstring.c
++++ b/third_party/lua/lstring.c
+@@ -28,19 +28,16 @@
+ #define lstring_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+ #include "third_party/lua/lmem.h"
+ #include "third_party/lua/lobject.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lstring.h"
++#include "third_party/lua/lua.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+--- a/third_party/lua/ltable.c
++++ b/third_party/lua/ltable.c
+@@ -28,7 +28,18 @@
+ #define ltable_c
+ #define LUA_CORE
+ 
++#include "third_party/lua/ldebug.h"
++#include "third_party/lua/ldo.h"
++#include "third_party/lua/lgc.h"
++#include "third_party/lua/lmem.h"
++#include "third_party/lua/lobject.h"
+ #include "third_party/lua/lprefix.h"
++#include "third_party/lua/lstate.h"
++#include "third_party/lua/lstring.h"
++#include "third_party/lua/ltable.h"
++#include "third_party/lua/lua.h"
++#include "third_party/lua/lvm.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+@@ -44,21 +55,6 @@
+ ** Hence even when the load factor reaches 100%, performance remains good.
+ */
+ 
+-#include <math.h>
+-#include <limits.h>
+-
+-#include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/ldebug.h"
+-#include "third_party/lua/ldo.h"
+-#include "third_party/lua/lgc.h"
+-#include "third_party/lua/lmem.h"
+-#include "third_party/lua/lobject.h"
+-#include "third_party/lua/lstate.h"
+-#include "third_party/lua/lstring.h"
+-#include "third_party/lua/ltable.h"
+-#include "third_party/lua/lvm.h"
+-
+ 
+ /*
+ ** MAXABITS is the largest integer such that MAXASIZE fits in an
+--- a/third_party/lua/ltablib.c
++++ b/third_party/lua/ltablib.c
+@@ -28,17 +28,14 @@
+ #define ltablib_c
+ #define LUA_LIB
+ 
++#include "libc/calls/calls.h"
++#include "libc/calls/weirdtypes.h"
++#include "libc/str/str.h"
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <limits.h>
+-#include <stddef.h>
+-#include <string.h>
+-
+ #include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lualib.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+@@ -253,8 +250,6 @@
+ */
+ #if !defined(l_randomizePivot)		/* { */
+ 
+-#include <time.h>
+-
+ /* size of 'e' measured in number of 'unsigned int's */
+ #define sof(e)		(sizeof(e) / sizeof(unsigned int))
+ 
+--- a/third_party/lua/ltests.h
++++ b/third_party/lua/ltests.h
+@@ -1,9 +1,8 @@
+ #ifndef ltests_h
+ #define ltests_h
+ 
++#include "third_party/lua/lua.h"
+ 
+-#include <stdio.h>
+-#include <stdlib.h>
+ 
+ /* test Lua with compatibility code */
+ #define LUA_COMPAT_MATHLIB
+--- a/third_party/lua/ltm.c
++++ b/third_party/lua/ltm.c
+@@ -28,22 +28,18 @@
+ #define ltm_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+ #include "third_party/lua/lgc.h"
+ #include "third_party/lua/lobject.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
+ #include "third_party/lua/ltm.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lvm.h"
++__static_yoink("lua_notice");
+ 
+ 
+ static const char udatatypename[] = "userdata";
+--- a/third_party/lua/lualib.h
++++ b/third_party/lua/lualib.h
+@@ -1,4 +1,3 @@
+-
+ #ifndef lualib_h
+ #define lualib_h
+ 
+--- a/third_party/lua/lundump.c
++++ b/third_party/lua/lundump.c
+@@ -1,5 +1,5 @@
+ /*-*- mode:c;indent-tabs-mode:nil;c-basic-offset:2;tab-width:8;coding:utf-8 -*-│
+-│ vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                               :vi │
++│vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                                :vi│
+ ╚──────────────────────────────────────────────────────────────────────────────╝
+ │                                                                              │
+ │  Lua                                                                         │
+@@ -28,22 +28,18 @@
+ #define lundump_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <limits.h>
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+ #include "third_party/lua/lfunc.h"
+ #include "third_party/lua/lmem.h"
+ #include "third_party/lua/lobject.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstring.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lundump.h"
+ #include "third_party/lua/lzio.h"
++__static_yoink("lua_notice");
+ 
+ 
+ #if !defined(luai_verifycode)
+--- a/third_party/lua/lutf8lib.c
++++ b/third_party/lua/lutf8lib.c
+@@ -1,5 +1,5 @@
+ /*-*- mode:c;indent-tabs-mode:nil;c-basic-offset:2;tab-width:8;coding:utf-8 -*-│
+-│ vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                               :vi │
++│vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                                :vi│
+ ╚──────────────────────────────────────────────────────────────────────────────╝
+ │                                                                              │
+ │  Lua                                                                         │
+@@ -28,18 +28,11 @@
+ #define lutf8lib_c
+ #define LUA_LIB
+ 
++#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lprefix.h"
+-
+-
+-#include <assert.h>
+-#include <limits.h>
+-#include <stdlib.h>
+-#include <string.h>
+-
+ #include "third_party/lua/lua.h"
+-
+-#include "third_party/lua/lauxlib.h"
+ #include "third_party/lua/lualib.h"
++__static_yoink("lua_notice");
+ 
+ 
+ #define MAXUNICODE	0x10FFFFu
+--- a/third_party/lua/lvm.c
++++ b/third_party/lua/lvm.c
+@@ -28,28 +28,21 @@
+ #define lvm_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-#include <float.h>
+-#include <limits.h>
+-#include <math.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
+ #include "third_party/lua/ldebug.h"
+ #include "third_party/lua/ldo.h"
+ #include "third_party/lua/lfunc.h"
+ #include "third_party/lua/lgc.h"
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/lopcodes.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
+ #include "third_party/lua/lstring.h"
+ #include "third_party/lua/ltable.h"
+ #include "third_party/lua/ltm.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lvm.h"
++__static_yoink("lua_notice");
+ 
+ 
+ /*
+@@ -1028,18 +1021,18 @@
+ */
+ #define op_order(L,opi,opn,other) {  \
+   StkId ra = RA(i); \
+-  int cond;  \
+-  TValue *rb = vRB(i);  \
+-  if (ttisinteger(s2v(ra)) && ttisinteger(rb)) {  \
+-    lua_Integer ia = ivalue(s2v(ra));  \
+-    lua_Integer ib = ivalue(rb);  \
+-    cond = opi(ia, ib);  \
+-  }  \
+-  else if (ttisnumber(s2v(ra)) && ttisnumber(rb))  \
+-    cond = opn(s2v(ra), rb);  \
+-  else  \
+-    Protect(cond = other(L, s2v(ra), rb));  \
+-  docondjump(); }
++        int cond;  \
++        TValue *rb = vRB(i);  \
++        if (ttisinteger(s2v(ra)) && ttisinteger(rb)) {  \
++          lua_Integer ia = ivalue(s2v(ra));  \
++          lua_Integer ib = ivalue(rb);  \
++          cond = opi(ia, ib);  \
++        }  \
++        else if (ttisnumber(s2v(ra)) && ttisnumber(rb))  \
++          cond = opn(s2v(ra), rb);  \
++        else  \
++          Protect(cond = other(L, s2v(ra), rb));  \
++        docondjump(); }
+ 
+ 
+ /*
+@@ -1048,20 +1041,20 @@
+ */
+ #define op_orderI(L,opi,opf,inv,tm) {  \
+   StkId ra = RA(i); \
+-  int cond;  \
+-  int im = GETARG_sB(i);  \
+-  if (ttisinteger(s2v(ra)))  \
+-    cond = opi(ivalue(s2v(ra)), im);  \
+-  else if (ttisfloat(s2v(ra))) {  \
+-    lua_Number fa = fltvalue(s2v(ra));  \
+-    lua_Number fim = cast_num(im);  \
+-    cond = opf(fa, fim);  \
+-  }  \
+-  else {  \
+-    int isf = GETARG_C(i);  \
+-    Protect(cond = luaT_callorderiTM(L, s2v(ra), im, inv, isf, tm));  \
+-  }  \
+-  docondjump(); }
++        int cond;  \
++        int im = GETARG_sB(i);  \
++        if (ttisinteger(s2v(ra)))  \
++          cond = opi(ivalue(s2v(ra)), im);  \
++        else if (ttisfloat(s2v(ra))) {  \
++          lua_Number fa = fltvalue(s2v(ra));  \
++          lua_Number fim = cast_num(im);  \
++          cond = opf(fa, fim);  \
++        }  \
++        else {  \
++          int isf = GETARG_C(i);  \
++          Protect(cond = luaT_callorderiTM(L, s2v(ra), im, inv, isf, tm));  \
++        }  \
++        docondjump(); }
+ 
+ /* }================================================================== */
+ 
+@@ -1171,7 +1164,7 @@
+   const Instruction *pc;
+   int trap;
+ #if LUA_USE_JUMPTABLE
+-#include "ljumptab.h"
++#include "third_party/lua/ljumptab.inc"
+ #endif
+  startfunc:
+   trap = L->hookmask;
+--- a/third_party/lua/lvm.h
++++ b/third_party/lua/lvm.h
+@@ -1,7 +1,6 @@
+ #ifndef lvm_h
+ #define lvm_h
+ 
+-
+ #include "third_party/lua/ldo.h"
+ #include "third_party/lua/lobject.h"
+ #include "third_party/lua/ltm.h"
+--- a/third_party/lua/lzio.c
++++ b/third_party/lua/lzio.c
+@@ -28,17 +28,14 @@
+ #define lzio_c
+ #define LUA_CORE
+ 
+-#include "third_party/lua/lprefix.h"
+-
+-
+-#include <string.h>
+-
+-#include "third_party/lua/lua.h"
+-
++#include "libc/str/str.h"
+ #include "third_party/lua/llimits.h"
+ #include "third_party/lua/lmem.h"
++#include "third_party/lua/lprefix.h"
+ #include "third_party/lua/lstate.h"
++#include "third_party/lua/lua.h"
+ #include "third_party/lua/lzio.h"
++__static_yoink("lua_notice");
+ 
+ 
+ int luaZ_fill (ZIO *z) {
+--- a/third_party/lua/lzio.h
++++ b/third_party/lua/lzio.h
+@@ -1,10 +1,8 @@
+-
+ #ifndef lzio_h
+ #define lzio_h
+ 
+-#include "third_party/lua/lua.h"
+-
+ #include "third_party/lua/lmem.h"
++#include "third_party/lua/lua.h"
+ 
+ 
+ #define EOZ	(-1)			/* end of stream */
