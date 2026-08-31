@@ -858,8 +858,8 @@ end
 
 local qvio = { param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {} }
 for _, d in ipairs(qdecls) do
-  for p in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
-    p = p:gsub("%s", "")
+  for rawp in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
+    local p = rawp:gsub("%s", "")
     if p ~= "" and p ~= "self" and p ~= "..." then
       if not d.block:find("%-%-%-@param%s+" .. p .. "%f[%W]") then
         qvio.param[d.disp] = true
