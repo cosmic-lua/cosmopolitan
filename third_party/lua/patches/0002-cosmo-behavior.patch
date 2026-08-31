@@ -233,7 +233,7 @@
  #define LUAI_TRY(L,c,a)		if (_setjmp((c)->b) == 0) { a }
  #define luai_jmpbuf		jmp_buf
  
-@@ -150,7 +148,8 @@
+@@ -147,7 +145,8 @@
          lua_unlock(L);
          g->panic(L);  /* call panic function (last chance to jump out) */
        }
@@ -243,7 +243,7 @@
      }
    }
  }
-@@ -239,7 +238,7 @@
+@@ -265,7 +264,7 @@
    relstack(L);  /* change pointers to offsets */
    G(L)->gcstopem = 1;  /* stop emergency collection */
    newstack = luaM_reallocvector(L, L->stack.p, oldsize + EXTRA_STACK,
@@ -252,7 +252,7 @@
    G(L)->gcstopem = oldgcstop;  /* restore emergency collection */
    if (l_unlikely(newstack == NULL)) {  /* reallocation failed? */
      correctstack(L);  /* change offsets back to pointers */
-@@ -282,12 +281,12 @@
+@@ -308,12 +307,12 @@
        return luaD_reallocstack(L, newsize, raiseerror);
    }
    /* else stack overflow */
@@ -271,7 +271,7 @@
  
  
  /*
-@@ -570,21 +569,21 @@
+@@ -596,21 +595,21 @@
      case LUA_VLCF:  /* light C function */
        return precallC(L, func, LUA_MULTRET, fvalue(s2v(func)));
      case LUA_VLCL: {  /* Lua function */
@@ -420,7 +420,7 @@
  
  
  /*
-@@ -128,7 +136,6 @@
+@@ -119,7 +127,6 @@
  ** =========================================================================
  */
  
@@ -428,7 +428,7 @@
  
  /*
  ** Macro to convert pointer-to-void* to pointer-to-function. This cast
-@@ -173,7 +180,6 @@
+@@ -164,7 +171,6 @@
  ** =======================================================================
  */
  
@@ -436,7 +436,7 @@
  
  
  /*
-@@ -758,12 +764,17 @@
+@@ -749,12 +755,17 @@
  }
  
  
@@ -580,7 +580,7 @@
  
  
  /*
-@@ -791,7 +787,6 @@
+@@ -789,7 +785,6 @@
  #define UTF8BUFFSZ	8
  
  LUAI_FUNC int luaO_utf8esc (char *buff, unsigned long x);
@@ -588,7 +588,7 @@
  LUAI_FUNC int luaO_rawarith (lua_State *L, int op, const TValue *p1,
                               const TValue *p2, TValue *res);
  LUAI_FUNC void luaO_arith (lua_State *L, int op, const TValue *p1,
-@@ -804,6 +799,11 @@
+@@ -802,6 +797,11 @@
  LUAI_FUNC const char *luaO_pushfstring (lua_State *L, const char *fmt, ...);
  LUAI_FUNC void luaO_chunkid (char *out, const char *source, size_t srclen);
  
@@ -665,7 +665,7 @@
  
 +#include "libc/math.h"
 +#include "libc/str/str.h"
-+#include "third_party/lua/cosmo.h"
++#include "third_party/lua/cosmo/cosmo.h"
 +#include "third_party/lua/lauxlib.h"
  #include "third_party/lua/lprefix.h"
 -
@@ -745,7 +745,7 @@
    int l = capture_to_close(ms);
    const char *res;
    ms->capture[l].len = s - ms->capture[l].init;  /* close capture */
-@@ -1256,7 +1274,7 @@
+@@ -1255,7 +1273,7 @@
    }
    if (!isalpha(uchar(*spec)))  /* did not go to the end? */
      luaL_error(L, "invalid conversion specification: '%s'", form);
@@ -810,7 +810,7 @@
  
  
  
-@@ -1729,7 +1734,7 @@
+@@ -1738,7 +1743,7 @@
        lua_error(L1);
      }
      else if EQ("abort") {
@@ -821,15 +821,14 @@
  #if defined(__cplusplus)
 --- a/third_party/lua/ltm.h
 +++ b/third_party/lua/ltm.h
-@@ -1,44 +1,17 @@
+@@ -1,42 +1,16 @@
  #ifndef ltm_h
  #define ltm_h
  
 -
  #include "third_party/lua/lobject.h"
- #include "third_party/lua/lstate.h"
 +#include "third_party/lua/luaconf.h"
-+#include "third_party/lua/tms.h"
++#include "third_party/lua/cosmo/tms.h"
  
  
  /*
@@ -864,11 +863,10 @@
 -  TM_CLOSE,
 -  TM_N		/* number of elements in the enum */
 -} TMS;
--
 +// [jart] moved to tms.h
  
+ 
  /*
- ** Mask with 1 in all fast-access methods. A 1 in any of these bits
 --- a/third_party/lua/lua.h
 +++ b/third_party/lua/lua.h
 @@ -1,13 +1,10 @@
@@ -911,7 +909,7 @@
 +extern const char *g_lua_path_default;  // [jart]
  
 -/******************************************************************************
--* Copyright (C) 1994-2023 Lua.org, PUC-Rio.
+-* Copyright (C) 1994-2026 Lua.org, PUC-Rio.
 -*
 -* Permission is hereby granted, free of charge, to any person obtaining
 -* a copy of this software and associated documentation files (the
@@ -1028,9 +1026,9 @@
 -
 -#endif
  
- /* }================================================================== */
  
-@@ -269,20 +231,8 @@
+ /*
+@@ -278,20 +240,8 @@
  ** the libraries, you may want to use the following definition (define
  ** LUA_BUILD_AS_DLL to get it).
  */
@@ -1051,7 +1049,7 @@
  
  /*
  ** More often than not the libs go together with the core.
-@@ -305,12 +255,7 @@
+@@ -314,12 +264,7 @@
  ** give a warning about it. To avoid these warnings, change to the
  ** default definition.
  */
@@ -1064,7 +1062,7 @@
  
  #define LUAI_DDEC(dec)	LUAI_FUNC dec
  #define LUAI_DDEF	/* empty */
-@@ -639,7 +584,6 @@
+@@ -648,7 +593,6 @@
  
  #if !defined(LUA_USE_C89) && defined(__STDC_VERSION__) && \
      __STDC_VERSION__ >= 199901L
@@ -1072,7 +1070,7 @@
  #if defined(INTPTR_MAX)  /* even in C99 this type is optional */
  #undef LUA_KCONTEXT
  #define LUA_KCONTEXT	intptr_t
-@@ -707,8 +651,7 @@
+@@ -716,8 +660,7 @@
  @@ LUA_USE_APICHECK turns on several consistency checks on the C API.
  ** Define it as a help when debugging C code.
  */
