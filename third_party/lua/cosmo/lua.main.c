@@ -42,6 +42,7 @@
 #include "third_party/linenoise/linenoise.h"
 #include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
+#include "third_party/lua/llimits.h"
 #include "third_party/lua/lprefix.h"
 #include "third_party/lua/cosmo/lrepl.h"
 #include "third_party/lua/lualib.h"

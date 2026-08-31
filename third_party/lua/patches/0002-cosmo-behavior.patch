@@ -3,15 +3,18 @@
 # install.
 #   lua.h / luaconf.h  - COSMOPOLITAN_C_START_/END_ header guard, LUA_ROOT
 #                         under the zip payload (/zip/.lua/), LUA_USE_LINENOISE
-#                         and LUA_USE_POSIX, api-check gated on IsModeDbg(),
-#                         a MODE_DBG hook that pulls in ltests.h without the
-#                         unsafe LUA_USER_H kludge, and g_lua_path_default as
-#                         a mutable global (see loadlib.c) so a hosted script
-#                         can override the module search path
+#                         and LUA_USE_POSIX, a MODE_DBG hook that pulls in
+#                         ltests.h without the unsafe LUA_USER_H kludge, and
+#                         g_lua_path_default as a mutable global (see
+#                         loadlib.c) so a hosted script can override the
+#                         module search path
 #   loadlib.c          - routes LUA_PATH_DEFAULT through g_lua_path_default
 #   ltm.h              - TMS enum moved to (non-stock) tms.h so both ltm.c and
 #                         the C API binding layer can share it without a
 #                         circular include
+#   (lapi.h's api-check gate and llimits.h's lua_assert/lua_writestring*
+#   live in patch 0001 now, following upstream's move of the underlying
+#   fallback macros out of luaconf.h/lauxlib.h and into lapi.h/llimits.h)
 #   lctype.h           - lctype.c is not vendored (see update.sh); reimplements
 #                         its table-driven ctype tests as branchless GCC
 #                         statement-expression macros, and adds lisbdigit for
@@ -224,16 +227,16 @@
  
  
  #define errorstatus(s)	((s) > LUA_YIELD)
-@@ -84,7 +82,7 @@
+@@ -116,7 +114,7 @@
  #elif defined(LUA_USE_POSIX)				/* }{ */
  
- /* in POSIX, try _longjmp/_setjmp (more efficient) */
+ /* in POSIX, use _longjmp/_setjmp (more efficient) */
 -#define LUAI_THROW(L,c)		_longjmp((c)->b, 1)
 +#define LUAI_THROW(L,c)		longjmp((c)->b, 1)
- #define LUAI_TRY(L,c,a)		if (_setjmp((c)->b) == 0) { a }
- #define luai_jmpbuf		jmp_buf
+ #define LUAI_TRY(L,c,f,ud)	if (_setjmp((c)->b) == 0) ((f)(L, ud))
  
-@@ -147,7 +145,8 @@
+ #else							/* }{ */
+@@ -162,7 +160,8 @@
          lua_unlock(L);
          g->panic(L);  /* call panic function (last chance to jump out) */
        }
@@ -243,16 +246,7 @@
      }
    }
  }
-@@ -265,7 +264,7 @@
-   relstack(L);  /* change pointers to offsets */
-   G(L)->gcstopem = 1;  /* stop emergency collection */
-   newstack = luaM_reallocvector(L, L->stack.p, oldsize + EXTRA_STACK,
--                                   newsize + EXTRA_STACK, StackValue);
-+                                      newsize + EXTRA_STACK, StackValue);
-   G(L)->gcstopem = oldgcstop;  /* restore emergency collection */
-   if (l_unlikely(newstack == NULL)) {  /* reallocation failed? */
-     correctstack(L);  /* change offsets back to pointers */
-@@ -308,12 +307,12 @@
+@@ -401,12 +400,12 @@
        return luaD_reallocstack(L, newsize, raiseerror);
    }
    /* else stack overflow */
@@ -271,37 +265,6 @@
  
  
  /*
-@@ -596,21 +595,21 @@
-     case LUA_VLCF:  /* light C function */
-       return precallC(L, func, LUA_MULTRET, fvalue(s2v(func)));
-     case LUA_VLCL: {  /* Lua function */
--      Proto *p = clLvalue(s2v(func))->p;
--      int fsize = p->maxstacksize;  /* frame size */
--      int nfixparams = p->numparams;
--      int i;
-+  Proto *p = clLvalue(s2v(func))->p;
-+  int fsize = p->maxstacksize;  /* frame size */
-+  int nfixparams = p->numparams;
-+  int i;
-       checkstackGCp(L, fsize - delta, func);
-       ci->func.p -= delta;  /* restore 'func' (if vararg) */
--      for (i = 0; i < narg1; i++)  /* move down function and arguments */
-+  for (i = 0; i < narg1; i++)  /* move down function and arguments */
-         setobjs2s(L, ci->func.p + i, func + i);
-       func = ci->func.p;  /* moved-down function */
--      for (; narg1 <= nfixparams; narg1++)
--        setnilvalue(s2v(func + narg1));  /* complete missing arguments */
-+  for (; narg1 <= nfixparams; narg1++)
-+    setnilvalue(s2v(func + narg1));  /* complete missing arguments */
-       ci->top.p = func + 1 + fsize;  /* top for new function */
-       lua_assert(ci->top.p <= L->stack_last.p);
--      ci->u.l.savedpc = p->code;  /* starting point */
--      ci->callstatus |= CIST_TAIL;
-+  ci->u.l.savedpc = p->code;  /* starting point */
-+  ci->callstatus |= CIST_TAIL;
-       L->top.p = func + narg1;  /* set top */
-       return -1;
-     }
 --- a/third_party/lua/llex.c
 +++ b/third_party/lua/llex.c
 @@ -28,26 +28,20 @@
@@ -335,7 +298,7 @@
  
  
  #define next(ls)	(ls->current = zgetc(ls->z))
-@@ -417,6 +411,7 @@
+@@ -439,6 +433,7 @@
          switch (ls->current) {
            case 'a': c = '\a'; goto read_save;
            case 'b': c = '\b'; goto read_save;
@@ -343,7 +306,7 @@
            case 'f': c = '\f'; goto read_save;
            case 'n': c = '\n'; goto read_save;
            case 'r': c = '\r'; goto read_save;
-@@ -439,6 +434,7 @@
+@@ -461,6 +456,7 @@
              goto no_save;
            }
            default: {
@@ -388,7 +351,7 @@
    }
 --- a/third_party/lua/loadlib.c
 +++ b/third_party/lua/loadlib.c
-@@ -28,17 +28,25 @@
+@@ -28,18 +28,25 @@
  #define loadlib_c
  #define LUA_LIB
  
@@ -396,15 +359,12 @@
 +#include "libc/runtime/runtime.h"
 +#include "libc/str/str.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 +#include "third_party/lua/lua.h"
 +#include "third_party/lua/lualib.h"
 +__static_yoink("lua_notice");
  
- 
--#include <stdio.h>
--#include <stdlib.h>
--#include <string.h>
 +/*
 +**
 +** [jart] This module contains an implementation of loadlib for Unix systems
@@ -412,23 +372,28 @@
 +** systems.
 +*/
  
--#include "third_party/lua/lua.h"
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
  
+-#include "third_party/lua/lua.h"
+-
 -#include "third_party/lua/lauxlib.h"
 -#include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +const char *g_lua_path_default = LUA_PATH_DEFAULT;  // [jart]
  
  
  /*
-@@ -119,7 +127,6 @@
+@@ -115,7 +122,6 @@
  ** =========================================================================
  */
  
 -#include <dlfcn.h>
  
- /*
- ** Macro to convert pointer-to-void* to pointer-to-function. This cast
-@@ -164,7 +171,6 @@
+ 
+ static void lsys_unloadlib (void *lib) {
+@@ -149,7 +155,6 @@
  ** =======================================================================
  */
  
@@ -436,7 +401,7 @@
  
  
  /*
-@@ -749,12 +755,17 @@
+@@ -738,13 +743,18 @@
  }
  
  
@@ -446,7 +411,8 @@
 +
 +
  LUAMOD_API int luaopen_package (lua_State *L) {
-   createclibstable(L);
+   luaL_getsubtable(L, LUA_REGISTRYINDEX, CLIBS);  /* create CLIBS table */
+   lua_pop(L, 1);  /* will not use it now */
    luaL_newlib(L, pk_funcs);  /* create 'package' table */
    createsearcherstable(L);
    /* set paths */
@@ -457,13 +423,14 @@
    lua_pushliteral(L, LUA_DIRSEP "\n" LUA_PATH_SEP "\n" LUA_PATH_MARK "\n"
 --- a/third_party/lua/lobject.c
 +++ b/third_party/lua/lobject.c
-@@ -28,47 +28,24 @@
+@@ -28,49 +28,24 @@
  #define lobject_c
  #define LUA_CORE
  
 -#include "third_party/lua/lprefix.h"
 -
 -
+-#include <float.h>
 -#include <locale.h>
 -#include <math.h>
 -#include <stdarg.h>
@@ -488,10 +455,12 @@
  
  
  /*
- ** Computes ceil(log2(x))
+-** Computes ceil(log2(x)), which is the smallest integer n such that
+-** x <= (1 << n).
++** Computes ceil(log2(x))
  */
--int luaO_ceillog2 (unsigned int x) {
--  static const lu_byte log_2[256] = {  /* log_2[i] = ceil(log2(i - 1)) */
+-lu_byte luaO_ceillog2 (unsigned int x) {
+-  static const lu_byte log_2[256] = {  /* log_2[i - 1] = ceil(log2(i)) */
 -    0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
 -    6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
 -    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
@@ -504,13 +473,13 @@
 -  int l = 0;
 -  x--;
 -  while (x >= 256) { l += 8; x >>= 8; }
--  return l + log_2[x];
+-  return cast_byte(l + log_2[x]);
 -}
 +// [jart] moved to lobject.h
  
- 
- static lua_Integer intarith (lua_State *L, int op, lua_Integer v1,
-@@ -292,7 +269,9 @@
+ /*
+ ** Encodes 'p'% as a floating-point byte, represented as (eeeexxxx).
+@@ -355,7 +330,9 @@
  
  
  #define MAXBY10		cast(lua_Unsigned, LUA_MAXINTEGER / 10)
@@ -520,7 +489,7 @@
  
  static const char *l_str2int (const char *s, lua_Integer *result) {
    lua_Unsigned a = 0;
-@@ -308,6 +287,23 @@
+@@ -371,6 +348,23 @@
        empty = 0;
      }
    }
@@ -580,30 +549,30 @@
  
  
  /*
-@@ -789,7 +785,6 @@
- #define UTF8BUFFSZ	8
+@@ -837,7 +833,6 @@
  
- LUAI_FUNC int luaO_utf8esc (char *buff, unsigned long x);
--LUAI_FUNC int luaO_ceillog2 (unsigned int x);
- LUAI_FUNC int luaO_rawarith (lua_State *L, int op, const TValue *p1,
-                              const TValue *p2, TValue *res);
- LUAI_FUNC void luaO_arith (lua_State *L, int op, const TValue *p1,
-@@ -802,6 +797,11 @@
+ 
+ LUAI_FUNC int luaO_utf8esc (char *buff, l_uint32 x);
+-LUAI_FUNC lu_byte luaO_ceillog2 (unsigned int x);
+ LUAI_FUNC lu_byte luaO_codeparam (unsigned int p);
+ LUAI_FUNC l_mem luaO_applyparam (lu_byte p, l_mem x);
+ 
+@@ -854,6 +849,11 @@
  LUAI_FUNC const char *luaO_pushfstring (lua_State *L, const char *fmt, ...);
  LUAI_FUNC void luaO_chunkid (char *out, const char *source, size_t srclen);
  
 +/*
 +** Computes ceil(log2(x))
 +*/
-+static inline int luaO_ceillog2 (unsigned int x) {
-+  return --x ? _bsr(x) + 1 : 0;  // [jart]
++static inline lu_byte luaO_ceillog2 (unsigned int x) {
++  return --x ? cast_byte(_bsr(x) + 1) : 0;  // [jart]
 +}
  
  #endif
 -
 --- a/third_party/lua/loslib.c
 +++ b/third_party/lua/loslib.c
-@@ -28,19 +28,20 @@
+@@ -28,20 +28,21 @@
  #define loslib_c
  #define LUA_LIB
  
@@ -617,6 +586,7 @@
 +#include "libc/temp.h"
 +#include "libc/time.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -630,11 +600,12 @@
 -
 -#include "third_party/lua/lauxlib.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  /*
-@@ -124,17 +125,13 @@
+@@ -125,17 +126,13 @@
  
  #if defined(LUA_USE_POSIX)	/* { */
  
@@ -659,7 +630,7 @@
  
 --- a/third_party/lua/lstrlib.c
 +++ b/third_party/lua/lstrlib.c
-@@ -28,23 +28,15 @@
+@@ -28,24 +28,16 @@
  #define lstrlib_c
  #define LUA_LIB
  
@@ -667,6 +638,7 @@
 +#include "libc/str/str.h"
 +#include "third_party/lua/cosmo/cosmo.h"
 +#include "third_party/lua/lauxlib.h"
++#include "third_party/lua/llimits.h"
  #include "third_party/lua/lprefix.h"
 -
 -
@@ -685,20 +657,21 @@
 -#include "third_party/lua/lauxlib.h"
 +#include "libc/ctype.h"
  #include "third_party/lua/lualib.h"
+-#include "third_party/lua/llimits.h"
 +__static_yoink("lua_notice");
  
  
  /*
-@@ -72,6 +64,8 @@
- 
- 
+@@ -65,6 +57,8 @@
+   return 1;
+ }
  
 +static int str_format(lua_State *);  // [jart]
 +
  
- static int str_len (lua_State *L) {
-   size_t l;
-@@ -324,11 +318,35 @@
+ /*
+ ** translate a relative initial string position
+@@ -326,11 +320,35 @@
  }
  
  static int arith_mul (lua_State *L) {
@@ -736,7 +709,7 @@
  }
  
  static int arith_pow (lua_State *L) {
-@@ -567,7 +585,7 @@
+@@ -569,7 +587,7 @@
  
  
  static const char *end_capture (MatchState *ms, const char *s,
@@ -745,9 +718,9 @@
    int l = capture_to_close(ms);
    const char *res;
    ms->capture[l].len = s - ms->capture[l].init;  /* close capture */
-@@ -1255,7 +1273,7 @@
+@@ -1266,7 +1284,7 @@
    }
-   if (!isalpha(uchar(*spec)))  /* did not go to the end? */
+   if (!isalpha(cast_uchar(*spec)))  /* did not go to the end? */
      luaL_error(L, "invalid conversion specification: '%s'", form);
 -}
 +  }
@@ -810,7 +783,7 @@
  
  
  
-@@ -1738,7 +1743,7 @@
+@@ -1964,7 +1969,7 @@
        lua_error(L1);
      }
      else if EQ("abort") {
@@ -869,7 +842,7 @@
  /*
 --- a/third_party/lua/lua.h
 +++ b/third_party/lua/lua.h
-@@ -1,13 +1,10 @@
+@@ -1,10 +1,5 @@
 -
 -#ifndef lua_h
 -#define lua_h
@@ -880,13 +853,17 @@
 +#ifndef COSMOPOLITAN_THIRD_PARTY_LUA_LUA_H_
 +#define COSMOPOLITAN_THIRD_PARTY_LUA_LUA_H_
  
+ #define LUA_COPYRIGHT	LUA_RELEASE "  Copyright (C) 1994-2026 Lua.org, PUC-Rio"
+ #define LUA_AUTHORS	"R. Ierusalimschy, L. H. de Figueiredo, W. Celes"
+@@ -20,6 +15,8 @@
+ 
  #include "third_party/lua/luaconf.h"
  
 +COSMOPOLITAN_C_START_
 +
  
- #define LUA_VERSION_MAJOR	"5"
- #define LUA_VERSION_MINOR	"4"
+ /* mark for precompiled code ('<esc>Lua') */
+ #define LUA_SIGNATURE	"\x1bLua"
 @@ -137,6 +134,14 @@
  
  
@@ -902,9 +879,9 @@
  ** generic extra include file
  */
  #if defined(LUA_USER_H)
-@@ -488,29 +493,7 @@
- 
- /* }====================================================================== */
+@@ -512,29 +517,7 @@
+ #define LUA_VERSION	"Lua " LUA_VERSION_MAJOR "." LUA_VERSION_MINOR
+ #define LUA_RELEASE	LUA_VERSION "." LUA_VERSION_RELEASE
  
 +extern const char *g_lua_path_default;  // [jart]
  
@@ -957,7 +934,7 @@
  
  
  /*
-@@ -191,65 +198,20 @@
+@@ -209,65 +216,20 @@
  */
  
  #define LUA_VDIR	LUA_VERSION_MAJOR "." LUA_VERSION_MINOR
@@ -972,17 +949,17 @@
 -
 -#if !defined(LUA_PATH_DEFAULT)
 -#define LUA_PATH_DEFAULT  \
--		LUA_LDIR"?.lua;"  LUA_LDIR"?\\init.lua;" \
--		LUA_CDIR"?.lua;"  LUA_CDIR"?\\init.lua;" \
--		LUA_SHRDIR"?.lua;" LUA_SHRDIR"?\\init.lua;" \
+-		LUA_LDIR "?.lua;"  LUA_LDIR "?\\init.lua;" \
+-		LUA_CDIR "?.lua;"  LUA_CDIR "?\\init.lua;" \
+-		LUA_SHRDIR "?.lua;"  LUA_SHRDIR "?\\init.lua;" \
 -		".\\?.lua;" ".\\?\\init.lua"
 -#endif
 -
 -#if !defined(LUA_CPATH_DEFAULT)
 -#define LUA_CPATH_DEFAULT \
--		LUA_CDIR"?.dll;" \
--		LUA_CDIR"..\\lib\\lua\\" LUA_VDIR "\\?.dll;" \
--		LUA_CDIR"loadall.dll;" ".\\?.dll"
+-		LUA_CDIR "?.dll;" \
+-		LUA_CDIR "..\\lib\\lua\\"  LUA_VDIR "\\?.dll;" \
+-		LUA_CDIR "loadall.dll;" ".\\?.dll"
 -#endif
 -
 -#else			/* }{ */
@@ -993,16 +970,16 @@
 -
 -#if !defined(LUA_PATH_DEFAULT)
 -#define LUA_PATH_DEFAULT  \
--		LUA_LDIR"?.lua;"  LUA_LDIR"?/init.lua;" \
--		LUA_CDIR"?.lua;"  LUA_CDIR"?/init.lua;" \
+-		LUA_LDIR "?.lua;"  LUA_LDIR "?/init.lua;" \
+-		LUA_CDIR "?.lua;"  LUA_CDIR "?/init.lua;" \
 -		"./?.lua;" "./?/init.lua"
 -#endif
--
+ 
 -#if !defined(LUA_CPATH_DEFAULT)
 -#define LUA_CPATH_DEFAULT \
--		LUA_CDIR"?.so;" LUA_CDIR"loadall.so;" "./?.so"
+-		LUA_CDIR "?.so;" LUA_CDIR "loadall.so;" "./?.so"
 -#endif
- 
+-
 -#endif			/* } */
 +#define LUA_ROOT	"/zip/"
 +#define LUA_LDIR	LUA_ROOT ".lua/"
@@ -1028,7 +1005,7 @@
  
  
  /*
-@@ -278,20 +240,8 @@
+@@ -296,20 +258,8 @@
  ** the libraries, you may want to use the following definition (define
  ** LUA_BUILD_AS_DLL to get it).
  */
@@ -1049,20 +1026,7 @@
  
  /*
  ** More often than not the libs go together with the core.
-@@ -314,12 +264,7 @@
- ** give a warning about it. To avoid these warnings, change to the
- ** default definition.
- */
--#if defined(__GNUC__) && ((__GNUC__*100 + __GNUC_MINOR__) >= 302) && \
--    defined(__ELF__)		/* { */
--#define LUAI_FUNC	__attribute__((visibility("internal"))) extern
--#else				/* }{ */
- #define LUAI_FUNC	extern
--#endif				/* } */
- 
- #define LUAI_DDEC(dec)	LUAI_FUNC dec
- #define LUAI_DDEF	/* empty */
-@@ -648,7 +593,6 @@
+@@ -621,7 +571,6 @@
  
  #if !defined(LUA_USE_C89) && defined(__STDC_VERSION__) && \
      __STDC_VERSION__ >= 199901L
@@ -1070,13 +1034,3 @@
  #if defined(INTPTR_MAX)  /* even in C99 this type is optional */
  #undef LUA_KCONTEXT
  #define LUA_KCONTEXT	intptr_t
-@@ -716,8 +660,7 @@
- @@ LUA_USE_APICHECK turns on several consistency checks on the C API.
- ** Define it as a help when debugging C code.
- */
--#if defined(LUA_USE_APICHECK)
--#include <assert.h>
-+#if IsModeDbg()
- #define luai_apicheck(l,e)	assert(e)
- #endif
- 

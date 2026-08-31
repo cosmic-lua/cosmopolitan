@@ -258,9 +258,9 @@ static int MeasureArray(lua_State *L, struct Serializer *z,
   unsigned int i, asize;
   // for a table, lua_topointer returns its GC object, the Table itself
   const Table *t = lua_topointer(L, -1);
-  asize = luaH_realasize(t);
+  asize = t->asize;
   for (i = 0; i < asize; i++) {
-    if (!isempty(&t->array[i])) {
+    if (!tagisempty(*getArrTag(t, i))) {
       ++cnt;
       max = i + 1;
     }
