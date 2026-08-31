@@ -235,6 +235,14 @@ o/$(MODE)/tool/lua/test_unix_clearenv.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/te
 	$< tool/lua/test_unix_clearenv.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_unix_execvp.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_execvp.lua
+	$< tool/lua/test_unix_execvp.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_unix_daemon.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_daemon.lua
+	$< tool/lua/test_unix_daemon.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -257,6 +265,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_unix_setenv.ok				\
 	o/$(MODE)/tool/lua/test_unix_unsetenv.ok				\
 	o/$(MODE)/tool/lua/test_unix_clearenv.ok				\
+	o/$(MODE)/tool/lua/test_unix_execvp.ok				\
+	o/$(MODE)/tool/lua/test_unix_daemon.ok				\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
