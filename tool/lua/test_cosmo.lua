@@ -62,6 +62,18 @@ local ok, err = unix.setsockopt(sfd, unix.SOL_SOCKET, unix.SO_NOSIGPIPE, true)
 assert(ok or err, "setsockopt(SO_NOSIGPIPE) should return a status")
 unix.close(sfd)
 
+-- getsockopt(SOL_SOCKET, SO_LINGER) must return BOTH values of its
+-- documented two-value overload (seconds:int, enabled:bool), in that
+-- order. The C binding once pushed both values but returned only 1,
+-- silently dropping seconds and shifting enabled into its place.
+local lfd = assert(unix.socket(unix.AF_INET, unix.SOCK_STREAM))
+assert(unix.setsockopt(lfd, unix.SOL_SOCKET, unix.SO_LINGER, 5, true))
+local seconds, enabled, extra = unix.getsockopt(lfd, unix.SOL_SOCKET, unix.SO_LINGER)
+assert(seconds == 5, "getsockopt(SO_LINGER) seconds should be 5, got: " .. tostring(seconds))
+assert(enabled == true, "getsockopt(SO_LINGER) enabled should be true, got: " .. tostring(enabled))
+assert(extra == nil, "getsockopt(SO_LINGER) should return exactly 2 values")
+unix.close(lfd)
+
 -- randomness surface: keep exactly GetRandomBytes and Rand64. The rdrand/
 -- rdseed/lemur64 fictions (arc4random64 aliases that never touched RDRAND, a
 -- deterministic per-run generator) were removed; so were the Curve25519 key
