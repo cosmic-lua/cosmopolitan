@@ -1779,7 +1779,7 @@ static int db_serialize(lua_State *L) {
         return pusherrstr(L, "failed to serialize");
 
     lua_pushlstring(L, buffer, size);
-    free(buffer);
+    sqlite3_free(buffer);
     return 1;
 }
 

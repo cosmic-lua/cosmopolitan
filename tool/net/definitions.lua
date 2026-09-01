@@ -919,7 +919,8 @@ function lsqlite3.Database:rollback_hook(func, udata) end
 function lsqlite3.Database:rows(sql) end
 
 --- Serialize a database to be restored later with `Database:deserialize`.
----@return string? -- `nil` if the database has no tables
+---@return string|nil data `nil` if the database has no tables
+---@return string? error message on failure
 ---@nodiscard
 function lsqlite3.Database:serialize() end
 
