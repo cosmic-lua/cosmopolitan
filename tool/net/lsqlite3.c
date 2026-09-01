@@ -1605,10 +1605,11 @@ static int db_prepare(lua_State *L) {
 
     if (sqlite3_prepare_v2(db->db, sql, sql_len, &svm->vm, &sqltail) != SQLITE_OK) {
         lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
         lua_pushinteger(L, sqlite3_errcode(db->db));
         if (cleanupvm(L, svm) == 1)
             lua_pop(L, 1); /* this should not happen since sqlite3_prepare_v2 will not set ->vm on error */
-        return 2;
+        return 3;
     }
 
     /* vm already in the stack */

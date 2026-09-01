@@ -874,7 +874,8 @@ function lsqlite3.Database:nrows(sql) end
 --- See https://lua.sqlite.org/home/doc/tip/doc/lsqlite3.wiki#methods_for_prepared_statements for details.
 ---@param sql string
 ---@return lsqlite3.Statement|nil stmt compiled statement, or nil when compilation fails
----@return string|lsqlite3.ResultCode tail SQL past the first statement on success; the error code on failure (fetch the message with db:errmsg())
+---@return string? tail_or_error SQL past the first statement on success; the error message on failure
+---@return lsqlite3.ResultCode? errorcode present on failure only
 ---@nodiscard
 function lsqlite3.Database:prepare(sql) end
 
