@@ -580,17 +580,20 @@ function lsqlite3.version() end
 ---
 --- - `lsqlite3.CONFIG_SINGLETHREAD`, `lsqlite3.CONFIG_MULTITHREAD`, or
 ---   `lsqlite3.CONFIG_SERIALIZED`: selects the global threading mode.
----   Returns `lsqlite3.OK` on success, or `nil` plus a numerical error
----   code on failure.
+---   Returns `lsqlite3.OK` on success, or `nil` plus an error message and
+---   numerical error code on failure.
 --- - `lsqlite3.CONFIG_LOG`: installs a Lua callback that is invoked as
 ---   `func(udata, errcode, message)` for every SQLite3 log event, or
 ---   removes the current callback when `func` is `nil`. Returns
 ---   `lsqlite3.OK` followed by the previously installed callback and its
 ---   user data.
+--- - Any other value for `option`: returns `nil` plus an error message and
+---   numerical error code.
 ---@param option integer
 ---@param func function? callback for `lsqlite3.CONFIG_LOG`, or `nil` to remove it
 ---@param udata any? user data passed to the log callback
 ---@return integer|nil rc, function? prev_func, any prev_udata
+---@return string? errormsg
 ---@return integer? errorcode
 function lsqlite3.config(option, func, udata) end
 
