@@ -1554,18 +1554,41 @@ static int LuaUnixSetgid(lua_State *L) {
   return LuaUnixSetid(L, "setgid", setgid);
 }
 
+// setfsuid(2)/setfsgid(2) can't signal failure through their return
+// value the way SysretBool assumes: success returns the PREVIOUS
+// fsuid/fsgid, failure returns the CURRENT (unchanged) one, and
+// neither is -1 in ordinary operation. The established idiom to
+// detect a refused change is a second call with -1 (an id no process
+// can hold, so it changes nothing) immediately after, which reports
+// the value now in effect; if that doesn't match what we asked for,
+// the kernel refused the change (typically for lack of
+// CAP_SETUID/CAP_SETGID) and we synthesize EPERM so callers get the
+// honest nil, err, errno tuple instead of a false true.
+static dontinline int LuaUnixSetfsxid(lua_State *L, const char *call,
+                                      int f(unsigned)) {
+  int olderr = errno;
+  unsigned want = luaL_checkinteger(L, 1);
+  f(want);
+  if ((unsigned)f(-1) != want) {
+    errno = EPERM;
+    return LuaUnixSysretErrno(L, call, olderr);
+  }
+  lua_pushboolean(L, true);
+  return 1;
+}
+
 // unix.setfsuid(fsuid:int)
 //     ├─→ true
 //     └─→ nil, error:str, errno:int
 static int LuaUnixSetfsuid(lua_State *L) {
-  return LuaUnixSetid(L, "setfsuid", setfsuid);
+  return LuaUnixSetfsxid(L, "setfsuid", setfsuid);
 }
 
 // unix.setfsgid(fsgid:int)
 //     ├─→ true
 //     └─→ nil, error:str, errno:int
 static int LuaUnixSetfsgid(lua_State *L) {
-  return LuaUnixSetid(L, "setfsgid", setfsgid);
+  return LuaUnixSetfsxid(L, "setfsgid", setfsgid);
 }
 
 static dontinline int LuaUnixSetresid(lua_State *L, const char *call,
