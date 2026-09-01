@@ -251,6 +251,7 @@ probe("path.basename", path.basename, "/a/b/c.tl")
 probe("path.dirname", path.dirname, "/a/b/c.tl")
 probe("path.join", path.join, "a", "b")
 probe("unix.getpid", unix.getpid)
+probe("unix.getpgrp", unix.getpgrp)
 probe("unix.clock_gettime", unix.clock_gettime)
 
 -- --- the pure surface -------------------------------------------------
