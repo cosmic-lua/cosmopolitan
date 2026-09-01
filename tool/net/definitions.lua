@@ -552,8 +552,8 @@ lsqlite3 = {
 ---@param filename string
 ---@param flags? lsqlite3.OpenFlag defaults to `lsqlite3.OPEN_READWRITE + lsqlite3.OPEN_CREATE`
 ---@return lsqlite3.Database|nil db
----@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
 ---@nodiscard
 function lsqlite3.open(filename, flags) end
 
@@ -561,8 +561,8 @@ function lsqlite3.open(filename, flags) end
 --- of an error, the function returns `nil`, an error code and an error message.
 --- (In-memory databases are volatile as they are never stored on disk.)
 ---@return lsqlite3.Database|nil db
----@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
 ---@nodiscard
 function lsqlite3.open_memory() end
 
@@ -1415,16 +1415,18 @@ re.Regex = {}
 
 --- A regex match: the whole matched substring plus its parenthesized
 --- capture groups, as returned by `re.Regex:search`, `re.Regex:match`,
---- and `re.search`.
----@class re.Match
+--- and `re.search`. Distinct from `re.Match` (returned by
+--- `re.Regex:find`), which reports offsets instead of the substring
+--- itself.
+---@class re.SearchMatch
 ---@field match string the whole matched substring
 ---@field captures {string} the parenthesized capture groups, in order
 --- (an empty table when the pattern has no groups)
 
 --- Executes precompiled regular expression.
 ---
---- On a match, returns one `re.Match` table. A no-match is not an
---- error: it returns a single bare `nil`, so the idiomatic
+--- On a match, returns one `re.SearchMatch` table. A no-match is not
+--- an error: it returns a single bare `nil`, so the idiomatic
 --- `if result then` works. Only a genuine regex engine failure (e.g.
 --- running out of memory) returns `nil, err`. Flags may contain
 --- `re.NOTBOL` or `re.NOTEOL` to indicate whether or not text should
@@ -1433,9 +1435,9 @@ re.Regex = {}
 --- The match and its captures used to be two positional returns
 --- (`match`, `captures`), which put the failure path's error string in
 --- the same slot a match's captures table occupied. Bundling both into
---- one `re.Match` table keeps every slot's meaning fixed regardless of
---- branch: this return is always the value-or-nil, and the next is
---- always the error string, present on no other path.
+--- one `re.SearchMatch` table keeps every slot's meaning fixed
+--- regardless of branch: this return is always the value-or-nil, and
+--- the next is always the error string, present on no other path.
 ---
 ---@param str string
 ---@param flags? re.SearchFlag defaults to zero and may have any of:
@@ -1444,8 +1446,8 @@ re.Regex = {}
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return re.Match|nil result the match, nil when nothing matched or
---- the search failed
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
 ---@return string? error the engine failure message; absent both on a
 --- match and on a no-match
 ---@nodiscard
@@ -1463,19 +1465,35 @@ function re.Regex:search(str, flags) end
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return re.Match|nil result the match, nil when nothing matched or
---- the search failed
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
 ---@return string? error the engine failure message; absent both on a
 --- match and on a no-match
 ---@nodiscard
 function re.Regex:match(str, flags) end
 
+--- A match reported by `re.Regex:find`: the absolute 1-based inclusive
+--- start and end offsets into the searched string, plus the table of
+--- parenthesized capture groups. The matched text is
+--- `str:sub(match.start, match.stop)`.
+---
+--- The offsets and the captures table used to be three positional
+--- returns (`start`, `stop`, `captures`), which put the failure path's
+--- error string in the same slot (2) that a completed match's `stop`
+--- occupied. Bundling them into one table — like `unix.capget`'s caps
+--- table — keeps every slot's meaning fixed regardless of branch: the
+--- first return is always the value-or-nil, the second is always the
+--- error string or absent.
+---@class re.Match
+---@field start integer Absolute 1-based offset of the first matched character.
+---@field stop integer Absolute 1-based offset of the last matched character.
+---@field captures {string} Parenthesized capture groups, in order (an
+--- empty table when the pattern has no groups; `""` for a group that
+--- did not participate).
+
 --- Executes precompiled regular expression, reporting where the match
 --- is. Like `re.Regex:search`, but instead of the matched substring it
---- returns the match's absolute 1-based inclusive start and end offsets
---- into `str`, plus the table of parenthesized capture groups (an empty
---- table when the pattern has no groups; `""` for a group that did not
---- participate). The matched text is `str:sub(start, stop)`.
+--- returns a `re.Match` table.
 ---
 --- `init` (1-based, defaults to 1) starts the search at that offset:
 --- the pattern is matched against the tail of `str`, and the returned
@@ -1494,9 +1512,9 @@ function re.Regex:match(str, flags) end
 --- - `re.NOTBOL`
 --- - `re.NOTEOL`
 ---@param init? integer 1-based offset to start searching at (defaults to 1)
----@return integer|nil start absolute 1-based offset of the first matched character
----@return integer|string|nil stop absolute 1-based offset of the last matched character (an error string when start is nil)
----@return {string} captures the parenthesized capture groups, in order
+---@return re.Match|nil match nil both when nothing matched and when the
+--- search failed
+---@return string? error
 ---@nodiscard
 function re.Regex:find(str, flags, init) end
 
@@ -1507,9 +1525,9 @@ function re.Regex:find(str, flags, init) end
 ---     local preg = assert(re.compile(regex))
 ---     local result = preg:search(text)
 ---
---- On a match, returns one `re.Match` table. A no-match returns a bare
---- `nil`. A bad pattern (compile failure) or a regex engine failure
---- returns `nil, err`.
+--- On a match, returns one `re.SearchMatch` table. A no-match returns a
+--- bare `nil`. A bad pattern (compile failure) or a regex engine
+--- failure returns `nil, err`.
 ---
 ---@param regex string
 ---@param text string
@@ -1525,8 +1543,8 @@ function re.Regex:find(str, flags, init) end
 --- This has exponential complexity. Please use `re.compile()` to compile your regular expressions once from `/.init.lua`. This API exists for convenience. This isn't recommended for prod.
 ---
 --- This uses POSIX extended syntax by default.
----@return re.Match|nil result the match, nil when nothing matched or
---- the search failed
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
 ---@return string? error the engine failure message (either a bad
 --- pattern at compile time or a genuine engine failure at search
 --- time); absent both on a match and on a no-match
@@ -1633,11 +1651,16 @@ getopt = {}
 ---     end
 ---     -- Now excludes contains all -e values: {"foo", "bar", "spam"}
 ---
+--- A malformed call -- `args` not a table, `optstring` not a string,
+--- `longopts` not nil/a table, an `args`/`longopts` table over its size
+--- limit, or a malformed `longopts` entry -- raises rather than returning
+--- an error, since none of those is a getopt_long() runtime outcome: no
+--- shape a correct caller passes can reach it.
+---
 ---@param args string[] Command-line arguments (typically `arg`)
 ---@param optstring string Short options string (e.g., "hvo:")
 ---@param longopts? table[] Long option definitions: {{name, has_arg, short}, ...}
----@return getopt.Result|nil result
----@return string? error
+---@return getopt.Result result
 function getopt.parse(args, optstring, longopts) end
 
 --- The path module may be used to manipulate unix paths.

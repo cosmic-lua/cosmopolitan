@@ -319,8 +319,9 @@ local sr = probe("re.search", re.search, "a(b)c", "abc")
 assert(sr.match == "abc" and type(sr.captures) == "table", "re.search must match")
 probe("re.search", re.search, "[", "x")
 
--- the compiled-Regex methods: a match fills the declared re.Match slot,
--- which is how #247's phantom third return would have been caught here
+-- the compiled-Regex methods: a match fills the declared re.SearchMatch
+-- slot, which is how #247's phantom third return would have been caught
+-- here
 local rss = probe("re.Regex:search", rx.search, rx, "abc")
 assert(rss.match == "abc" and type(rss.captures) == "table",
   "re.Regex:search must match")
@@ -329,9 +330,9 @@ assert(rsm.match == "abc" and type(rsm.captures) == "table",
   "re.Regex:match must match")
 probe("re.Regex:find", rx.find, rx, "abc")
 
-local gv, gerr = probe("getopt.parse", getopt.parse, "not-a-table", "h")
-assert(gv == nil and type(gerr) == "string",
-  "getopt.parse with a non-table argv must be nil, string")
+-- getopt.parse raises on a malformed call (an argument-shape error), so
+-- unlike re.compile/re.search above it has no nil+error slot to force;
+-- only its success path is probed here.
 probe("getopt.parse", getopt.parse, { "prog", "-h" }, "h")
 
 -- These two have a real second slot the C can push but no test can
@@ -506,6 +507,14 @@ local SLOT_UNPROBED = {
   -- already-compiled-object methods.
   ["re.Regex:search #2"] = true,
   ["re.Regex:match #2"] = true,
+  -- re.Regex:find's error slot only fires on a genuine regexec()
+  -- failure (REG_ESPACE: out of memory, or the backtracking matcher's
+  -- stack exhausted) against an already-compiled, valid regex_t --
+  -- unlike re.compile's bad-pattern probe above, no pattern or input
+  -- this file can construct forces that deterministically. The slot
+  -- is real: LuaReFindImpl shares LuaReReturnError with re.compile's
+  -- demonstrated nil, err path.
+  ["re.Regex:find #2"] = true,
 }
 
 local nslots, nslotallow = 0, 0

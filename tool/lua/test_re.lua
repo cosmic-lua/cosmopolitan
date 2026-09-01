@@ -3,8 +3,9 @@
 -- strings, and the re.Errno userdata deleted.
 --
 -- re.Regex:search, re.Regex:match (the same C function), and module-level
--- re.search all bundle a match's substring and captures into one re.Match
--- table (fields "match" and "captures") instead of two positional returns,
+-- re.search all bundle a match's substring and captures into one
+-- re.SearchMatch table (fields "match" and "captures") instead of two
+-- positional returns,
 -- so no slot ever does double duty between a match's captures and a
 -- failure's error string: slot 1 is always the value-or-nil, slot 2 is
 -- always absent or the error string.
@@ -14,8 +15,8 @@ local re = require("cosmo.re")
 local rx = assert(re.compile("([0-9]+)-([0-9]+)"))
 assert(type(rx) == "userdata", "compiled regex should be userdata")
 
--- match: one re.Match table with the whole matched substring and a table
--- of capture groups
+-- match: one re.SearchMatch table with the whole matched substring and a
+-- table of capture groups
 local r = rx:search("abc 12-345 xyz")
 assert(type(r) == "table", "a match must return one table, got " .. type(r))
 assert(r.match == "12-345", "match should be the whole matched substring, got: " ..
@@ -60,7 +61,7 @@ assert(type(err) == "string", "compile error must be a string, got: " ..
 assert(#err > 0, "compile error string is non-empty")
 
 -- module-level re.search convenience obeys the same contract: one
--- re.Match table on a match
+-- re.SearchMatch table on a match
 local sr = re.search("(a+)(b+)", "xxaaabbyy")
 assert(type(sr) == "table", "re.search must return one table on a match")
 assert(sr.match == "aaabb", "re.search whole match")
@@ -101,36 +102,47 @@ assert(nr.match == "" and type(nr.captures) == "table",
   "NOSUB reports a match as an empty string")
 assert((ns:search("nope")) == nil, "NOSUB no-match is nil")
 
--- :find is a separate C function/binding (LuaReRegexFind/LuaReFindImpl) and
--- keeps its own three-positional-return shape (start, stop, captures);
--- unaffected by this change, still exercised here for regression coverage.
+-- :find reports absolute 1-based inclusive offsets plus captures,
+-- bundled into one re.Match table so slot 2 is never anything but an
+-- error string or absent (the same shape as unix.nanosleep's
+-- remainder table)
 local fx = assert(re.compile("([0-9]+)-([0-9]+)"))
-local fs, fe, fcaps = fx:find("abc 12-345 xyz")
-assert(fs == 5 and fe == 10, "find offsets, got: " ..
-  tostring(fs) .. "," .. tostring(fe))
-assert(("abc 12-345 xyz"):sub(fs, fe) == "12-345",
+local fm = fx:find("abc 12-345 xyz")
+assert(type(fm) == "table", "find match should be a table, got: " .. type(fm))
+assert(fm.start == 5 and fm.stop == 10, "find offsets, got: " ..
+  tostring(fm.start) .. "," .. tostring(fm.stop))
+assert(("abc 12-345 xyz"):sub(fm.start, fm.stop) == "12-345",
   "offsets slice back to the matched text")
-assert(fcaps[1] == "12" and fcaps[2] == "345", "find captures")
+assert(fm.captures[1] == "12" and fm.captures[2] == "345", "find captures")
 
 -- :find no-match is a single bare nil, like :search
 assert(select("#", fx:find("no digits")) == 1,
   "find no-match returns exactly one value")
 assert((fx:find("no digits")) == nil, "find no-match is nil")
 
+-- :find's engine-failure branch shares LuaReReturnError with
+-- re.compile's error path (already exercised above: a malformed
+-- pattern fails to compile as nil, string), so :find can never reach
+-- a live regex_t that then errors out of regexec() for a reason a
+-- test can force deterministically; what this capture guarantees is
+-- that IF that branch runs, slot 2 holds only a string, never mixed
+-- with the integer-offset success shape -- confirmed structurally by
+-- fm.start/fm.stop above living on the match table, not in slot 2
+
 -- init advances the search; offsets stay absolute
-local s2, e2 = fx:find("1-2 33-44", 0, 4)
-assert(s2 == 5 and e2 == 9, "find with init reports absolute offsets, got: " ..
-  tostring(s2) .. "," .. tostring(e2))
+local m2 = fx:find("1-2 33-44", 0, 4)
+assert(m2.start == 5 and m2.stop == 9, "find with init reports absolute offsets, got: " ..
+  tostring(m2.start) .. "," .. tostring(m2.stop))
 
 -- iterating by advancing init past each match finds every match
 local subject = "a1-2b345-6c7-89d"
 local starts = {}
 local pos = 1
 while true do
-  local ms, me = fx:find(subject, 0, pos)
-  if not ms then break end
-  starts[#starts + 1] = subject:sub(ms, me)
-  pos = me + 1
+  local match = fx:find(subject, 0, pos)
+  if not match then break end
+  starts[#starts + 1] = subject:sub(match.start, match.stop)
+  pos = match.stop + 1
 end
 assert(#starts == 3 and starts[1] == "1-2" and starts[2] == "345-6" and
   starts[3] == "7-89", "find-driven iteration collects every match")
@@ -140,21 +152,21 @@ assert((fx:find("1-2", 0, 99)) == nil, "init past the end is a no-match")
 assert((fx:find("1-2", 0, -5)) ~= nil, "negative init clamps to 1")
 
 -- a non-participating optional group is "" through :find too
-local ofs, ofe, ofc = opt:find("a")
-assert(ofs == 1 and ofe == 1 and ofc[1] == "a" and ofc[2] == "",
-  "find optional-group captures")
+local om = opt:find("a")
+assert(om.start == 1 and om.stop == 1 and om.captures[1] == "a" and
+  om.captures[2] == "", "find optional-group captures")
 
 -- ^ anchoring interacts with init the documented way: the tail is the
 -- subject, so ^ matches at init unless NOTBOL is passed
 local fanch = assert(re.compile("^abc"))
-assert((fanch:find("xxabc", 0, 3)) == 3, "^ matches at init by default")
+assert(fanch:find("xxabc", 0, 3).start == 3, "^ matches at init by default")
 assert((fanch:find("xxabc", re.NOTBOL, 3)) == nil,
   "NOTBOL suppresses ^ at init")
 
 -- :match is :search under the verb the operation performs, so a
 -- downstream that reserves `match` tree-wide can name the method
 -- directly instead of wrapping it. Same function, same returns: one
--- re.Match table on a match, sharing no slot with the error string.
+-- re.SearchMatch table on a match, sharing no slot with the error string.
 local mre = assert(re.compile("(a+)(b+)"))
 local mr = mre:match("xxaabbyy")
 local sr2 = mre:search("xxaabbyy")
