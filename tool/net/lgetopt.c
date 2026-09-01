@@ -26,13 +26,17 @@
 #define MAX_ARGC     10000
 #define MAX_LONGOPTS  1000
 
-// Push `nil, <message>` and return 2 from the calling C function.
-#define FAIL(...)                     \
-  do {                                \
-    lua_pushnil(L);                   \
-    lua_pushfstring(L, __VA_ARGS__);  \
-    return 2;                         \
-  } while (0)
+// Raise a bad-argument error (argument-shape violation) for 1-based
+// argument `idx`. Every ARGFAIL/SIZEFAIL site below rejects a shape no
+// correct caller passes, never a getopt_long() runtime outcome, so it
+// raises rather than returning a fallible `nil, err` (see AGENTS.md's
+// binding-contract rule).
+#define ARGFAIL(idx, ...) \
+  return luaL_argerror(L, (idx), lua_pushfstring(L, __VA_ARGS__))
+
+// Raise for a table exceeding a size limit: no single argument is at
+// fault, so this has no argument index to blame.
+#define SIZEFAIL(...) return luaL_error(L, __VA_ARGS__)
 
 static int ParseHasArg(const char *s) {
   if (!strcmp(s, "none"))
@@ -45,8 +49,13 @@ static int ParseHasArg(const char *s) {
 }
 
 // getopt.parse(args, optstring[, longopts])
-//     ├─→ {opts={{opt,arg?}...}, args={...}, unknown={...}, missing={...}}
-//     └─→ nil, err
+//     └─→ {opts={{opt,arg?}...}, args={...}, unknown={...}, missing={...}}
+//
+// Raises (luaL_argerror/luaL_error) on a malformed call -- a bad args/
+// optstring/longopts shape, or a table over MAX_ARGC/MAX_LONGOPTS -- since
+// none of those is a getopt_long() runtime outcome; unrecognized options
+// and missing arguments are reported through the success path's
+// result.unknown/result.missing instead.
 //
 // Single-shot, re-entrant command-line parser. Unlike the old stateful
 // Parser userdata, all state is local to this one call: the underlying
@@ -68,42 +77,42 @@ static int LuaGetoptParse(lua_State *L) {
   char *opts;
 
   if (!lua_istable(L, 1))
-    FAIL("args must be a table");
+    ARGFAIL(1, "args must be a table");
   if (lua_type(L, 2) != LUA_TSTRING)
-    FAIL("optstring must be a string");
+    ARGFAIL(2, "optstring must be a string");
   if (!lua_isnoneornil(L, 3) && !lua_istable(L, 3))
-    FAIL("longopts must be a table");
+    ARGFAIL(3, "longopts must be a table");
   ostr = lua_tolstring(L, 2, &olen);
 
   // Bounds-check the tables before touching C memory.
   argc_raw = luaL_len(L, 1);
   if (argc_raw < 0 || argc_raw > MAX_ARGC)
-    FAIL("args table too large (max %d)", MAX_ARGC);
+    SIZEFAIL("args table too large (max %d)", MAX_ARGC);
   argc = (int)argc_raw;
 
   nlong_raw = lua_isnoneornil(L, 3) ? 0 : luaL_len(L, 3);
   if (nlong_raw < 0 || nlong_raw > MAX_LONGOPTS)
-    FAIL("longopts table too large (max %d)", MAX_LONGOPTS);
+    SIZEFAIL("longopts table too large (max %d)", MAX_LONGOPTS);
   nlong = (int)nlong_raw;
 
   // Validate every longopt entry up front.
   for (int i = 0; i < nlong; i++) {
     lua_rawgeti(L, 3, i + 1);
     if (!lua_istable(L, -1))
-      FAIL("longopt[%d] must be a table", i + 1);
+      ARGFAIL(3, "longopt[%d] must be a table", i + 1);
     lua_rawgeti(L, -1, 1);
     if (lua_type(L, -1) != LUA_TSTRING)
-      FAIL("longopt[%d][1] (name) must be a string", i + 1);
+      ARGFAIL(3, "longopt[%d][1] (name) must be a string", i + 1);
     lua_pop(L, 1);
     lua_rawgeti(L, -1, 2);
     if (lua_type(L, -1) != LUA_TSTRING)
-      FAIL("longopt[%d][2] (has_arg) must be a string", i + 1);
+      ARGFAIL(3, "longopt[%d][2] (has_arg) must be a string", i + 1);
     if (ParseHasArg(lua_tostring(L, -1)) == -1)
-      FAIL("longopt[%d][2] must be 'none', 'required', or 'optional'", i + 1);
+      ARGFAIL(3, "longopt[%d][2] must be 'none', 'required', or 'optional'", i + 1);
     lua_pop(L, 1);
     lua_rawgeti(L, -1, 3);
     if (!lua_isnoneornil(L, -1) && lua_type(L, -1) != LUA_TSTRING)
-      FAIL("longopt[%d][3] (short) must be a string or nil", i + 1);
+      ARGFAIL(3, "longopt[%d][3] (short) must be a string or nil", i + 1);
     lua_pop(L, 1);
     lua_pop(L, 1);  // pop entry
   }
@@ -112,7 +121,7 @@ static int LuaGetoptParse(lua_State *L) {
   for (int i = 1; i <= argc; i++) {
     lua_rawgeti(L, 1, i);
     if (lua_type(L, -1) != LUA_TSTRING)
-      FAIL("args[%d] must be a string", i);
+      ARGFAIL(1, "args[%d] must be a string", i);
     lua_pop(L, 1);
   }
 
