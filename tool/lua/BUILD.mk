@@ -252,6 +252,7 @@ o/$(MODE)/tool/lua/test_sqlite_config_error.ok: o/$(MODE)/tool/lua/lua.dbg tool/
 
 o/$(MODE)/tool/lua/test_sqlite_prepare_error.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sqlite_prepare_error.lua
 	$< tool/lua/test_sqlite_prepare_error.lua
+	@touch $@
 
 o/$(MODE)/tool/lua/test_sqlite_deterministic.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sqlite_deterministic.lua
 	$< tool/lua/test_sqlite_deterministic.lua
