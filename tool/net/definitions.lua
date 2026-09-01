@@ -2069,6 +2069,18 @@ function zip.Appender:close() end
 ---
 cov = {}
 
+--- Arms an instruction budget on the calling thread's collection: the
+--- hook raises `"cosmo.cov: instruction budget exceeded"` once `n` VM
+--- instructions have executed. Re-arms the thread, which restarts Lua's
+--- internal instruction counter, so each call gives a fresh budget
+--- rather than continuing a previous one; the budget is one-shot and
+--- does not fire again once raised. Returns `false`, changing nothing,
+--- when the calling thread's debug hook is not this collector's — the
+--- caller then falls back to its own `debug.sethook` budget instead.
+---@param n integer? VM instructions until the hook raises; nil or 0 clears the budget
+---@return boolean armed `false` when the calling thread's hook is not the collector's
+function cov.budget(n) end
+
 --- Arms line-hit collection on the calling thread. Counting starts (or
 --- resumes) immediately; counts accumulate into process-global state
 --- shared with every other armed thread. Installs a Lua debug hook, so
