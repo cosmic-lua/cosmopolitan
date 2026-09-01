@@ -4599,12 +4599,11 @@ function unix.unsetenv(name) end
 
 --- Clears all environment variables.
 ---
---- This wraps the C `clearenv()` function to allow Lua scripts to remove
---- all environment variables at once.
----
----@return true|nil
----@return string? error
----@return unix.Errno? errno
+--- This wraps the C `clearenv()` function to allow Lua scripts to
+--- remove all environment variables at once. Never fails: this
+--- project's `clearenv()` (`libc/intrin/clearenv.c`)
+--- unconditionally sets `environ = 0` and returns success.
+---@return true
 function unix.clearenv() end
 
 --- Gets login name of current user.
@@ -6713,11 +6712,12 @@ function unix.sigaction(sig, handler, flags, mask) end
 ---@return unix.Errno? errno
 function unix.sigsuspend(mask) end
 
---- Returns the set of signals pending delivery to the calling process
---- that are currently blocked.
----@return unix.Sigset|nil mask
----@return string? error
----@return unix.Errno? errno
+--- Returns the set of signals pending delivery to the calling
+--- process that are currently blocked. Never fails on any
+--- platform this project supports: its one documented failure,
+--- EFAULT, needs an invalid pointer this binding never
+--- constructs.
+---@return unix.Sigset mask
 function unix.sigpending() end
 
 --- Causes `SIGALRM` signals to be generated at some point(s) in the
@@ -7146,23 +7146,25 @@ function unix.pledge(promises, execpromises, mode) end
 ---@overload fun(path: nil, permissions: nil): true
 function unix.unveil(path, permissions) end
 
+--- Broken-down time returned by `gmtime`/`localtime`.
+---@class unix.BrokenDownTime
+---@field year integer four-digit year
+---@field mon integer 1 ≤ mon ≤ 12
+---@field mday integer 1 ≤ mday ≤ 31
+---@field hour integer 0 ≤ hour ≤ 23
+---@field min integer 0 ≤ min ≤ 59
+---@field sec integer 0 ≤ sec ≤ 60
+---@field gmtoffsec integer ±93600 seconds
+---@field wday integer 0 ≤ wday ≤ 6
+---@field yday integer 0 ≤ yday ≤ 365
+---@field dst integer 1 if daylight savings, 0 if not, -1 if unknown
+---@field zone string time zone abbreviation, e.g. "UTC"
+
 --- Breaks down UNIX timestamp into Zulu Time numbers.
 ---@param unixts integer
----@return integer|nil year nil when the call failed
----@return integer|string mon 1 ≤ mon ≤ 12, or the error string when the
---- call failed — failure returns exactly `nil, error, errno`, so its two
---- values land in the slots mon and mday occupy on success, not in slots
---- of their own past `zone`
----@return integer|unix.Errno mday 1 ≤ mday ≤ 31, or the errno when the
---- call failed
----@return integer hour 0 ≤ hour ≤ 23
----@return integer min 0 ≤ min ≤ 59
----@return integer sec 0 ≤ sec ≤ 60
----@return integer gmtoffsec ±93600 seconds
----@return integer wday 0 ≤ wday ≤ 6
----@return integer yday 0 ≤ yday ≤ 365
----@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
----@return string zone
+---@return unix.BrokenDownTime|nil
+---@return string? error
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.gmtime(unixts) end
 
@@ -7198,21 +7200,9 @@ function unix.gmtime(unixts) end
 --- needed, without having to recompile.
 ---
 ---@param unixts integer
----@return integer|nil year nil when the call failed
----@return integer|string mon 1 ≤ mon ≤ 12, or the error string when the
---- call failed — failure returns exactly `nil, error, errno`, so its two
---- values land in the slots mon and mday occupy on success, not in slots
---- of their own past `zone`
----@return integer|unix.Errno mday 1 ≤ mday ≤ 31, or the errno when the
---- call failed
----@return integer hour 0 ≤ hour ≤ 23
----@return integer min 0 ≤ min ≤ 59
----@return integer sec 0 ≤ sec ≤ 60
----@return integer gmtoffsec ±93600 seconds
----@return integer wday 0 ≤ wday ≤ 6
----@return integer yday 0 ≤ yday ≤ 365
----@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
----@return string zone
+---@return unix.BrokenDownTime|nil
+---@return string? error
+---@return unix.Errno? errno
 function unix.localtime(unixts) end
 
 --- Gets information about file or directory.

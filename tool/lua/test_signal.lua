@@ -145,4 +145,9 @@ do
   end
 end
 
+-- sigpending takes no argument and has no reachable failure on any
+-- platform this project supports (EFAULT needs a pointer this
+-- binding never constructs); it must always return a plain Sigset.
+assert(unix.sigpending() ~= nil, "sigpending must always succeed")
+
 print("PASS")

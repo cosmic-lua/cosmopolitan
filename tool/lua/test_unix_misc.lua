@@ -33,19 +33,19 @@ function UnixTest()
    assert(unix.strsignal(9) == "SIGKILL")
    assert(unix.strsignal(unix.SIGKILL) == "SIGKILL")
 
-   -- gmtime
-   year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst,zone = assert(unix.gmtime(1657297063))
-   assert(year == 2022)
-   assert(mon == 7)
-   assert(mday == 8)
-   assert(hour == 16)
-   assert(min == 17)
-   assert(sec == 43)
-   assert(gmtoffsec == 0)
-   assert(wday == 5)
-   assert(yday == 188)
-   assert(dst == 0)
-   assert(zone == "UTC")
+   -- gmtime: success returns one table (tool/net/definitions.lua).
+   local bdt = assert(unix.gmtime(1657297063))
+   assert(bdt.year == 2022 and bdt.mon == 7 and bdt.mday == 8
+     and bdt.hour == 16 and bdt.min == 17 and bdt.sec == 43
+     and bdt.gmtoffsec == 0 and bdt.wday == 5 and bdt.yday == 188
+     and bdt.dst == 0 and bdt.zone == "UTC")
+
+   -- gmtime's one reachable failure (EOVERFLOW) is a clean nil, string,
+   -- errno tuple now -- nothing shares a slot with a BrokenDownTime field.
+   local goy, gerr, geno = unix.gmtime(9223372036854775807)
+   assert(goy == nil, "gmtime of an unrepresentable timestamp must report nil")
+   assert(type(gerr) == "string", "the error must be a string")
+   assert(geno == unix.EOVERFLOW, "errno must be EOVERFLOW")
 
    -- dup
    -- 1. duplicate stderr as lowest available fd
