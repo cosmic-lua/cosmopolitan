@@ -24,8 +24,7 @@ local unix = require("cosmo.unix")
 local path = require("cosmo.path")
 
 -- create a symlink in a relative directory
-local test_dir = "o/tmp/readlink_test"
-unix.makedirs(test_dir)
+local test_dir = assert(unix.mkdtemp((os.getenv("TMPDIR") or "/tmp") .. "/readlink_test_XXXXXX"))
 local link_path = path.join(test_dir, "testlink")
 unix.unlink(link_path)
 unix.symlink("target_file", link_path)
@@ -70,6 +69,5 @@ assert(neg_result == "target_file",
 -- cleanup
 unix.unlink(link_path)
 unix.rmdir(test_dir)
-unix.rmdir("o/tmp")
 
 print("unix.readlink() relative path tests passed")
