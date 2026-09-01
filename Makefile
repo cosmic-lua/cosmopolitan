@@ -396,7 +396,6 @@ include test/tool/build/lib/BUILD.mk
 include test/tool/build/BUILD.mk
 include test/tool/viz/lib/BUILD.mk
 include test/tool/viz/BUILD.mk
-include test/tool/net/BUILD.mk
 include test/tool/BUILD.mk
 include test/dsp/core/BUILD.mk
 include test/dsp/scale/BUILD.mk
