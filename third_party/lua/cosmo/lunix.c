@@ -2780,7 +2780,7 @@ static int LuaUnixSigpending(lua_State *L) {
 }
 
 // unix.setitimer(which[, intervalsec, intns, valuesec, valuens])
-//     ├─→ intervalsec:int, intervalns:int, valuesec:int, valuens:int
+//     ├─→ previous:table
 //     └─→ nil, error:str, errno:int
 static int LuaUnixSetitimer(lua_State *L) {
   int which, olderr = errno;
@@ -2796,11 +2796,16 @@ static int LuaUnixSetitimer(lua_State *L) {
     itptr = 0;
   }
   if (!setitimer(which, itptr, &oldit)) {
+    lua_newtable(L);
     lua_pushinteger(L, oldit.it_interval.tv_sec);
+    lua_setfield(L, -2, "intervalsec");
     lua_pushinteger(L, oldit.it_interval.tv_usec * 1000);
+    lua_setfield(L, -2, "intervalns");
     lua_pushinteger(L, oldit.it_value.tv_sec);
+    lua_setfield(L, -2, "valuesec");
     lua_pushinteger(L, oldit.it_value.tv_usec * 1000);
-    return 4;
+    lua_setfield(L, -2, "valuens");
+    return 1;
   } else {
     return LuaUnixSysretErrno(L, "setitimer", olderr);
   }
