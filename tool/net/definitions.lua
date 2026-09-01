@@ -552,8 +552,8 @@ lsqlite3 = {
 ---@param filename string
 ---@param flags? lsqlite3.OpenFlag defaults to `lsqlite3.OPEN_READWRITE + lsqlite3.OPEN_CREATE`
 ---@return lsqlite3.Database|nil db
----@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
 ---@nodiscard
 function lsqlite3.open(filename, flags) end
 
@@ -561,8 +561,8 @@ function lsqlite3.open(filename, flags) end
 --- of an error, the function returns `nil`, an error code and an error message.
 --- (In-memory databases are volatile as they are never stored on disk.)
 ---@return lsqlite3.Database|nil db
----@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
 ---@nodiscard
 function lsqlite3.open_memory() end
 

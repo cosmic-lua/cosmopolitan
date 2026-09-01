@@ -2416,8 +2416,8 @@ static int lsqlite_do_open(lua_State *L, const char *filename, int flags) {
 
     /* failed to open database */
     lua_pushnil(L);                             /* push nil */
-    lua_pushinteger(L, sqlite3_errcode(db->db));
     lua_pushstring(L, sqlite3_errmsg(db->db));  /* push error message */
+    lua_pushinteger(L, sqlite3_errcode(db->db));
 
     /* clean things up */
     cleanupdb(L, db);
