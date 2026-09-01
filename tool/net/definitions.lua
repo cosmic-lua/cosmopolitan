@@ -7265,19 +7265,15 @@ function unix.opendir(path) end
 ---@nodiscard
 function unix.fdopendir(fd) end
 
---- Returns true if file descriptor is a teletypewriter. Otherwise nil
---- with an Errno object holding one of the following values:
----
---- - `ENOTTY` if `fd` is valid but not a teletypewriter
---- - `EBADF` if `fd` isn't a valid file descriptor.
---- - `EPERM` if pledge() is used without `tty` in lenient mode
----
---- No other error numbers are possible.
----
+--- Returns true if file descriptor is a teletypewriter, false
+--- otherwise — including when `fd` is invalid (`EBADF`) or
+--- pledge()-restricted (`EPERM`). The underlying libc isatty() never
+--- signals failure through its return value (only through `errno`,
+--- which this binding does not currently surface), so there is no nil
+--- case: a bad fd and a valid non-terminal fd are indistinguishable
+--- here.
 ---@param fd integer
----@return true|nil
----@return string? error
----@return unix.Errno? errno
+---@return boolean
 ---@nodiscard
 function unix.isatty(fd) end
 
