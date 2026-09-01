@@ -37,6 +37,13 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/net/lzip.o					\
 	o/$(MODE)/tool/net/lcov.o
 
+# lfetch.c is excluded from TOOL_NET_SRCS (see tool/net/BUILD.mk), so
+# mkdeps never scans it and o/$(MODE)/depend carries no header edges for
+# it; give it the one that matters for incremental builds by hand.
+o/$(MODE)/tool/net/lfetch.o:						\
+		tool/net/lfetch.c					\
+		tool/net/fetch.inc
+
 TOOL_LUA_DIRECTDEPS =							\
 	DSP_SCALE							\
 	LIBC_CALLS							\
