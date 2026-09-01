@@ -621,11 +621,11 @@ static int LuaUnixUnsetenv(lua_State *L) {
 }
 
 // unix.clearenv()
-//     ├─→ true
-//     └─→ nil, error:str, errno:int
+//     └─→ true
 static int LuaUnixClearenv(lua_State *L) {
-  int olderr = errno;
-  return SysretBool(L, "clearenv", olderr, clearenv());
+  clearenv();
+  lua_pushboolean(L, 1);
+  return 1;
 }
 
 // unix.getlogin()
@@ -2751,17 +2751,12 @@ static int LuaUnixSigsuspend(lua_State *L) {
 }
 
 // unix.sigpending()
-//     ├─→ mask:unix.Sigset
-//     └─→ nil, error:str, errno:int
+//     └─→ mask:unix.Sigset
 static int LuaUnixSigpending(lua_State *L) {
   sigset_t mask;
-  int olderr = errno;
-  if (!sigpending(&mask)) {
-    LuaPushSigset(L, mask);
-    return 1;
-  } else {
-    return LuaUnixSysretErrno(L, "sigpending", olderr);
-  }
+  sigpending(&mask);
+  LuaPushSigset(L, mask);
+  return 1;
 }
 
 // unix.setitimer(which[, intervalsec, intns, valuesec, valuens])
@@ -2832,32 +2827,33 @@ static dontinline int LuaUnixTime(lua_State *L, const char *call,
   int olderr = errno;
   ts = luaL_checkinteger(L, 1);
   if (f(&ts, &tm)) {
-    lua_pushinteger(L, tm.tm_year + 1900);
-    lua_pushinteger(L, tm.tm_mon + 1);  // 1 ≤ mon  ≤ 12
-    lua_pushinteger(L, tm.tm_mday);     // 1 ≤ mday ≤ 31
-    lua_pushinteger(L, tm.tm_hour);     // 0 ≤ hour ≤ 23
-    lua_pushinteger(L, tm.tm_min);      // 0 ≤ min  ≤ 59
-    lua_pushinteger(L, tm.tm_sec);      // 0 ≤ sec  ≤ 60
-    lua_pushinteger(L, tm.tm_gmtoff);   // ±93600 seconds
-    lua_pushinteger(L, tm.tm_wday);     // 0 ≤ wday ≤ 6
-    lua_pushinteger(L, tm.tm_yday);     // 0 ≤ yday ≤ 365
-    lua_pushinteger(L, tm.tm_isdst);    // daylight savings
-    lua_pushstring(L, tm.tm_zone);
-    return 11;
+    lua_newtable(L);
+    lua_pushinteger(L, tm.tm_year + 1900); lua_setfield(L, -2, "year");
+    lua_pushinteger(L, tm.tm_mon + 1);     lua_setfield(L, -2, "mon");
+    lua_pushinteger(L, tm.tm_mday);        lua_setfield(L, -2, "mday");
+    lua_pushinteger(L, tm.tm_hour);        lua_setfield(L, -2, "hour");
+    lua_pushinteger(L, tm.tm_min);         lua_setfield(L, -2, "min");
+    lua_pushinteger(L, tm.tm_sec);         lua_setfield(L, -2, "sec");
+    lua_pushinteger(L, tm.tm_gmtoff);      lua_setfield(L, -2, "gmtoffsec");
+    lua_pushinteger(L, tm.tm_wday);        lua_setfield(L, -2, "wday");
+    lua_pushinteger(L, tm.tm_yday);        lua_setfield(L, -2, "yday");
+    lua_pushinteger(L, tm.tm_isdst);       lua_setfield(L, -2, "dst");
+    lua_pushstring(L, tm.tm_zone);         lua_setfield(L, -2, "zone");
+    return 1;
   } else {
     return LuaUnixSysretErrno(L, call, olderr);
   }
 }
 
 // unix.gmtime(unixsecs:int)
-//     ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
+//     ├─→ bdt:unix.BrokenDownTime
 //     └─→ nil, error:str, errno:int
 static int LuaUnixGmtime(lua_State *L) {
   return LuaUnixTime(L, "gmtime", gmtime_r);
 }
 
 // unix.localtime(unixts:int)
-//     ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
+//     ├─→ bdt:unix.BrokenDownTime
 //     └─→ nil, error:str, errno:int
 static int LuaUnixLocaltime(lua_State *L) {
   return LuaUnixTime(L, "localtime", localtime_r);

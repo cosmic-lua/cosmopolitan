@@ -34,8 +34,10 @@ assert(os.getenv("TEST_VAR1") == "value1")
 assert(os.getenv("TEST_VAR2") == "value2")
 assert(os.getenv("TEST_VAR3") == "value3")
 
--- Clear all environment variables
-assert(unix.clearenv())
+-- Clear all environment variables. clearenv has no reachable failure:
+-- this project's clearenv() (libc/intrin/clearenv.c) unconditionally
+-- succeeds.
+assert(unix.clearenv() == true, "clearenv must always return true")
 
 -- Verify they're all gone
 assert(os.getenv("TEST_VAR1") == nil)
