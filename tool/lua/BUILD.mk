@@ -203,6 +203,10 @@ o/$(MODE)/tool/lua/test_fetch_local.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test
 	$< tool/lua/test_fetch_local.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_fetch_proxy.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_fetch_proxy.lua
+	$< tool/lua/test_fetch_proxy.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_landlock_net.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_landlock_net.lua
 	$< tool/lua/test_landlock_net.lua
 	@touch $@
@@ -388,6 +392,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_isatty.ok				\
 	o/$(MODE)/tool/lua/test_fetch_unix_proxy.ok			\
 	o/$(MODE)/tool/lua/test_fetch_local.ok				\
+	o/$(MODE)/tool/lua/test_fetch_proxy.ok				\
 	o/$(MODE)/tool/lua/test_landlock_net.ok				\
 	o/$(MODE)/tool/lua/test_landlock_abi.ok				\
 	o/$(MODE)/tool/lua/test_definitions_coverage.ok			\
