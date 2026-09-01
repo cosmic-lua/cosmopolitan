@@ -102,11 +102,47 @@ end
 -- An uninterrupted nanosleep reports a zero remainder rather than
 -- whatever the kernel left in its buffer (POSIX leaves it unspecified
 -- on success), so a caller can trust the value without a clock read.
+-- The remainder comes back as one table, not two positional integers,
+-- so nothing here can be confused with the failure path's error/errno.
 do
-  local s, ns = unix.nanosleep(0, 1000000)
-  assert(s == 0 and ns == 0,
-    "a completed sleep has no remainder, got " .. tostring(s) .. "," ..
-    tostring(ns))
+  local remaining = unix.nanosleep(0, 1000000)
+  assert(type(remaining) == "table",
+    "a completed sleep returns a remainder table, got " .. type(remaining))
+  assert(remaining.seconds == 0 and remaining.nanos == 0,
+    "a completed sleep has no remainder, got " .. tostring(remaining.seconds) ..
+    "," .. tostring(remaining.nanos))
+end
+
+-- An EINTR-interrupted nanosleep must return a tuple where no slot
+-- serves two purposes across the success and failure branches: slot 1
+-- is nil (never the remainder table success uses), slots 2/3 are
+-- always error/errno, and slot 4 -- present only here -- carries the
+-- kernel's leftover time as its own table.
+do
+  local pid = unix.fork()
+  if pid == 0 then
+    unix.sigaction(unix.SIGALRM, function() end)
+    -- one-shot alarm ~50ms out, well inside the 5s sleep below
+    assert(unix.setitimer(unix.ITIMER_REAL, 0, 0, 0, 50e6))
+    local remaining, err, eno, eintr_remaining = unix.nanosleep(5, 0)
+    assert(remaining == nil,
+      "an interrupted sleep must not return a remainder in slot 1")
+    assert(type(err) == "string", "slot 2 must be the error string")
+    assert(eno == unix.EINTR, "slot 3 must be EINTR, got " .. tostring(eno))
+    assert(type(eintr_remaining) == "table",
+      "slot 4 must be the EINTR remainder table, got " .. type(eintr_remaining))
+    assert(type(eintr_remaining.seconds) == "number" and
+      type(eintr_remaining.nanos) == "number",
+      "the EINTR remainder table must carry numeric seconds/nanos")
+    assert(eintr_remaining.seconds >= 0 and eintr_remaining.seconds <= 5,
+      "the remaining seconds must be within the requested sleep")
+    unix.sigaction(unix.SIGALRM, unix.SIG_DFL)
+    unix.exit(0)
+  else
+    local _, wstatus = unix.wait(pid)
+    assert(unix.WIFEXITED(wstatus) and unix.WEXITSTATUS(wstatus) == 0,
+      "the EINTR nanosleep child must exit cleanly")
+  end
 end
 
 print("PASS")

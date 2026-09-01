@@ -5878,26 +5878,37 @@ function unix.syslog(priority, msg) end
 ---@nodiscard
 function unix.clock_gettime(clock) end
 
+--- Time left in a sleep, in seconds and nanoseconds.
+---@class unix.SleepRemainder
+---@field seconds integer Whole seconds left to sleep.
+---@field nanos integer Nanoseconds left to sleep, past `seconds`.
+
 --- Sleeps with nanosecond precision.
 ---
 --- Returns `EINTR` if a signal was received while waiting. On that
---- failure the kernel's remainder follows the errno as two further
---- values (`eintr_remseconds`, `eintr_remnanos`), so an interrupted
---- sleep can be resumed without re-deriving the remainder from a
---- clock. A sleep that completes returns a zero remainder: POSIX
---- leaves the kernel's buffer unspecified on success, and the sleep
---- is over by definition.
+--- failure a fourth return value carries the kernel's unslept
+--- remainder as a `unix.SleepRemainder` table, so an interrupted sleep
+--- can be resumed without re-deriving it from a clock. A sleep that
+--- completes returns a remainder of zero: POSIX leaves the kernel's
+--- buffer unspecified on success, and the sleep is over by
+--- definition.
+---
+--- The remainder used to be two positional integers (`remseconds`,
+--- `remnanos`) on both the success and the EINTR path, which put the
+--- failure path's error string in the same slot a completed sleep's
+--- `remnanos` occupied. Bundling the remainder into one table — like
+--- `unix.capget`'s caps table — keeps every slot's meaning fixed
+--- regardless of branch: this return is always the value-or-nil, the
+--- next two are always error/errno, and the fourth is the EINTR
+--- remainder, present on no other path.
 ---@param seconds integer
 ---@param nanos integer?
----@return integer|nil remseconds 0 on success, nil when the call failed
----@return integer|string remnanos 0 on success, or the error string when
---- the call failed — failure returns exactly `nil, error, errno`, so the
---- error lands in this slot, not in a slot of its own
+---@return unix.SleepRemainder|nil remaining zero seconds/nanos on a
+--- completed sleep, nil when the call failed
+---@return string? error
 ---@return unix.Errno? errno
----@return integer? eintr_remseconds seconds left of the sleep, present
---- only when the errno is `EINTR`
----@return integer? eintr_remnanos nanoseconds left of the sleep, present
---- only when the errno is `EINTR`
+---@return unix.SleepRemainder? eintr_remaining seconds/nanos left to
+--- sleep, present only when the errno is `EINTR`
 function unix.nanosleep(seconds, nanos) end
 
 --- These functions are used to make programs slower by asking the
