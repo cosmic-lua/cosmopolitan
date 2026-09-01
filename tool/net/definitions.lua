@@ -2715,8 +2715,9 @@ function cosmo.EscapeUser(str) end
 --- (handshake or certificate verification failed), `"timeout"`,
 --- `"proxy"` (proxy configuration or tunnel failure), `"protocol"`
 --- (malformed request or response), `"too_large"` (response exceeded
---- `maxresponse`), or `"blocked"` (refused by SSRF protection or the
---- HTTPS-to-HTTP downgrade guard).
+--- `maxresponse`; message includes the configured limit, e.g.
+--- `"response too large (max 100 bytes)"`), or `"blocked"` (refused by
+--- SSRF protection or the HTTPS-to-HTTP downgrade guard).
 ---@param url string
 ---@param body? string|cosmo.FetchOptions
 ---@return integer|nil status, table<string,string> headers, string body, string url
