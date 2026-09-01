@@ -7437,11 +7437,18 @@ function unix.pivot_root(new_root, put_old) end
 ---@return unix.Errno? errno
 function unix.prctl(option, arg2, arg3, arg4, arg5) end
 
---- Returns the calling thread's (or `pid`'s) capability sets as
---- 64-bit bitmasks. Each bit position N corresponds to `unix.CAP_*`
---- constant N. Linux-only.
+--- Capability sets returned by `capget`, as read by `capset`.
+---@class unix.Caps
+---@field effective integer Bitmask of `1 << unix.CAP_*` bits.
+---@field permitted integer Bitmask of `1 << unix.CAP_*` bits.
+---@field inheritable integer Bitmask of `1 << unix.CAP_*` bits.
+
+--- Returns the calling thread's (or `pid`'s) capability sets as a
+--- table with `effective`, `permitted`, and `inheritable` fields,
+--- each a 64-bit bitmask. Each bit position N in those masks
+--- corresponds to `unix.CAP_*` constant N. Linux-only.
 ---@param pid integer?
----@return integer|nil effective, integer permitted, integer inheritable
+---@return unix.Caps|nil caps
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.capget(pid) end
