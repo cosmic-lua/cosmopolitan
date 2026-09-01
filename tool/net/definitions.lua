@@ -5148,23 +5148,35 @@ function unix.makedirs(path, mode) end
 ---@return unix.Errno? errno
 function unix.mkdtemp(template) end
 
+--- The path of a file created by `mkstemp`, wrapped in a table.
+---
+--- `path` used to be a second positional return value, a plain string
+--- sharing the same slot (2) that the failure path returns its error
+--- string in -- nothing about the type distinguished a created path
+--- from an error message. Bundling it into a table -- like
+--- `unix.SleepRemainder` -- fixes the slot's meaning across branches:
+--- 2 is a `unix.MkstempPath` on success, the error string on failure.
+---@class unix.MkstempPath
+---@field path string the created file's path
+
 --- Creates a temporary file with a unique name.
 ---
 --- `template` must end with "XXXXXX" which will be replaced with random
 --- characters to create a unique filename.
 ---
---- Returns both the file descriptor and the path of the created file.
---- The file is opened for reading and writing.
+--- Returns the file descriptor and, bundled in a `unix.MkstempPath`
+--- table, the path of the created file. The file is opened for reading
+--- and writing.
 ---
 --- Example:
 ---
----     local fd, path = unix.mkstemp("/tmp/myapp_XXXXXX")
+---     local fd, result = unix.mkstemp("/tmp/myapp_XXXXXX")
 ---     unix.write(fd, "hello")
 ---     unix.close(fd)
----     unix.unlink(path)
+---     unix.unlink(result.path)
 ---
 ---@param template string template path ending in XXXXXX
----@return integer|nil fd, string path
+---@return integer|nil fd, unix.MkstempPath path
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.mkstemp(template) end
@@ -5248,13 +5260,19 @@ function unix.symlink(target, linkpath, newdirfd) end
 --- furthermore prefixes `//?/` to WIN32 DOS-style absolute paths,
 --- thereby assisting with simple absolute filename checks in addition
 --- to enabling one to exceed the traditional 260 character limit.
+---
+--- Unlike upstream, this fork's second parameter is not a directory
+--- file descriptor to resolve `path` against -- resolution always uses
+--- `AT_FDCWD`. It is instead an optional buffer size for the link's
+--- content, clamped to `[1, 0x7ffff000]`.
 ---@param path string
----@param dirfd? integer
+---@param bufsiz? integer buffer size for the link content, clamped to
+--- `[1, 0x7ffff000]`
 ---@return string|nil content
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard
-function unix.readlink(path, dirfd) end
+function unix.readlink(path, bufsiz) end
 
 --- Returns absolute path of filename, with `.` and `..` components
 --- removed, and symlinks will be resolved.
