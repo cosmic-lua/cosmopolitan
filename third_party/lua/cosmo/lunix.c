@@ -324,6 +324,11 @@ static char **ConvertLuaArrayToStringList(lua_State *L, int i) {
   n = lua_tointeger(L, -1);
   lua_pop(L, 1);
   if ((p = LuaAlloc(L, (n + 1) * sizeof(*p)))) {
+    // NUL-terminate every slot up front so FreeStringList() is safe to
+    // call on the partially-filled array below: LuaAlloc() doesn't
+    // zero memory, and freeing an early failure would otherwise walk
+    // uninitialized heap past the converted prefix.
+    memset(p, 0, (n + 1) * sizeof(*p));
     for (j = 1; j <= n; ++j) {
       lua_geti(L, i, j);
       if ((str = lua_tostring(L, -1))) {
@@ -336,12 +341,10 @@ static char **ConvertLuaArrayToStringList(lua_State *L, int i) {
         p[j - 1] = s;
       } else {
         FreeStringList(p);
-        p = 0;
-        break;
+        luaL_argerror(L, i, "argv/envp element must be convertible to a string");
+        __builtin_unreachable();
       }
     }
-    if (p)
-      p[j - 1] = 0;
   }
   return p;
 }
