@@ -162,4 +162,14 @@ assert(unix.raise(0) == 0, "raise(0) is a valid existence check")
 assert(not pcall(unix.sigprocmask, 999, unix.sigset()),
   "sigprocmask of an invalid how must raise")
 
+-- setitimer now bundles its previous-value success fields into one
+-- table (tool/net/definitions.lua); pin both branches.
+local prev = assert(unix.setitimer(unix.ITIMER_REAL, 0, 0, 0, 0))
+assert(type(prev) == "table" and type(prev.intervalsec) == "number",
+  "a successful setitimer must return one table")
+local bad, err, eno = unix.setitimer(999)
+assert(bad == nil, "setitimer(999) must report nil")
+assert(type(err) == "string", "the error must be a string, not a table field")
+assert(eno == unix.EINVAL, "errno must be EINVAL, not a table field")
+
 print("PASS")

@@ -6764,15 +6764,22 @@ function unix.sigpending() end
 ---     unix.sigaction(unix.SIGALRM, MyOnSigAlrm, unix.SA_RESETHAND)
 ---     unix.setitimer(unix.ITIMER_REAL, 0, 0, 1, 0)
 ---
+--- Previous interval-timer setting returned by `setitimer`.
+---@class unix.Itimerval
+---@field intervalsec integer Whole seconds of the recurring interval.
+---@field intervalns integer Nanoseconds of the recurring interval, past `intervalsec`.
+---@field valuesec integer Whole seconds left until the next tick.
+---@field valuens integer Nanoseconds left until the next tick, past `valuesec`.
+
 ---@param which integer
 ---@param intervalsec integer
 ---@param intervalns integer needs to be on the interval `[0,1000000000)`
 ---@param valuesec integer
 ---@param valuens integer needs to be on the interval `[0,1000000000)`
----@return integer|nil intervalsec, integer intervalns, integer valuesec, integer valuens
+---@return unix.Itimerval|nil previous
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(which: integer): intervalsec: integer, intervalns: integer, valuesec: integer, valuens: integer
+---@overload fun(which: integer): unix.Itimerval
 function unix.setitimer(which, intervalsec, intervalns, valuesec, valuens) end
 
 --- Turns platform-specific `sig` code into its symbolic name.
