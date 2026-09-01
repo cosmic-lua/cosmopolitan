@@ -4210,18 +4210,28 @@ static int LuaUnixDirClose(lua_State *L) {
 
 // unix.Dir:read()
 //     ├─→ name:str, kind:int, ino:int, off:int
-//     └─→ nil
+//     ├─→ nil                        (end of directory stream)
+//     └─→ nil, error:str, errno:int  (readdir() failure)
 static int LuaUnixDirRead(lua_State *L) {
+  DIR *dir;
+  int olderr;
   struct dirent *ent;
-  if ((ent = readdir(GetDirOrDie(L)))) {
+  dir = GetDirOrDie(L);
+  olderr = errno;
+  // readdir() returns NULL on both end-of-directory and failure; per
+  // its own doc comment (libc/stdio/dirstream.c) the two are told
+  // apart by zeroing errno beforehand and checking it after.
+  errno = 0;
+  if ((ent = readdir(dir))) {
     lua_pushlstring(L, ent->d_name, strnlen(ent->d_name, sizeof(ent->d_name)));
     lua_pushinteger(L, ent->d_type);
     lua_pushinteger(L, ent->d_ino);
     lua_pushinteger(L, ent->d_off);
     return 4;
+  } else if (errno) {
+    return LuaUnixSysretErrno(L, "readdir", olderr);
   } else {
     // end of directory stream condition
-    // we make the assumption getdents() won't fail
     lua_pushnil(L);
     return 1;
   }

@@ -7907,6 +7907,8 @@ function unix.Dir:close() end
 --- `unix.Dir` objects may be used as a for loop iterator.
 ---
 ---@return string|nil name, integer kind, integer ino, integer off
+---@return string? error
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.Dir:read() end
 
@@ -7914,7 +7916,9 @@ function unix.Dir:read() end
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard
---- Returns `EOPNOTSUPP` if using a `/zip/...` path or if using Windows NT.
+--- Always returns the directory stream's underlying file descriptor,
+--- as a plain integer; there is no `/zip/...` or Windows NT case that
+--- fails.
 function unix.Dir:fd() end
 
 ---@return integer|nil off current arbitrary offset into stream.
