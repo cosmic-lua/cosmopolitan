@@ -315,14 +315,18 @@ assert(rxbad == nil and type(rxerr) == "string",
   "re.compile of a bad pattern must be nil, string")
 local rx = probe("re.compile", re.compile, "a(b)c")
 
-local sv, scaps = probe("re.search", re.search, "a(b)c", "abc")
-assert(sv == "abc" and type(scaps) == "table", "re.search must match")
+local sr = probe("re.search", re.search, "a(b)c", "abc")
+assert(sr.match == "abc" and type(sr.captures) == "table", "re.search must match")
 probe("re.search", re.search, "[", "x")
 
--- the compiled-Regex methods: a match fills every declared slot, which
--- is how #247's phantom third return would have been caught here
-probe("re.Regex:search", rx.search, rx, "abc")
-probe("re.Regex:match", rx.match, rx, "abc")
+-- the compiled-Regex methods: a match fills the declared re.Match slot,
+-- which is how #247's phantom third return would have been caught here
+local rss = probe("re.Regex:search", rx.search, rx, "abc")
+assert(rss.match == "abc" and type(rss.captures) == "table",
+  "re.Regex:search must match")
+local rsm = probe("re.Regex:match", rx.match, rx, "abc")
+assert(rsm.match == "abc" and type(rsm.captures) == "table",
+  "re.Regex:match must match")
 probe("re.Regex:find", rx.find, rx, "abc")
 
 local gv, gerr = probe("getopt.parse", getopt.parse, "not-a-table", "h")
@@ -493,6 +497,15 @@ local SLOT_UNPROBED = {
   -- file tried; the arity check confirms the C can push two, so the
   -- slot is real and the probe is the missing half.
   ["cosmo.Strftime #2"] = true,
+  -- re.Regex:search/:match's error slot is LuaReSearchImpl's
+  -- regexec() failure branch (REG_ESPACE), which third_party/regex
+  -- only returns on an allocation failure -- unreachable from Lua
+  -- once a pattern has already compiled. re.search's own error slot
+  -- IS probed above (a bad pattern fails at compile time, before
+  -- LuaReSearchImpl runs), so this gap is specific to the two
+  -- already-compiled-object methods.
+  ["re.Regex:search #2"] = true,
+  ["re.Regex:match #2"] = true,
 }
 
 local nslots, nslotallow = 0, 0
