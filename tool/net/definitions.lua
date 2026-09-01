@@ -7356,9 +7356,12 @@ function unix.fdopendir(fd) end
 function unix.isatty(fd) end
 
 ---@param fd integer
----@return integer|nil rows, integer cols cellular dimensions of pseudoteletypewriter display.
----@return string? error
----@return unix.Errno? errno
+---@return integer|nil rows
+---@return integer|string cols cellular dimensions of pseudoteletypewriter
+--- display on success, or the error string when the call failed —
+--- failure returns exactly `nil, error, errno`, so the error lands in
+--- this slot, not one of its own
+---@return unix.Errno? errno the errno on failure; nil on success
 ---@nodiscard
 function unix.tiocgwinsz(fd) end
 
