@@ -1520,8 +1520,7 @@ static dontinline int LuaUnixRc0(lua_State *L, const char *call, int f(void)) {
 }
 
 // unix.getpgrp()
-//     ├─→ pgid:int
-//     └─→ nil, error:str, errno:int
+//     └─→ pgid:int
 static int LuaUnixGetpgrp(lua_State *L) {
   return LuaUnixRc0(L, "getpgrp", getpgrp);
 }
