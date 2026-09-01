@@ -1,6 +1,9 @@
 ---@meta
 error("Tried to evaluate definition file.")
 
+-- Annotating a new or changed binding's return shape? AGENTS.md's
+-- Conventions section states the argument-shape-vs-fallible-tuple rule.
+
 --- Lua's builtin string type, extended with the operators this runtime
 --- installs: `s % {...}` formats and `s * n` repeats.
 ---@class string
