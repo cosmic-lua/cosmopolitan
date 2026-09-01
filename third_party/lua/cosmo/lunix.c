@@ -1249,15 +1249,18 @@ static int LuaUnixSetrlimit(lua_State *L) {
 }
 
 // unix.getrlimit(resource:int)
-//     ├─→ soft:int, hard:int
+//     ├─→ unix.Rlimit
 //     └─→ nil, error:str, errno:int
 static int LuaUnixGetrlimit(lua_State *L) {
   int olderr = errno;
   struct rlimit rlim;
   if (!getrlimit(luaL_checkinteger(L, 1), &rlim)) {
+    lua_newtable(L);
     lua_pushinteger(L, FixLimit(rlim.rlim_cur));
+    lua_setfield(L, -2, "soft");
     lua_pushinteger(L, FixLimit(rlim.rlim_max));
-    return 2;
+    lua_setfield(L, -2, "hard");
+    return 1;
   } else {
     return LuaUnixSysretErrno(L, "getrlimit", olderr);
   }
@@ -1296,11 +1299,17 @@ static int LuaUnixKillpg(lua_State *L) {
 }
 
 // unix.raise(sig:int)
-//     ├─→ rc:int
-//     └─→ nil, error:str, errno:int
+//     └─→ rc:int
 static int LuaUnixRaise(lua_State *L) {
   int olderr = errno;
-  return SysretInteger(L, "raise", olderr, raise(luaL_checkinteger(L, 1)));
+  int sig = luaL_checkinteger(L, 1);
+  if (!(0 <= sig && sig <= NSIG)) {
+    errno = olderr;
+    return luaL_argerror(
+        L, 1, lua_pushfstring(L, "invalid signal number %d", sig));
+  }
+  lua_pushinteger(L, raise(sig));
+  return 1;
 }
 
 // unix.wait([pid:int, options:int])
@@ -2581,18 +2590,18 @@ static int LuaUnixShutdown(lua_State *L) {
 }
 
 // unix.sigprocmask(how:int, newmask:unix.Sigset)
-//     ├─→ oldmask:unix.Sigset
-//     └─→ nil, error:str, errno:int
+//     └─→ oldmask:unix.Sigset
 static int LuaUnixSigprocmask(lua_State *L) {
   sigset_t oldmask;
   int olderr = errno;
-  if (!sigprocmask(luaL_checkinteger(L, 1),
-                   luaL_checkudata(L, 2, "unix.Sigset"), &oldmask)) {
-    LuaPushSigset(L, oldmask);
-    return 1;
-  } else {
-    return LuaUnixSysretErrno(L, "sigprocmask", olderr);
+  int how = luaL_checkinteger(L, 1);
+  if (how != SIG_BLOCK && how != SIG_UNBLOCK && how != SIG_SETMASK) {
+    errno = olderr;
+    return luaL_argerror(L, 1, lua_pushfstring(L, "invalid how %d", how));
   }
+  sigprocmask(how, luaL_checkudata(L, 2, "unix.Sigset"), &oldmask);
+  LuaPushSigset(L, oldmask);
+  return 1;
 }
 
 // Registry key (its unique address) for the table mapping signal number to

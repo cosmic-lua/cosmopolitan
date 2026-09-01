@@ -150,4 +150,16 @@ end
 -- binding never constructs); it must always return a plain Sigset.
 assert(unix.sigpending() ~= nil, "sigpending must always succeed")
 
+-- raise()'s only documented failure is an invalid signal number
+-- (EINVAL); sig == 0 is a legitimate existence-check call (like
+-- kill(pid, 0)) and must not raise.
+assert(not pcall(unix.raise, 999),
+  "raise of an invalid signal number must raise")
+assert(unix.raise(0) == 0, "raise(0) is a valid existence check")
+
+-- sigprocmask's only reachable failure is an invalid `how`;
+-- EFAULT needs a pointer this binding never constructs from Lua.
+assert(not pcall(unix.sigprocmask, 999, unix.sigset()),
+  "sigprocmask of an invalid how must raise")
+
 print("PASS")

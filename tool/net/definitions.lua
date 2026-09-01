@@ -5060,11 +5060,12 @@ function unix.killpg(pgrp, sig) end
 
 --- Triggers signal in current process.
 ---
---- This is pretty much the same as `kill(getpid(), sig)`.
+--- This is pretty much the same as `kill(getpid(), sig)`. Raises a
+--- bad-argument error if `sig` is not `0` (existence check only,
+--- like `kill(pid, 0)`) or a valid signal number — POSIX's only
+--- documented failure for `raise()`, `EINVAL`.
 ---@param sig integer
----@return integer|nil rc
----@return string? error
----@return unix.Errno? errno
+---@return integer rc
 function unix.raise(sig) end
 
 --- Checks if effective user of current process has permission to access file.
@@ -6610,9 +6611,7 @@ function unix.shutdown(fd, how) end
 ---   assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
 ---
 ---@param newmask unix.Sigset
----@return unix.Sigset|nil oldmask
----@return string? error
----@return unix.Errno? errno
+---@return unix.Sigset oldmask
 function unix.sigprocmask(how, newmask) end
 
 ---@param sig integer can be one of:
@@ -6805,9 +6804,14 @@ function unix.strsignal(sig) end
 ---@return unix.Errno? errno
 function unix.setrlimit(resource, soft, hard) end
 
+--- Resource limits returned by `getrlimit`.
+---@class unix.Rlimit
+---@field soft integer Current enforced limit.
+---@field hard integer Ceiling `soft` may be raised to.
+
 --- Returns information about resource limits for current process.
 ---@param resource integer
----@return integer|nil soft, integer hard
+---@return unix.Rlimit|nil
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard

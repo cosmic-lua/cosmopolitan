@@ -45,8 +45,13 @@ else
   -- string lands in the slot declared `sfd` and the errno lands in the
   -- slot declared `name` — not in slots of their own.
   if unix.RLIMIT_NOFILE and unix.getrlimit and unix.setrlimit then
-    local old_soft, old_hard = unix.getrlimit(unix.RLIMIT_NOFILE)
-    if old_soft then
+    -- getrlimit's success value is one unix.Rlimit table ({soft=, hard=}),
+    -- not two positional integers -- slot 2 always means error, on either
+    -- branch.
+    local old_limit = unix.getrlimit(unix.RLIMIT_NOFILE)
+    if old_limit then
+      assert(type(old_limit) == "table", "getrlimit success should return a table")
+      local old_soft, old_hard = old_limit.soft, old_limit.hard
       assert(unix.setrlimit(unix.RLIMIT_NOFILE, 0, old_hard))
       local fpacked = table.pack(unix.openpty())
       assert(unix.setrlimit(unix.RLIMIT_NOFILE, old_soft, old_hard))
@@ -65,6 +70,27 @@ else
   else
     print("skipping openpty failure-shape probe: rlimit API unavailable")
   end
+end
+
+-- getrlimit's own contract: slot 2 always means error, regardless of
+-- branch. Success bundles soft/hard into one unix.Rlimit table (never
+-- a bare integer that could be confused with the error string); an
+-- invalid resource constant still returns the clean 3-value failure
+-- tuple.
+if unix.RLIMIT_NOFILE and unix.getrlimit then
+  local limit = unix.getrlimit(unix.RLIMIT_NOFILE)
+  assert(type(limit) == "table",
+    "getrlimit success should return a unix.Rlimit table, got " .. type(limit))
+  assert(type(limit.soft) == "number" and type(limit.hard) == "number",
+    "unix.Rlimit should carry numeric soft/hard fields")
+
+  local packed = table.pack(unix.getrlimit(-1))
+  assert(packed.n == 3, "getrlimit failure should return exactly 3 values, got " .. packed.n)
+  assert(packed[1] == nil, "getrlimit failure's 1st value should be nil")
+  assert(type(packed[2]) == "string",
+    "getrlimit failure's 2nd value should be the error string, got " .. type(packed[2]))
+  assert(type(packed[3]) == "number",
+    "getrlimit failure's 3rd value should be the errno, got " .. type(packed[3]))
 end
 
 print("all openpty tests passed")
