@@ -4196,13 +4196,14 @@ UNIX MODULE
     environment variables.
 
   unix.clearenv()
-      ├─→ true
-      └─→ nil, error:str, errno:int
+      └─→ true
 
     Clears all environment variables.
 
     This wraps the C `clearenv()` function to allow Lua scripts to remove
-    all environment variables at once.
+    all environment variables at once. It never fails: this project's
+    `clearenv()` unconditionally empties the environment and returns
+    success, so there is no error branch to check.
 
   unix.getlogin()
       ├─→ str
@@ -4328,10 +4329,13 @@ UNIX MODULE
     It's a good idea to not do too much work in a signal handler.
 
   unix.sigpending()
-      ├─→ mask:unix.Sigset
-      └─→ nil, error:str, errno:int
+      └─→ mask:unix.Sigset
 
-    Returns the set of signals that are pending for delivery.
+    Returns the set of signals pending delivery to the calling process
+    that are currently blocked. It never fails on any platform this
+    project supports: its one documented failure, `EFAULT`, needs an
+    invalid pointer this binding never constructs, so there is no error
+    branch to check.
 
   unix.sigsuspend([mask:unix.Sigset])
       └─→ nil, error:str, errno:int
@@ -4716,31 +4720,43 @@ UNIX MODULE
         the pledge promise "cpath".
 
   unix.gmtime(unixts:int)
-      ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
+      ├─→ bdt:unix.BrokenDownTime
       └─→ nil, error:str, errno:int
 
     Breaks down UNIX timestamp into Zulu Time numbers.
 
-    - `mon`     1 ≤ mon  ≤ 12
-    - `mday`    1 ≤ mday ≤ 31
-    - `hour`    0 ≤ hour ≤ 23
-    - `min`     0 ≤ min  ≤ 59
-    - `sec`     0 ≤ sec  ≤ 60
-    - `gmtoff`  ±93600 seconds
-    - `wday`    0 ≤ wday ≤ 6
-    - `yday`    0 ≤ yday ≤ 365
-    - `dst`     1 if daylight savings, 0 if not, -1 if not unknown
+    On success this returns a single `unix.BrokenDownTime` table with
+    the following fields:
+
+    - `year`       four-digit year
+    - `mon`        1 ≤ mon  ≤ 12
+    - `mday`       1 ≤ mday ≤ 31
+    - `hour`       0 ≤ hour ≤ 23
+    - `min`        0 ≤ min  ≤ 59
+    - `sec`        0 ≤ sec  ≤ 60
+    - `gmtoffsec`  ±93600 seconds
+    - `wday`       0 ≤ wday ≤ 6
+    - `yday`       0 ≤ yday ≤ 365
+    - `dst`        1 if daylight savings, 0 if not, -1 if unknown
+    - `zone`       time zone abbreviation, e.g. "UTC"
+
+    On failure, e.g. `EOVERFLOW` for a timestamp the calendar cannot
+    represent, it returns `nil`, an error string, and the errno. The
+    error always occupies slot 2; no field of the table ever shares a
+    slot with it.
 
   unix.localtime(unixts:int)
-      ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
+      ├─→ bdt:unix.BrokenDownTime
       └─→ nil, error:str, errno:int
 
     Breaks down UNIX timestamp into local time numbers, e.g.
 
         >: unix.localtime(unix.clock_gettime())
-        2022    4       28      2       14      22      -25200  4       117     1       "PDT"
+        {year=2022, mon=4, mday=28, hour=2, min=14, sec=22,
+         gmtoffsec=-25200, wday=4, yday=117, dst=1, zone="PDT"}
 
-    This follows the same API as gmtime() which has further details.
+    This follows the same API as gmtime() which has further details,
+    including the table's fields and the failure tuple.
 
     Your redbean ships with a subset of the time zone database.
 
@@ -5392,10 +5408,10 @@ UNIX MODULE
 
         st = assert(unix.stat('/etc/passwd'))
         unixts, nanos = st:birthtim()
-        year,mon,mday,hour,min,sec,gmtoffsec = unix.localtime(unixts)
+        t = assert(unix.localtime(unixts))
         Write('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.9d%+.2d%.2d % {
-                 year, mon, mday, hour, min, sec, nanos,
-                 gmtoffsec / (60 * 60), math.abs(gmtoffsec) % 60})
+                 t.year, t.mon, t.mday, t.hour, t.min, t.sec, nanos,
+                 t.gmtoffsec / (60 * 60), math.abs(t.gmtoffsec) % 60})
 
   unix.Stat:mtim()
       └─→ unixts:int, nanos:int
