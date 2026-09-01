@@ -1796,8 +1796,14 @@ static int LuaUnixMkdtemp(lua_State *L) {
 }
 
 // unix.mkstemp(template:str)
-//     ├─→ fd:int, path:str
+//     ├─→ fd:int, unix.MkstempPath{path:str}
 //     └─→ nil, error:str, errno:int
+//
+// path used to be a second positional string, the same slot (2) the
+// failure path uses for its error string. Bundling it into a table --
+// like unix.nanosleep's remainder -- keeps slot 2's meaning fixed
+// across branches: a unix.MkstempPath on success, the error string on
+// failure.
 static int LuaUnixMkstemp(lua_State *L) {
   char *path;
   int fd, olderr = errno;
@@ -1810,7 +1816,9 @@ static int LuaUnixMkstemp(lua_State *L) {
   memcpy(path, template, len + 1);
   if ((fd = mkstemp(path)) != -1) {
     lua_pushinteger(L, fd);
+    lua_newtable(L);
     lua_pushstring(L, path);
+    lua_setfield(L, -2, "path");
     free(path);
     return 2;
   } else {

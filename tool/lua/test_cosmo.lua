@@ -36,9 +36,10 @@ assert(unix.S_ISDIR(stat:mode()), "mkdtemp result should be a directory")
 unix.rmdir(tmpdir)
 
 -- test unix.mkstemp
-local fd, tmpfile = unix.mkstemp((os.getenv("TMPDIR") or "/tmp") .. "/test_XXXXXX")
+local fd, result = unix.mkstemp((os.getenv("TMPDIR") or "/tmp") .. "/test_XXXXXX")
 assert(fd, "mkstemp should return a file descriptor")
-assert(tmpfile, "mkstemp should return a path")
+assert(result and result.path, "mkstemp should return a table with a path field")
+local tmpfile = result.path
 assert(not tmpfile:match("XXXXXX"), "mkstemp should replace XXXXXX")
 assert(type(fd) == "number" and fd >= 0, "mkstemp fd should be a non-negative integer")
 unix.write(fd, "test")
