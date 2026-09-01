@@ -1413,15 +1413,31 @@ re = {
 ---@class re.Regex: userdata
 re.Regex = {}
 
+--- A regex match: the whole matched substring plus its parenthesized
+--- capture groups, as returned by `re.Regex:search`, `re.Regex:match`,
+--- and `re.search`. Distinct from `re.Match` (returned by
+--- `re.Regex:find`), which reports offsets instead of the substring
+--- itself.
+---@class re.SearchMatch
+---@field match string the whole matched substring
+---@field captures {string} the parenthesized capture groups, in order
+--- (an empty table when the pattern has no groups)
+
 --- Executes precompiled regular expression.
 ---
---- On a match, returns the whole matched substring plus a table of the
---- parenthesized capture groups (an empty table when the pattern has no groups).
---- A no-match is not an error: it returns a single bare `nil`, so the idiomatic
---- `if match then` works. Only a genuine regex engine failure (e.g. running out
---- of memory) returns `nil, err`. Flags may contain `re.NOTBOL` or `re.NOTEOL`
---- to indicate whether or not text should be considered at the start and/or end
---- of a line.
+--- On a match, returns one `re.SearchMatch` table. A no-match is not
+--- an error: it returns a single bare `nil`, so the idiomatic
+--- `if result then` works. Only a genuine regex engine failure (e.g.
+--- running out of memory) returns `nil, err`. Flags may contain
+--- `re.NOTBOL` or `re.NOTEOL` to indicate whether or not text should
+--- be considered at the start and/or end of a line.
+---
+--- The match and its captures used to be two positional returns
+--- (`match`, `captures`), which put the failure path's error string in
+--- the same slot a match's captures table occupied. Bundling both into
+--- one `re.SearchMatch` table keeps every slot's meaning fixed
+--- regardless of branch: this return is always the value-or-nil, and
+--- the next is always the error string, present on no other path.
 ---
 ---@param str string
 ---@param flags? re.SearchFlag defaults to zero and may have any of:
@@ -1430,13 +1446,10 @@ re.Regex = {}
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return string|nil match the whole matched substring; nil both when
---- nothing matched and when the search failed
----@return {string}|string|nil captures the parenthesized capture groups
---- (in order) on a match, or the error string when it failed. The C
---- pushes at most two values: `(match, captures)`, a bare `nil` for a
---- no-match, or `(nil, err)`. A third slot was annotated here and never
---- returned, so a generated binding declared a value that does not exist.
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
+---@return string? error the engine failure message; absent both on a
+--- match and on a no-match
 ---@nodiscard
 function re.Regex:search(str, flags) end
 
@@ -1452,13 +1465,10 @@ function re.Regex:search(str, flags) end
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return string|nil match the whole matched substring; nil both when
---- nothing matched and when the search failed
----@return {string}|string|nil captures the parenthesized capture groups
---- (in order) on a match, or the error string when it failed. The C
---- pushes at most two values: `(match, captures)`, a bare `nil` for a
---- no-match, or `(nil, err)`. A third slot was annotated here and never
---- returned, so a generated binding declared a value that does not exist.
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
+---@return string? error the engine failure message; absent both on a
+--- match and on a no-match
 ---@nodiscard
 function re.Regex:match(str, flags) end
 
@@ -1513,11 +1523,11 @@ function re.Regex:find(str, flags, init) end
 --- This is a shorthand notation roughly equivalent to:
 ---
 ---     local preg = assert(re.compile(regex))
----     local match, captures = preg:search(text)
+---     local result = preg:search(text)
 ---
---- On a match, returns the whole matched substring plus a table of the
---- parenthesized capture groups. A no-match returns a bare `nil`. A bad pattern
---- (compile failure) or a regex engine failure returns `nil, err`.
+--- On a match, returns one `re.SearchMatch` table. A no-match returns a
+--- bare `nil`. A bad pattern (compile failure) or a regex engine
+--- failure returns `nil, err`.
 ---
 ---@param regex string
 ---@param text string
@@ -1533,13 +1543,11 @@ function re.Regex:find(str, flags, init) end
 --- This has exponential complexity. Please use `re.compile()` to compile your regular expressions once from `/.init.lua`. This API exists for convenience. This isn't recommended for prod.
 ---
 --- This uses POSIX extended syntax by default.
----@return string|nil match the whole matched substring; nil both when
---- nothing matched and when the search failed
----@return {string}|string|nil captures the parenthesized capture groups
---- (in order) on a match, or the error string when it failed. The C
---- pushes at most two values: `(match, captures)`, a bare `nil` for a
---- no-match, or `(nil, err)`. A third slot was annotated here and never
---- returned, so a generated binding declared a value that does not exist.
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
+---@return string? error the engine failure message (either a bad
+--- pattern at compile time or a genuine engine failure at search
+--- time); absent both on a match and on a no-match
 ---@nodiscard
 function re.search(regex, text, flags) end
 
