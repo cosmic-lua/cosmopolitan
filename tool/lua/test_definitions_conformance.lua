@@ -325,9 +325,9 @@ probe("re.Regex:search", rx.search, rx, "abc")
 probe("re.Regex:match", rx.match, rx, "abc")
 probe("re.Regex:find", rx.find, rx, "abc")
 
-local gv, gerr = probe("getopt.parse", getopt.parse, "not-a-table", "h")
-assert(gv == nil and type(gerr) == "string",
-  "getopt.parse with a non-table argv must be nil, string")
+-- getopt.parse raises on a malformed call (an argument-shape error), so
+-- unlike re.compile/re.search above it has no nil+error slot to force;
+-- only its success path is probed here.
 probe("getopt.parse", getopt.parse, { "prog", "-h" }, "h")
 
 -- These two have a real second slot the C can push but no test can

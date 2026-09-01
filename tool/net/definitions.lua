@@ -1627,11 +1627,16 @@ getopt = {}
 ---     end
 ---     -- Now excludes contains all -e values: {"foo", "bar", "spam"}
 ---
+--- A malformed call -- `args` not a table, `optstring` not a string,
+--- `longopts` not nil/a table, an `args`/`longopts` table over its size
+--- limit, or a malformed `longopts` entry -- raises rather than returning
+--- an error, since none of those is a getopt_long() runtime outcome: no
+--- shape a correct caller passes can reach it.
+---
 ---@param args string[] Command-line arguments (typically `arg`)
 ---@param optstring string Short options string (e.g., "hvo:")
 ---@param longopts? table[] Long option definitions: {{name, has_arg, short}, ...}
----@return getopt.Result|nil result
----@return string? error
+---@return getopt.Result result
 function getopt.parse(args, optstring, longopts) end
 
 --- The path module may be used to manipulate unix paths.

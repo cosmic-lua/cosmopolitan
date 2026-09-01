@@ -148,14 +148,40 @@ do
   assert(#res.opts == 0, "the incomplete option is not reported as parsed")
 end
 
--- Malformed input returns nil + error rather than throwing
+-- Malformed input is an argument-shape error: every reachable failure
+-- rejects a shape no correct caller passes, never a getopt_long() runtime
+-- outcome, so it raises (luaL_argerror/luaL_error) rather than returning
+-- a fallible nil, err.
 do
-  local res, err = getopt.parse("not a table", "h")
-  assert(res == nil and type(err) == "string", "bad args -> nil, err")
-  res, err = getopt.parse({1, 2}, "h")
-  assert(res == nil and type(err) == "string", "non-string args -> nil, err")
-  res, err = getopt.parse({"-h"}, "h", {{"bad", "sometimes"}})
-  assert(res == nil and type(err) == "string", "bad has_arg -> nil, err")
+  -- luaL_argerror: args is not a table at all.
+  local ok, err = pcall(getopt.parse, "not a table", "h")
+  assert(not ok, "bad args shape should raise")
+  assert(tostring(err):find("args must be a table", 1, true),
+    "raised message should name the violation: " .. tostring(err))
+
+  -- luaL_argerror: an args[i] entry is not a string.
+  ok, err = pcall(getopt.parse, {1, 2}, "h")
+  assert(not ok, "non-string args[i] should raise")
+  assert(tostring(err):find("args[1] must be a string", 1, true),
+    "raised message: " .. tostring(err))
+
+  -- luaL_argerror: a longopts entry's has_arg value is not recognized.
+  ok, err = pcall(getopt.parse, {"-h"}, "h", {{"bad", "sometimes"}})
+  assert(not ok, "bad has_arg value should raise")
+  assert(tostring(err):find(
+    "longopt[1][2] must be 'none', 'required', or 'optional'", 1, true),
+    "raised message: " .. tostring(err))
+
+  -- luaL_error: a longopts table over MAX_LONGOPTS (1000) has no single
+  -- culprit argument, so it raises without an argument index.
+  local longopts = {}
+  for i = 1, 1001 do
+    longopts[i] = {"opt" .. i, "none"}
+  end
+  ok, err = pcall(getopt.parse, {}, "", longopts)
+  assert(not ok, "longopts table over MAX_LONGOPTS should raise")
+  assert(tostring(err):find("longopts table too large", 1, true),
+    "raised message: " .. tostring(err))
 end
 
 print("PASS")
