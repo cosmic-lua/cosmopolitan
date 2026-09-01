@@ -335,6 +335,10 @@ o/$(MODE)/tool/lua/test_unix_tcattr.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test
 	$< tool/lua/test_unix_tcattr.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_unix_openpty.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_openpty.lua
+	$< tool/lua/test_unix_openpty.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -371,6 +375,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_unix_getlogin.ok			\
 	o/$(MODE)/tool/lua/test_unix_uname.ok				\
 	o/$(MODE)/tool/lua/test_unix_tcattr.ok				\
+	o/$(MODE)/tool/lua/test_unix_openpty.ok				\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
