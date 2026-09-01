@@ -1462,12 +1462,28 @@ function re.Regex:search(str, flags) end
 ---@nodiscard
 function re.Regex:match(str, flags) end
 
+--- A match reported by `re.Regex:find`: the absolute 1-based inclusive
+--- start and end offsets into the searched string, plus the table of
+--- parenthesized capture groups. The matched text is
+--- `str:sub(match.start, match.stop)`.
+---
+--- The offsets and the captures table used to be three positional
+--- returns (`start`, `stop`, `captures`), which put the failure path's
+--- error string in the same slot (2) that a completed match's `stop`
+--- occupied. Bundling them into one table — like `unix.capget`'s caps
+--- table — keeps every slot's meaning fixed regardless of branch: the
+--- first return is always the value-or-nil, the second is always the
+--- error string or absent.
+---@class re.Match
+---@field start integer Absolute 1-based offset of the first matched character.
+---@field stop integer Absolute 1-based offset of the last matched character.
+---@field captures {string} Parenthesized capture groups, in order (an
+--- empty table when the pattern has no groups; `""` for a group that
+--- did not participate).
+
 --- Executes precompiled regular expression, reporting where the match
 --- is. Like `re.Regex:search`, but instead of the matched substring it
---- returns the match's absolute 1-based inclusive start and end offsets
---- into `str`, plus the table of parenthesized capture groups (an empty
---- table when the pattern has no groups; `""` for a group that did not
---- participate). The matched text is `str:sub(start, stop)`.
+--- returns a `re.Match` table.
 ---
 --- `init` (1-based, defaults to 1) starts the search at that offset:
 --- the pattern is matched against the tail of `str`, and the returned
@@ -1486,9 +1502,9 @@ function re.Regex:match(str, flags) end
 --- - `re.NOTBOL`
 --- - `re.NOTEOL`
 ---@param init? integer 1-based offset to start searching at (defaults to 1)
----@return integer|nil start absolute 1-based offset of the first matched character
----@return integer|string|nil stop absolute 1-based offset of the last matched character (an error string when start is nil)
----@return {string} captures the parenthesized capture groups, in order
+---@return re.Match|nil match nil both when nothing matched and when the
+--- search failed
+---@return string? error
 ---@nodiscard
 function re.Regex:find(str, flags, init) end
 

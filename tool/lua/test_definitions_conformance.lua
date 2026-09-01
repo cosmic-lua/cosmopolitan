@@ -493,6 +493,14 @@ local SLOT_UNPROBED = {
   -- file tried; the arity check confirms the C can push two, so the
   -- slot is real and the probe is the missing half.
   ["cosmo.Strftime #2"] = true,
+  -- re.Regex:find's error slot only fires on a genuine regexec()
+  -- failure (REG_ESPACE: out of memory, or the backtracking matcher's
+  -- stack exhausted) against an already-compiled, valid regex_t --
+  -- unlike re.compile's bad-pattern probe above, no pattern or input
+  -- this file can construct forces that deterministically. The slot
+  -- is real: LuaReFindImpl shares LuaReReturnError with re.compile's
+  -- demonstrated nil, err path.
+  ["re.Regex:find #2"] = true,
 }
 
 local nslots, nslotallow = 0, 0
