@@ -178,6 +178,21 @@ function UnixTest()
 end
 
 function main()
+   -- capget: success returns one table (effective/permitted/inheritable
+   -- all present, none nil); failure returns nil, error:str, errno:int.
+   -- The two branches must not share a positional slot for unrelated
+   -- meanings. Runs before pledge() below, since capget isn't in any
+   -- promise this test asks for.
+   caps = assert(unix.capget())
+   assert(type(caps) == "table")
+   assert(type(caps.effective) == "number")
+   assert(type(caps.permitted) == "number")
+   assert(type(caps.inheritable) == "number")
+   badcaps, caperr, caperrno = unix.capget(999999)
+   assert(badcaps == nil)
+   assert(type(caperr) == "string")
+   assert(caperrno == unix.ESRCH)
+
    assert(unix.makedirs(tmpdir))
    unix.unveil(tmpdir, "rwc")
    unix.unveil(nil, nil)

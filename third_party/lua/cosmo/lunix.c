@@ -1026,15 +1026,16 @@ static int LuaUnixPrctl(lua_State *L) {
 }
 
 // unix.capget([pid:int])
-//     ├─→ effective:int, permitted:int, inheritable:int
+//     ├─→ caps:table
 //     └─→ nil, error:str, errno:int
 //
-// Returns the calling thread's (or `pid`'s) capability sets as
-// 64-bit bitmasks. Each bit position N in the returned masks
-// corresponds to `unix.CAP_*` constant N. Linux-only.
+// Returns the calling thread's (or `pid`'s) capability sets as a table
+// with `effective`, `permitted`, and `inheritable` fields, each a
+// 64-bit bitmask. Each bit position N in those masks corresponds to
+// `unix.CAP_*` constant N. Linux-only.
 //
-//     local eff, perm, inh = assert(unix.capget())
-//     if (eff & (1 << unix.CAP_NET_ADMIN)) ~= 0 then
+//     local caps = assert(unix.capget())
+//     if (caps.effective & (1 << unix.CAP_NET_ADMIN)) ~= 0 then
 //       -- we have CAP_NET_ADMIN
 //     end
 static int LuaUnixCapget(lua_State *L) {
@@ -1050,10 +1051,14 @@ static int LuaUnixCapget(lua_State *L) {
   if (capget(&hdr, data) == -1) {
     return LuaUnixSysretErrno(L, "capget", olderr);
   }
+  lua_newtable(L);
   lua_pushinteger(L, ((uint64_t)data[1].effective   << 32) | data[0].effective);
+  lua_setfield(L, -2, "effective");
   lua_pushinteger(L, ((uint64_t)data[1].permitted   << 32) | data[0].permitted);
+  lua_setfield(L, -2, "permitted");
   lua_pushinteger(L, ((uint64_t)data[1].inheritable << 32) | data[0].inheritable);
-  return 3;
+  lua_setfield(L, -2, "inheritable");
+  return 1;
 }
 
 // unix.capset(effective:int, permitted:int, inheritable:int[, pid:int])
@@ -1066,10 +1071,11 @@ static int LuaUnixCapget(lua_State *L) {
 // a subset of `permitted UNION current_inheritable`, and you cannot
 // add bits to `permitted` that aren't already there. Linux-only.
 //
-//     local _, perm, inh = assert(unix.capget())
+//     local caps = assert(unix.capget())
 //     -- Drop everything except CAP_NET_BIND_SERVICE.
 //     local keep = 1 << unix.CAP_NET_BIND_SERVICE
-//     assert(unix.capset(perm & keep, perm & keep, inh & keep))
+//     assert(unix.capset(caps.permitted & keep, caps.permitted & keep,
+//                         caps.inheritable & keep))
 static int LuaUnixCapset(lua_State *L) {
   int olderr = errno;
   struct __user_cap_header_struct hdr;
