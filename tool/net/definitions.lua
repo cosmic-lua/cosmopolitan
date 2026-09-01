@@ -6385,9 +6385,15 @@ function unix.sethostname(name) end
 --- forked child to give that child a controlling terminal.
 ---
 --- Not supported on Windows or bare metal, where it returns `ENOSYS`.
----@return integer|nil mfd, integer sfd, string name
----@return string? error
----@return unix.Errno? errno
+--- Returns exactly 3 values in both branches: success returns `mfd,
+--- sfd, name`; failure returns exactly `nil, error, errno`, so the
+--- error string lands in the slot declared `sfd` and the errno lands
+--- in the slot declared `name`, not in slots of their own.
+---@return integer|nil mfd
+---@return integer|string sfd the subordinate fd on success, or the
+--- error string when the call failed
+---@return string|unix.Errno name the subordinate's path on success, or
+--- the errno when the call failed
 ---@nodiscard
 function unix.openpty() end
 
