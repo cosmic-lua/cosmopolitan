@@ -5585,9 +5585,10 @@ function unix.fcntl(fd, cmd, ...) end
 function unix.getsid(pid) end
 
 --- Gets process group id.
----@return integer|nil pgid
----@return string? error
----@return unix.Errno? errno
+---
+--- This function does not fail: getpgrp(2) takes no argument and POSIX
+--- guarantees it is always successful.
+---@return integer pgid
 ---@nodiscard
 function unix.getpgrp() end
 
