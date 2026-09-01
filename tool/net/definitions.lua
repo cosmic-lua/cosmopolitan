@@ -4872,6 +4872,11 @@ function unix.spawnp(prog, argv, envp) end
 ---@return unix.Errno? errno
 function unix.dup(oldfd, newfd, flags, lowest) end
 
+--- A pipe's two file descriptors, as returned by `pipe`.
+---@class unix.Pipe
+---@field reader integer the read end's file descriptor
+---@field writer integer the write end's file descriptor
+
 --- Creates fifo which enables communication between processes.
 ---
 ---@param flags integer? may have any combination (using bitwise OR) of:
@@ -4884,26 +4889,27 @@ function unix.dup(oldfd, newfd, flags, lowest) end
 ---   as they're no larger than `PIPE_BUF` (guaranteed to be 512+ bytes)
 ---   with support limited to Linux, Windows NT, FreeBSD, and NetBSD.
 ---
---- Returns two file descriptors: one for reading and one for writing.
+--- Returns one `unix.Pipe` table with `reader` and `writer` file
+--- descriptor fields.
 ---
 --- Here's an example of how pipe(), fork(), dup(), etc. may be used
 --- to serve an HTTP response containing the output of a subprocess.
 ---
 ---     local unix = require "unix"
 ---     ls = assert(unix.commandv("ls"))
----     reader, writer = assert(unix.pipe())
+---     pipe = assert(unix.pipe())
 ---     if assert(unix.fork()) == 0 then
 ---        unix.close(1)
----        unix.dup(writer)
----        unix.close(writer)
----        unix.close(reader)
+---        unix.dup(pipe.writer)
+---        unix.close(pipe.writer)
+---        unix.close(pipe.reader)
 ---        unix.execve(ls, {ls, "-Shal"})
 ---        unix.exit(127)
 ---     else
----        unix.close(writer)
+---        unix.close(pipe.writer)
 ---        SetHeader('Content-Type', 'text/plain')
 ---        while true do
----           data, err, errno = unix.read(reader)
+---           data, err, errno = unix.read(pipe.reader)
 ---           if data then
 ---              if data ~= "" then
 ---                 Write(data)
@@ -4915,11 +4921,11 @@ function unix.dup(oldfd, newfd, flags, lowest) end
 ---              break
 ---           end
 ---        end
----        assert(unix.close(reader))
+---        assert(unix.close(pipe.reader))
 ---        assert(unix.wait())
 ---     end
 ---
----@return integer|nil reader, integer writer
+---@return unix.Pipe|nil
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard

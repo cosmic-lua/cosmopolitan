@@ -15,7 +15,8 @@ local UNPRIV = 65534  -- "nobody"
 -- a forked child that first drops to an unprivileged uid/gid if it
 -- started as root, then reports the result back over a pipe.
 local function run_unprivileged(body)
-  local r, w = assert(unix.pipe())
+  local pipe = assert(unix.pipe())
+  local r, w = pipe.reader, pipe.writer
   local pid = assert(unix.fork())
   if pid == 0 then
     unix.close(r)

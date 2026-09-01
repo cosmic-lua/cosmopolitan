@@ -38,7 +38,8 @@ end
 -- Fork-uniqueness tripwire: 1000 UUIDs split across parent and child must all
 -- be distinct. A seed drawn only from rdtsc+pid would collide here.
 local N = 500
-local r, w = assert(unix.pipe())
+local pipe = assert(unix.pipe())
+local r, w = pipe.reader, pipe.writer
 local pid = assert(unix.fork())
 if pid == 0 then
   unix.close(r)

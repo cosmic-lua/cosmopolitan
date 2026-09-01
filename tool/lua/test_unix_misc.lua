@@ -74,15 +74,17 @@ function UnixTest()
    -- 2. sandbox the process
    -- 3. then violate its security
    if unix.pledge(nil, nil) then
-       reader, writer = assert(unix.pipe())
+       -- pipe's success value is one unix.Pipe table ({reader=, writer=}),
+       -- not two positional integers -- slot 2 always means error.
+       local pipe = assert(unix.pipe())
        if assert(unix.fork()) == 0 then
-           assert(unix.dup(writer, 2))
+           assert(unix.dup(pipe.writer, 2))
            assert(unix.pledge("stdio"))
            unix.socket()
            unix.exit(0)
        end
-       unix.close(writer)
-       unix.close(reader)
+       unix.close(pipe.writer)
+       unix.close(pipe.reader)
        pid, ws = assert(unix.wait())
        assert(unix.WIFSIGNALED(ws))
        assert(unix.WTERMSIG(ws) == unix.SIGSYS or  -- Linux

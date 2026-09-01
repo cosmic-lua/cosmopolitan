@@ -8,7 +8,8 @@ function main()
       cmd = 'ls'
    end
    ls = assert(unix.commandv(cmd))
-   reader, writer = assert(unix.pipe(unix.O_CLOEXEC))
+   pipe = assert(unix.pipe(unix.O_CLOEXEC))
+   reader, writer = pipe.reader, pipe.writer
    oldint = assert(unix.sigaction(unix.SIGINT, unix.SIG_IGN))
    oldquit = assert(unix.sigaction(unix.SIGQUIT, unix.SIG_IGN))
    oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.sigset(unix.SIGCHLD)))
