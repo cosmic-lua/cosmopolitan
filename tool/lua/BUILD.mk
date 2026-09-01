@@ -227,6 +227,10 @@ o/$(MODE)/tool/lua/test_sqlite_readonly.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/
 	$< tool/lua/test_sqlite_readonly.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_sqlite_serialize.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sqlite_serialize.lua
+	$< tool/lua/test_sqlite_serialize.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_jsonorg_fail.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_jsonorg_fail.lua
 	$< tool/lua/test_jsonorg_fail.lua
 	@touch $@
@@ -385,6 +389,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_definitions_conformance.ok		\
 	o/$(MODE)/tool/lua/test_ssl_roots.ok				\
 	o/$(MODE)/tool/lua/test_sqlite_readonly.ok			\
+	o/$(MODE)/tool/lua/test_sqlite_serialize.ok			\
 	o/$(MODE)/tool/lua/test_jsonorg_fail.ok				\
 	o/$(MODE)/tool/lua/test_jsonorg_pass.ok				\
 	o/$(MODE)/tool/lua/test_jsontestsuite_fail1.ok			\
