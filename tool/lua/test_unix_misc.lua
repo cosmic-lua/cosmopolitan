@@ -175,6 +175,27 @@ function UnixTest()
    table.sort(t)
    assert(cosmo.EncodeLua(t) == '{".", "..", "cfr_dst", "cfr_src", "foo"}');
 
+   -- Dir:read(): end-of-directory and a genuine readdir() failure both
+   -- surface as nil, but must remain distinguishable via errno.
+   -- Ordinary end-of-directory is a bare nil with no error tuple.
+   eofdir = assert(unix.opendir(tmpdir))
+   while eofdir:read() do end
+   eofname, eoferr, eoferrno = eofdir:read()
+   assert(eofname == nil and eoferr == nil and eoferrno == nil,
+     "end-of-directory must be a bare nil, with no error tuple")
+   assert(eofdir:close())
+
+   -- Closing the stream's underlying fd out from under it turns the
+   -- next read() into a genuine readdir() failure, disambiguated by a
+   -- non-nil errno.
+   baddir = assert(unix.opendir(tmpdir))
+   baddirfd = assert(baddir:fd())
+   assert(unix.close(baddirfd))
+   badname, baderr, baderrno = baddir:read()
+   assert(badname == nil, "a failed readdir() must yield nil")
+   assert(type(baderr) == "string", "a failed readdir() must report an error string")
+   assert(baderrno ~= nil, "a failed readdir() must report a non-nil errno")
+
    -- localtime has no dedicated coverage today (`grep -c localtime
    -- tool/lua/test_unix_misc.lua` reports 0 before this change). Pin
    -- both paths against the unix.BrokenDownTime table shape the gmtime
