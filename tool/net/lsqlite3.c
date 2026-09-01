@@ -934,7 +934,10 @@ static int db_wal_checkpoint(lua_State *L) {
     const char *db_name = luaL_optstring(L, 3, NULL);
     int nLog, nCkpt;
     if (sqlite3_wal_checkpoint_v2(db->db, db_name, eMode, &nLog, &nCkpt) != SQLITE_OK) {
-        return pusherr(L, sqlite3_errcode(db->db));
+        lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
+        lua_pushinteger(L, sqlite3_errcode(db->db));
+        return 3;
     }
     lua_pushinteger(L, nLog);
     lua_pushinteger(L, nCkpt);

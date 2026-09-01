@@ -979,6 +979,7 @@ function lsqlite3.Database:urows(sql) end
 ---@param mode integer?
 ---@param name string?
 ---@return integer|nil nlog, integer nckpt
+---@return string? errormsg
 ---@return lsqlite3.ResultCode? errno
 function lsqlite3.Database:wal_checkpoint(mode, name) end
 
