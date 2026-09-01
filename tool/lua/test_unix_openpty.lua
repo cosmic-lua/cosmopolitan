@@ -93,4 +93,39 @@ if unix.RLIMIT_NOFILE and unix.getrlimit then
     "getrlimit failure's 3rd value should be the errno, got " .. type(packed[3]))
 end
 
+-- pipe's own contract: slot 2 always means error, regardless of
+-- branch. Success bundles the two positional fds into one unix.Pipe
+-- table (never a bare integer that could be confused with the error
+-- string, the deviation this test pins); fd exhaustion still returns
+-- the clean 3-value failure tuple.
+do
+  local pipe = assert(unix.pipe())
+  assert(type(pipe) == "table",
+    "pipe success should return a unix.Pipe table, got " .. type(pipe))
+  assert(type(pipe.reader) == "number" and type(pipe.writer) == "number",
+    "unix.Pipe should carry numeric reader/writer fields")
+  unix.close(pipe.reader)
+  unix.close(pipe.writer)
+
+  if unix.RLIMIT_NOFILE and unix.getrlimit and unix.setrlimit then
+    local old_limit = unix.getrlimit(unix.RLIMIT_NOFILE)
+    if old_limit then
+      assert(unix.setrlimit(unix.RLIMIT_NOFILE, 0, old_limit.hard))
+      local packed = table.pack(unix.pipe())
+      assert(unix.setrlimit(unix.RLIMIT_NOFILE, old_limit.soft, old_limit.hard))
+
+      assert(packed.n == 3, "pipe failure should return exactly 3 values, got " .. packed.n)
+      assert(packed[1] == nil, "pipe failure's 1st value should be nil")
+      assert(type(packed[2]) == "string",
+        "pipe failure's 2nd value should be the error string, got " .. type(packed[2]))
+      assert(type(packed[3]) == "number",
+        "pipe failure's 3rd value should be the errno, got " .. type(packed[3]))
+    else
+      print("skipping pipe failure-shape probe: could not read RLIMIT_NOFILE")
+    end
+  else
+    print("skipping pipe failure-shape probe: rlimit API unavailable")
+  end
+end
+
 print("all openpty tests passed")

@@ -1464,14 +1464,17 @@ static int LuaUnixDup(lua_State *L) {
 }
 
 // unix.pipe([flags:int])
-//     ├─→ reader:int, writer:int
+//     ├─→ unix.Pipe
 //     └─→ nil, error:str, errno:int
 static int LuaUnixPipe(lua_State *L) {
   int pipefd[2], olderr = errno;
   if (!pipe2(pipefd, luaL_optinteger(L, 1, 0))) {
+    lua_newtable(L);
     lua_pushinteger(L, pipefd[0]);
+    lua_setfield(L, -2, "reader");
     lua_pushinteger(L, pipefd[1]);
-    return 2;
+    lua_setfield(L, -2, "writer");
+    return 1;
   } else {
     return LuaUnixSysretErrno(L, "pipe", olderr);
   }
