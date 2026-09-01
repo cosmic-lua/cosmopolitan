@@ -98,7 +98,7 @@ function UnixTest()
    -- 4. pause() w/ atomic unblocking of USR1 [now it gets delivered!]
    -- 5. restore old signal mask
    -- 6. restore old sig handler
-   oldhand, oldflags, oldmask = assert(unix.sigaction(unix.SIGUSR1, OnSigUsr1))
+   oldact = assert(unix.sigaction(unix.SIGUSR1, OnSigUsr1))
    oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.sigset(unix.SIGUSR1)))
    assert(unix.raise(unix.SIGUSR1))
    assert(not gotsigusr1)
@@ -107,7 +107,7 @@ function UnixTest()
    assert(errno == unix.EINTR)
    assert(gotsigusr1)
    assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
-   assert(unix.sigaction(unix.SIGUSR1, oldhand, oldflags, oldmask))
+   assert(unix.sigaction(unix.SIGUSR1, oldact.handler, oldact.flags, oldact.mask))
 
    -- open
    -- 1. create file

@@ -172,4 +172,15 @@ assert(bad == nil, "setitimer(999) must report nil")
 assert(type(err) == "string", "the error must be a string, not a table field")
 assert(eno == unix.EINVAL, "errno must be EINVAL, not a table field")
 
+-- sigaction now bundles its previous-disposition success values
+-- into one table (tool/net/definitions.lua); pin both branches.
+local ok_action = assert(unix.sigaction(unix.SIGUSR1))
+assert(type(ok_action) == "table" and type(ok_action.flags) == "number"
+  and ok_action.mask ~= nil,
+  "a successful sigaction query must return one table")
+local bad_action, err, eno = unix.sigaction(unix.SIGKILL, unix.SIG_IGN)
+assert(bad_action == nil, "sigaction on SIGKILL must report nil")
+assert(type(err) == "string", "the error must be a string, not a table field")
+assert(eno == unix.EINVAL, "errno must be EINVAL, not a table field")
+
 print("PASS")
