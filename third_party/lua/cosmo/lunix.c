@@ -1675,8 +1675,16 @@ static int LuaUnixGettime(lua_State *L) {
 }
 
 // unix.nanosleep(seconds:int[, nanos:int])
-//     ├─→ remseconds:int, remnanos:int
-//     └─→ nil, error:str, errno:int[, remseconds:int, remnanos:int]
+//     ├─→ remaining:table
+//     └─→ nil, error:str, errno:int[, remaining:table]
+//
+// The success value and the EINTR remainder used to be two positional
+// integers each (remseconds, remnanos), which put the failure path's
+// error string in the same slot (2) that a completed sleep's remnanos
+// occupied. Bundling both into one {seconds, nanos} table -- like
+// unix.capget's caps table -- keeps every slot's meaning fixed: 1 is
+// always the value-or-nil, 2/3 are always error/errno, and 4 is the
+// EINTR remainder, present on no other path.
 static int LuaUnixNanosleep(lua_State *L) {
   int rc, err, olderr = errno;
   struct timespec req, rem = {0};
@@ -1686,19 +1694,26 @@ static int LuaUnixNanosleep(lua_State *L) {
     // POSIX leaves rem unspecified on success: the sleep completed,
     // so the remainder is zero by definition (the old code returned
     // whatever the kernel left in the buffer)
+    lua_newtable(L);
     lua_pushinteger(L, 0);
+    lua_setfield(L, -2, "seconds");
     lua_pushinteger(L, 0);
-    return 2;
+    lua_setfield(L, -2, "nanos");
+    return 1;
   } else {
-    // EINTR is the one failure that fills rem; return the kernel's
-    // remainder after the errno so an interrupted sleep can resume
-    // without re-deriving it from a clock
+    // EINTR is the one failure that fills rem; bundle the kernel's
+    // remainder into its own table, appended after the errno, so an
+    // interrupted sleep can resume without re-deriving it from a
+    // clock and without sharing a slot with the error string
     err = errno;
     rc = LuaUnixSysretErrno(L, "nanosleep", olderr);
     if (err == EINTR) {
+      lua_newtable(L);
       lua_pushinteger(L, rem.tv_sec);
+      lua_setfield(L, -2, "seconds");
       lua_pushinteger(L, rem.tv_nsec);
-      return rc + 2;
+      lua_setfield(L, -2, "nanos");
+      return rc + 1;
     }
     return rc;
   }
