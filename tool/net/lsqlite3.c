@@ -2495,7 +2495,13 @@ static int lsqlite_config(lua_State *L) {
             }
             return 3;  // return OK and previous callback and userdata
     }
-    return pusherr(L, rc);
+    // unlike pusherr(), config's failure carries a human-readable message in
+    // slot 2 (this repo's own convention), with the raw sqlite3 code kept as
+    // an optional slot 3 for callers that want to branch on it
+    lua_pushnil(L);
+    lua_pushstring(L, sqlite3_errstr(rc));
+    lua_pushinteger(L, rc);
+    return 3;
 }
 
 static int lsqlite_newindex(lua_State *L) {
