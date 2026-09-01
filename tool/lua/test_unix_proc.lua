@@ -96,20 +96,21 @@ assert(err ~= nil, "execvp failure should return error")
 -- Test spawn with an argv element that can't convert to a string. This
 -- used to free uninitialized heap memory (ConvertLuaArrayToStringList
 -- freeing an argv/envp array before NUL-terminating it) and segfault;
--- it should now raise a clean Lua error instead.
-local ok, err = pcall(unix.spawn, "/bin/true", {{}})
-assert(ok == false, "spawn with a table argv element should raise, not crash")
-assert(tostring(err):find("argv/envp element"),
-  "spawn should raise the argv/envp conversion error, got: " .. tostring(err))
+-- it should now return the ordinary fallible tuple instead.
+local pid, err = unix.spawn("/bin/true", {{}})
+assert(pid == nil, "spawn with a table argv element should fail, not crash")
+assert(err ~= nil, "spawn with a bad argv element should return an error")
 
--- Same bad-element case in envp, and on a non-spawn call site
--- (execve) that shares the same underlying conversion helper.
-local ok, err = pcall(unix.spawn, "/bin/true", {"/bin/true"}, {{}})
-assert(ok == false, "spawn with a table envp element should raise, not crash")
+-- Same bad-element case in envp (argv converts fine, then envp fails,
+-- exercising the cleanup path that frees the already-converted argv),
+-- and on a non-spawn call site (execve) that shares the same
+-- underlying conversion helper.
+local pid, err = unix.spawn("/bin/true", {"/bin/true"}, {{}})
+assert(pid == nil, "spawn with a table envp element should fail, not crash")
+assert(err ~= nil, "spawn with a bad envp element should return an error")
 
-local ok, err = pcall(unix.execve, "/bin/true", {{}})
-assert(ok == false, "execve with a table argv element should raise, not crash")
-assert(tostring(err):find("argv/envp element"),
-  "execve should raise the argv/envp conversion error, got: " .. tostring(err))
+local ok, err = unix.execve("/bin/true", {{}})
+assert(ok == nil, "execve with a table argv element should fail, not crash")
+assert(err ~= nil, "execve with a bad argv element should return an error")
 
 print("all unix proc tests passed")

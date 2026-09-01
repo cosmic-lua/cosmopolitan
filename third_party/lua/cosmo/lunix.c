@@ -341,10 +341,12 @@ static char **ConvertLuaArrayToStringList(lua_State *L, int i) {
         p[j - 1] = s;
       } else {
         FreeStringList(p);
-        luaL_argerror(L, i, "argv/envp element must be convertible to a string");
-        __builtin_unreachable();
+        p = 0;
+        break;
       }
     }
+    if (p)
+      p[j - 1] = 0;
   }
   return p;
 }
