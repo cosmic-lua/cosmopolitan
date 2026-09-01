@@ -319,6 +319,18 @@ o/$(MODE)/tool/lua/test_slurp_ranges.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/tes
 	$< tool/lua/test_slurp_ranges.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_unix_getlogin.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_getlogin.lua
+	$< tool/lua/test_unix_getlogin.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_unix_uname.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_uname.lua
+	$< tool/lua/test_unix_uname.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_unix_tcattr.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_tcattr.lua
+	$< tool/lua/test_unix_tcattr.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -352,6 +364,9 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_path_values.ok				\
 	o/$(MODE)/tool/lua/test_unix_readlink.ok			\
 	o/$(MODE)/tool/lua/test_slurp_ranges.ok				\
+	o/$(MODE)/tool/lua/test_unix_getlogin.ok			\
+	o/$(MODE)/tool/lua/test_unix_uname.ok				\
+	o/$(MODE)/tool/lua/test_unix_tcattr.ok				\
 	o/$(MODE)/tool/lua/test_uuid.ok					\
 	o/$(MODE)/tool/lua/test_crypto_hash.ok				\
 	o/$(MODE)/tool/lua/test_signal.ok				\
