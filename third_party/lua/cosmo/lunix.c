@@ -2145,7 +2145,7 @@ static int LuaUnixGetsockopt(lua_State *L) {
       CheckOptvalsize(L, sizeof(l), size);
       lua_pushinteger(L, l.l_linger);
       lua_pushboolean(L, !!l.l_onoff);
-      return 1;
+      return 2;
     }
   } else if (level == SOL_TCP && optname == TCP_SAVED_SYN) {
     // unix.getsockopt(fd:int, unix.SOL_TCP, unix.SO_SAVED_SYN)
