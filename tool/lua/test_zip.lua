@@ -509,6 +509,7 @@ assert(cok == nil and cerr:match("closed"), "save after close should fail")
 -- Cleanup
 --------------------------------------------------------------------------------
 
-os.execute("rm -rf " .. tmpdir)
+assert(unix.rmrf(tmpdir))
+assert(not unix.stat(tmpdir), "tmpdir should not exist after cleanup")
 
 print("PASS")
