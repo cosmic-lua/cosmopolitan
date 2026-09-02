@@ -4,11 +4,21 @@
 PKGS += TOOL_LUA
 
 TOOL_LUA_FILES := $(wildcard tool/lua/*)
-TOOL_LUA_SRCS = $(filter %.c,$(TOOL_LUA_FILES))
 TOOL_LUA_HDRS = $(filter %.h,$(TOOL_LUA_FILES))
 
+# TOOL_LUA_SRCS is what the root SRCS aggregate hands to mkdeps for this
+# package, and it carries one source this directory does not own:
+# tool/net/lfetch.c compiles against Mbed TLS 3.6 and links only into
+# the lua binary, so tool/net/BUILD.mk keeps it out of TOOL_NET_SRCS, and
+# listing it here is what gives o/$(MODE)/tool/net/lfetch.o its header
+# and .inc edges in o/$(MODE)/depend. The object list stays this
+# directory's own sources; lfetch.o is linked via TOOL_LUA_LUA_MODULES.
+TOOL_LUA_SRCS =								\
+	$(filter %.c,$(TOOL_LUA_FILES))					\
+	tool/net/lfetch.c
+
 TOOL_LUA_OBJS =								\
-	$(TOOL_LUA_SRCS:%.c=o/$(MODE)/%.o)
+	$(patsubst %.c,o/$(MODE)/%.o,$(filter %.c,$(TOOL_LUA_FILES)))
 
 TOOL_LUA_BINS =								\
 	$(TOOL_LUA_COMS)						\
@@ -36,13 +46,6 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/net/lgetopt.o					\
 	o/$(MODE)/tool/net/lzip.o					\
 	o/$(MODE)/tool/net/lcov.o
-
-# lfetch.c is excluded from TOOL_NET_SRCS (see tool/net/BUILD.mk), so
-# mkdeps never scans it and o/$(MODE)/depend carries no header edges for
-# it; give it the one that matters for incremental builds by hand.
-o/$(MODE)/tool/net/lfetch.o:						\
-		tool/net/lfetch.c					\
-		tool/net/fetch.inc
 
 TOOL_LUA_DIRECTDEPS =							\
 	DSP_SCALE							\
@@ -378,6 +381,14 @@ o/$(MODE)/tool/lua/test_build_mk_touch.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/t
 	$< tool/lua/test_build_mk_touch.lua
 	@touch $@
 
+# Dependency-scan gate: every .c this build compiled under tool/net,
+# tool/lua and third_party/lua/cosmo must be in o/$(MODE)/srcs.txt, or
+# mkdeps never scans it and its object goes stale on a header edit.
+# srcs.txt is a prerequisite so any BUILD.mk change re-runs the check.
+o/$(MODE)/tool/lua/test_srcs_scan.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_srcs_scan.lua o/$(MODE)/srcs.txt
+	$< tool/lua/test_srcs_scan.lua o/$(MODE)/srcs.txt
+	@touch $@
+
 # Function coverage floor: ftrace every enrolled test, intersect the
 # reached functions with nm's per-file listing of the binding sources,
 # and fail when a file's covered count drops below tool/lua/coverage_floor.lua.
@@ -456,6 +467,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_jsontestsuite_pass.ok			\
 	o/$(MODE)/tool/lua/test_ljson.ok				\
 	o/$(MODE)/tool/lua/test_build_mk_touch.ok			\
+	o/$(MODE)/tool/lua/test_srcs_scan.ok				\
 	o/$(MODE)/tool/lua/test_coverage.ok
 
 .PHONY: o/$(MODE)/tool/lua
