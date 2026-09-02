@@ -85,6 +85,19 @@ TOOL_LUA_DIRECTDEPS =							\
 TOOL_LUA_DEPS :=							\
 	$(call uniq,$(foreach x,$(TOOL_LUA_DIRECTDEPS),$($(x))))
 
+# lua.main.c compiles twice: once here with -DLUA_COSMO for this
+# binary's REPL, and once at o/$(MODE)/third_party/lua/cosmo/lua.main.o
+# without it, for the plain third_party/lua/lua binary. mkdeps derives
+# an object's path from its source's path alone, so it can carry edges
+# for only one of the two -- and it picks the plain build's, since that
+# one compiles at the path mkdeps derives. Rather than move this rule's
+# output onto that path (which would collide with the plain build's
+# differently-flagged object at the same path), this object is aliased
+# onto that one: whenever a header edit makes it stale, make rebuilds
+# it first, and its newer mtime then makes this rule stale too, so the
+# recipe below reruns with -DLUA_COSMO unchanged.
+o/$(MODE)/tool/lua/lua.main.o: o/$(MODE)/third_party/lua/cosmo/lua.main.o
+
 o/$(MODE)/tool/lua/lua.main.o: third_party/lua/cosmo/lua.main.c
 	@$(COMPILE) -AOBJECTIFY.c $(OBJECTIFY.c) $(OUTPUT_OPTION) -DLUA_COSMO $<
 
