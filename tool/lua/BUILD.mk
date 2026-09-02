@@ -237,6 +237,10 @@ o/$(MODE)/tool/lua/test_definitions_help.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua
 	$< tool/lua/test_definitions_help.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_sqlite_extensions.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sqlite_extensions.lua tool/net/definitions.lua third_party/sqlite3/extensions.h third_party/sqlite3/BUILD.mk $(THIRD_PARTY_SQLITE3_A_SRCS)
+	$< tool/lua/test_sqlite_extensions.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_ssl_roots.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_ssl_roots.lua net/https/sslroots.c $(wildcard usr/share/ssl/root/*.pem)
 	$< tool/lua/test_ssl_roots.lua
 	@touch $@
@@ -450,6 +454,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_definitions_coverage.ok			\
 	o/$(MODE)/tool/lua/test_definitions_conformance.ok		\
 	o/$(MODE)/tool/lua/test_definitions_help.ok			\
+	o/$(MODE)/tool/lua/test_sqlite_extensions.ok			\
 	o/$(MODE)/tool/lua/test_ssl_roots.ok				\
 	o/$(MODE)/tool/lua/test_sqlite_readonly.ok			\
 	o/$(MODE)/tool/lua/test_sqlite_serialize.ok			\
