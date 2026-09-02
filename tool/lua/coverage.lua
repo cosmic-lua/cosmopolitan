@@ -50,6 +50,23 @@
 -- them plainly, so nothing they assert is lost -- only the functions
 -- that no other test reaches stay out of the floor.
 --
+-- The three test_definitions_*.lua entries are unbounded for the same
+-- underlying reason: each repeatedly re-parses tool/net/definitions.lua
+-- (hundreds of KB) with string.find/match/gmatch, and it is that parsing
+-- -- not any binding call -- that explodes under --ftrace (measured
+-- 2026-09-02: 19 calls to test_definitions_conformance.lua's
+-- declared_returns() alone produced 11.5M FUN lines, past the cap below,
+-- with no binding call in sight). test_definitions_coverage.lua and
+-- test_definitions_help.lua call no bindings at all, so there is nothing
+-- to split out of them; they stay skipped outright.
+-- test_definitions_conformance.lua does call bindings -- the ~75 pure
+-- functions it checks against definitions.lua's annotations -- and those
+-- calls alone are bounded (measured the same day: under 66,000 FUN
+-- lines). tool/lua/test_definitions_probes.lua makes the same calls,
+-- success and forced-failure alike, with no definitions.lua parsing, so
+-- the floor sees those bindings without needing conformance.lua's own
+-- trace to finish; it is enrolled ordinarily and does not appear below.
+--
 -- Usage, as tool/lua/BUILD.mk invokes it:
 --
 --   lua.dbg tool/lua/coverage.lua <lua.dbg> <nm> <outdir> <floor> <test.lua>...
@@ -75,14 +92,16 @@ unix.setenv("COVERAGE_FTRACE", "1", true)
 
 local SKIP = {
   ["tool/lua/test_definitions_conformance.lua"] =
-    "pure-Lua source parser; every VM-internal C call is traced, ~28 MB/s " ..
-    "of trace with no bound in sight (25 GB written without finishing)",
+    "repeatedly re-parses definitions.lua to check annotations; ~28 MB/s " ..
+    "of trace with no bound in sight (25 GB written without finishing). " ..
+    "The ~75 bindings it also calls are covered, bounded, by " ..
+    "tool/lua/test_definitions_probes.lua instead",
   ["tool/lua/test_definitions_coverage.lua"] =
-    "pure-Lua source parser; every VM-internal C call is traced, ~28 MB/s " ..
-    "of trace, past 400 MB in 15 s",
+    "pure-Lua source parser, no bindings called; ~28 MB/s of trace, past " ..
+    "400 MB in 15 s",
   ["tool/lua/test_definitions_help.lua"] =
-    "pure-Lua source parser; every VM-internal C call is traced, ~28 MB/s " ..
-    "of trace, past 400 MB in 15 s",
+    "pure-Lua source parser, no bindings called; ~28 MB/s of trace, past " ..
+    "400 MB in 15 s",
 }
 
 local tests, skipped = {}, {}

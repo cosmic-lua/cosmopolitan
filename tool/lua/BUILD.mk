@@ -233,6 +233,10 @@ o/$(MODE)/tool/lua/test_definitions_conformance.ok: o/$(MODE)/tool/lua/lua.dbg t
 	$< tool/lua/test_definitions_conformance.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_definitions_probes.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_probes.lua
+	$< tool/lua/test_definitions_probes.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_definitions_help.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_help.lua tool/net/definitions.lua tool/net/help.txt third_party/lua/cosmo/lunix.c
 	$< tool/lua/test_definitions_help.lua
 	@touch $@
@@ -453,6 +457,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_landlock_abi.ok				\
 	o/$(MODE)/tool/lua/test_definitions_coverage.ok			\
 	o/$(MODE)/tool/lua/test_definitions_conformance.ok		\
+	o/$(MODE)/tool/lua/test_definitions_probes.ok			\
 	o/$(MODE)/tool/lua/test_definitions_help.ok			\
 	o/$(MODE)/tool/lua/test_sqlite_extensions.ok			\
 	o/$(MODE)/tool/lua/test_ssl_roots.ok				\
