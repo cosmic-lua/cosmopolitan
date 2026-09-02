@@ -182,6 +182,47 @@ CONFIG_COPTS += -fsanitize=undefined -fno-data-sections
 QUOTA ?= -C64 -L300
 endif
 
+# Coverage Mode
+#
+#   - `make MODE=cov`
+#   - Backtraces
+#   - No optimization
+#   - Function tracing
+#   - Builds the .gcda writer (libc/intrin/gcov.c) in place of the
+#     weak __gcov_* stubs, so an object compiled with COVERAGE_CFLAGS
+#     dumps its counters at exit. Those flags are NOT global: each
+#     BUILD.mk adds them to exactly the objects it measures
+#
+# COVERAGE_CFLAGS expands per object. tlscc compiles to a temporary .s
+# and assembles that, so gcc must be told to name the .gcno and the
+# embedded .gcda path after the object, not the temporary. With
+# -fprofile-arcs gcc also routes fork/exec* through __gcov_fork and
+# __gcov_exec* wrappers; -fno-builtin on those names keeps the calls
+# as they are, so no wrapper exists and none is needed.
+#
+ifeq ($(MODE), cov)
+ENABLE_FTRACE = 1
+COVERAGE_CFLAGS =							\
+	-fprofile-arcs							\
+	-ftest-coverage							\
+	-dumpdir $(@D)/							\
+	-dumpbase $(@F)							\
+	-fno-builtin-fork						\
+	-fno-builtin-execl						\
+	-fno-builtin-execv						\
+	-fno-builtin-execlp						\
+	-fno-builtin-execle						\
+	-fno-builtin-execvp						\
+	-fno-builtin-execve
+CONFIG_OFLAGS ?= -g -ggdb
+OVERRIDE_CFLAGS += -O0
+OVERRIDE_CXXFLAGS += -O0
+CONFIG_CPPFLAGS += -DMODE_COV -Wno-unused-variable -Wno-unused-but-set-variable
+CONFIG_CCFLAGS += $(BACKTRACES) -DSYSDEBUG
+OVERRIDE_CCFLAGS += -fno-pie
+QUOTA ?= -C64 -L300
+endif
+
 # System Five Mode
 #
 #   - `make MODE=sysv`

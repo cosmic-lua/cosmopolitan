@@ -458,6 +458,31 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_build_mk_touch.ok			\
 	o/$(MODE)/tool/lua/test_coverage.ok
 
+ifeq ($(MODE),cov)
+# Line coverage of the binding sources: gcc instruments these objects
+# (COVERAGE_CFLAGS, build/config.mk) and the runtime in
+# libc/intrin/gcov.c dumps a .gcda beside each one at exit. Read with
+# the host gcov, from the object directory:
+#   gcov -o o/cov/tool/net o/cov/tool/net/lsqlite3.o.gcno
+$(TOOL_LUA_LUA_MODULES): private				\
+		CFLAGS +=					\
+			$(COVERAGE_CFLAGS)
+
+# The ftrace function floor is a measurement of the default mode's -O2
+# binary (tool/lua/coverage.lua): at -O0 nothing is inlined and a
+# single test's trace runs past its line cap, so the pass cannot finish
+# here. This mode measures lines with gcov instead.
+TOOL_LUA_TESTS := $(filter-out %/test_coverage.ok,$(TOOL_LUA_TESTS))
+
+# The writer never merges: every process that exits rewrites the file
+# whole. So a test run starts from no .gcda at all, and every test
+# reruns, so what is left afterwards was written by this run.
+.PHONY: o/$(MODE)/tool/lua/gcda.clean
+o/$(MODE)/tool/lua/gcda.clean:
+	find o/$(MODE) -name '*.gcda' -delete
+$(TOOL_LUA_TESTS): o/$(MODE)/tool/lua/gcda.clean
+endif
+
 .PHONY: o/$(MODE)/tool/lua
 o/$(MODE)/tool/lua:							\
 		$(TOOL_LUA_BINS)					\
