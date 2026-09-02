@@ -877,15 +877,23 @@ local QALLOW_CONSTTYPE = set({})
 -- or -- StreamReader's read family -- a second, differently-named string?
 -- slot that is its OWN error message, not a stray copy of the failure
 -- tail). None of these can be produced by dropping a value line off a
--- standard `T|nil value / string? error / unix.Errno? errno` block.
-local QALLOW_NOSUCCESS = set({
-  "cosmo.ParseHost",
-  "cosmo.StreamReader:read",
-  "cosmo.StreamReader:read_until",
-  "lsqlite3.Database:db_filename",
-  "lsqlite3.Statement:bind_parameter_name",
-  "lsqlite3.VM:bind_parameter_name",
-})
+-- standard `T|nil value / string? error / unix.Errno? errno` block --
+-- EXCEPT by type token alone: `string?`/`unix.Errno?` is exactly what a
+-- failure tail that lost its value line still reads as, so allowlisting
+-- a NAME here cannot tell "genuinely bare" from "just got mutilated".
+-- Each entry is keyed instead to the `---@return` line count its block
+-- was seeded with, and the ratchet below only exempts a block whose
+-- count still matches -- StreamReader:read/:read_until dropping their
+-- real `chunk`/`data` line (2 lines -> 1) loses the exemption and
+-- reports by name even though the name is still listed.
+local QALLOW_NOSUCCESS = {
+  ["cosmo.ParseHost"] = 1,
+  ["cosmo.StreamReader:read"] = 2,
+  ["cosmo.StreamReader:read_until"] = 2,
+  ["lsqlite3.Database:db_filename"] = 1,
+  ["lsqlite3.Statement:bind_parameter_name"] = 1,
+  ["lsqlite3.VM:bind_parameter_name"] = 1,
+}
 
 -- Collect module function/method declarations paired with the contiguous run
 -- of `---` annotation lines that immediately precedes each.
@@ -969,9 +977,43 @@ for _, fx in ipairs(NOSUCCESS_FIXTURES) do
     table.concat(blocklines, " / "))
 end
 
+-- The count of `---@return` lines in a block -- the shape QALLOW_NOSUCCESS
+-- keys its exemptions to. first_return_type alone cannot distinguish a
+-- genuinely bare success value from a failure tail that lost its value
+-- line (both read as `string?`), so an allowlisted NAME is exempt only
+-- when its block still has the line count it was seeded for.
+local function return_line_count(blocklines)
+  local n = 0
+  for _, l in ipairs(blocklines) do
+    if l:match("^%-%-%-@return") then n = n + 1 end
+  end
+  return n
+end
+
+-- Shape self-check: mirrors the StreamReader:read/:read_until mutation --
+-- dropping a block's real value line while keeping a differently-named
+-- string? line changes the count, which is exactly what must cost an
+-- allowlisted entry its exemption below.
+local COUNT_FIXTURES = {
+  -- { blocklines, expected return_line_count }
+  { { "---@return string? chunk next chunk of data, or nil on EOF",
+      "---@return string? error error message on failure" }, 2 },
+  { { "---@return string? error error message on failure" }, 1 }, -- the
+    -- StreamReader:read mutation: the value line is gone, only the
+    -- (renamed) error line remains
+  { { "---@return string? port" }, 1 },
+  { { "--- no @return line at all" }, 0 },
+}
+for _, fx in ipairs(COUNT_FIXTURES) do
+  local blocklines, want = fx[1], fx[2]
+  local got = return_line_count(blocklines)
+  assert(got == want, "Q6 shape self-check: return_line_count mismatch for " ..
+    table.concat(blocklines, " / "))
+end
+
 local qvio = {
   param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {},
-  nosuccess = {},
+  nosuccess = {}, nosuccess_lines = {},
 }
 for _, d in ipairs(qdecls) do
   for rawp in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
@@ -989,6 +1031,7 @@ for _, d in ipairs(qdecls) do
     local rt = first_return_type(d.blocklines)
     if rt == "string?" or rt == "unix.Errno?" then
       qvio.nosuccess[d.disp] = true
+      qvio.nosuccess_lines[d.disp] = return_line_count(d.blocklines)
     end
   end
   for _, l in ipairs(d.blocklines) do
@@ -1367,8 +1410,36 @@ ratchet(qvio.noreturn, QALLOW_NORETURN, "no @return/@overload")
 ratchet(qvio.inline, QALLOW_INLINE, "inline { } table type")
 ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
 ratchet(qvio.consttype, QALLOW_CONSTTYPE, "constant not declared integer")
-ratchet(qvio.nosuccess, QALLOW_NOSUCCESS,
+
+-- Q6 is not a plain name ratchet: QALLOW_NOSUCCESS exempts a binding only
+-- for the `---@return` line count its block was seeded with, so a
+-- mutation that drops the real success line -- StreamReader:read and
+-- :read_until dropping their `chunk`/`data` line, leaving only a
+-- differently-named `string?` line -- still reports by name even though
+-- the name stays in the allowlist.
+local function ratchet_nosuccess(viol, lines, allow, label)
+  for _, disp in ipairs(sorted_keys(viol)) do
+    local want_lines = allow[disp]
+    if not want_lines then
+      fail("annotation quality [" .. label .. "]: " .. disp ..
+        " (fix the annotation, or seed the QALLOW list)")
+    elseif want_lines ~= lines[disp] then
+      fail("annotation quality [" .. label .. "]: " .. disp ..
+        " (allowlisted for a " .. want_lines .. "-line @return block, but " ..
+        "its block now has " .. lines[disp] .. " -- the success slot may " ..
+        "have been lost; fix the annotation or reseed the QALLOW line count)")
+    end
+  end
+  for _, disp in ipairs(sorted_keys(allow)) do
+    if not viol[disp] then
+      fail("stale quality allowlist entry [" .. label ..
+        "] (now clean, remove it): " .. disp)
+    end
+  end
+end
+ratchet_nosuccess(qvio.nosuccess, qvio.nosuccess_lines, QALLOW_NOSUCCESS,
   "first @return is the failure tail (lost success slot)")
+
 ratchet(arity_vio, ARITY_ALLOW, "annotation declares returns the C never pushes")
 
 assert(#failures == 0,
