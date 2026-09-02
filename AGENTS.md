@@ -83,6 +83,22 @@ evidence a board item may link, never duplicate.
   is the error — an annotation that deviates is a bug, and a contract
   change to conform is made deliberately (`definitions.lua` same
   commit, conformance probe same PR), never inside another change.
+- **named exception — multi-value success reuses its own slots for
+  error info**: a small set of bindings return more than one genuine
+  value on success and fall back to the same slot positions for error
+  info on failure: `unix.wait` (`pid, wstatus, rusage` vs. `nil,
+  error, errno`), `unix.accept` (`clientfd, ip, port` vs. `nil, error,
+  errno`), and `cosmo.Fetch`/`cosmo.FetchStream` (`status, headers,
+  body|reader, url` vs. `nil, error, kind` — `kind` standing in for
+  `errno` as a machine-readable string enum). This is not a slot
+  violation: slot 1 still disambiguates the branch exactly as the rule
+  above requires, and once a caller has checked it, slot 2 is
+  unambiguously the error and slot 3 unambiguously `errno`/`kind` —
+  the same discipline as a single-value binding, just with more
+  success data ahead of it. `Fetch` and `FetchStream` follow this
+  consistently with each other (arity-4 success, arity-3 failure) and
+  with the rest of this family; it is accepted as-is, not scheduled
+  for normalization.
 
 ## Releases and the cosmic pin
 
