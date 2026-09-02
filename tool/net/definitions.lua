@@ -7226,7 +7226,8 @@ function unix.gmtime(unixts) end
 --- Breaks down UNIX timestamp into local time numbers, e.g.
 ---
 ---     >: unix.localtime(unix.clock_gettime())
----     2022    4       28      2       14      22      -25200  4       117     1       "PDT"
+---     {year=2022, mon=4, mday=28, hour=2, min=14, sec=22,
+---      gmtoffsec=-25200, wday=4, yday=117, dst=1, zone="PDT"}
 ---
 --- This follows the same API as `gmtime()` which has further details.
 ---
