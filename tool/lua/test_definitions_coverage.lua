@@ -798,6 +798,15 @@ end
 --       Teal `number`, and every bit-op call site on it then needs an
 --       `as integer` cast (whilp/cosmopolitan#142). Declaring it here is
 --       what keeps cosmic's generated `integer` honest.
+--   Q6: a block that documents any `---@return` line documents a success
+--       slot -- its FIRST `---@return` is the one downstream generators
+--       (cosmic's gentype) read as the binding's success type, and this
+--       file's dialect spells the failure tail's two slots exactly
+--       `---@return string? error` / `---@return unix.Errno? errno`
+--       (D24/#151), never anything else. A block whose first line is
+--       bare `string?` or `unix.Errno?` has lost its value line and left
+--       only the failure tail -- invisible to every OTHER check here,
+--       since the tail is still syntactically well-formed and non-empty.
 -- Each QALLOW_* is a RATCHET seeded at today's counts: an entry may only be
 -- removed (by improving the annotation), never added. A newly-violating
 -- binding, or a stale entry that no longer violates, fails this test.
@@ -863,6 +872,46 @@ local QALLOW_BARE = set({
 -- empty and must stay that way. Do not seed it -- annotate the constant.
 local QALLOW_CONSTTYPE = set({})
 
+-- Q6: bindings whose declared success value genuinely IS a bare optional
+-- string, with no error/errno slot of its own (a single ---@return line,
+-- or -- StreamReader's read family -- a second, differently-named string?
+-- slot that is its OWN error message, not a stray copy of the failure
+-- tail). None of these can be produced by dropping a value line off a
+-- standard `T|nil value / string? error / unix.Errno? errno` block --
+-- EXCEPT by type token alone: `string?`/`unix.Errno?` is exactly what a
+-- failure tail that lost its value line still reads as, so allowlisting
+-- a NAME here cannot tell "genuinely bare" from "just got mutilated".
+-- Each entry is keyed instead to the exact TEXT of the `---@return` line
+-- its block's real success line was seeded with, and the ratchet below
+-- only exempts a block whose first `---@return` line still reads that
+-- text. A line count is not enough: StreamReader:read and :read_until
+-- both already carry two `string?` lines (their real success line and
+-- their `error` line), so a mutation that swaps the real line's text for
+-- a fabricated one sharing the same `string?` token -- keeping the count
+-- at 2 -- is invisible to a count check but changes the head line's text.
+-- Keying to text also still catches the coarser mutations: dropping the
+-- real line entirely (count 2 -> 1, and the surviving line's text is the
+-- `error` line's, not this one's) or dropping the block's only line
+-- (falls out of `qvio.nosuccess` into the Q2 `noreturn` check instead).
+local QALLOW_NOSUCCESS = {
+  ["cosmo.ParseHost"] =
+    "---@return string? port",
+  ["cosmo.StreamReader:read"] =
+    "---@return string? chunk next chunk of data, or nil on EOF",
+  ["cosmo.StreamReader:read_until"] =
+    "---@return string? data bytes before the delimiter (or the final " ..
+    "remainder), or nil on EOF",
+  ["lsqlite3.Database:db_filename"] =
+    "---@return string? filename associated with database `name` of " ..
+    "connection `db`.",
+  ["lsqlite3.Statement:bind_parameter_name"] =
+    "---@return string? -- the name of the n-th parameter in prepared " ..
+    "statement.",
+  ["lsqlite3.VM:bind_parameter_name"] =
+    "---@return string? parameter_name nil for a positional (`?`) " ..
+    "parameter, which has no name.",
+}
+
 -- Collect module function/method declarations paired with the contiguous run
 -- of `---` annotation lines that immediately precedes each.
 local qdecls = {}
@@ -905,7 +954,94 @@ local function qbare(t)
   return false
 end
 
-local qvio = { param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {} }
+-- The type token of a block's FIRST `---@return` line, or nil when the
+-- block declares none. Only the head token is read (the same word gentype
+-- takes as the slot's type), so a description trailing it doesn't matter.
+local function first_return_type(blocklines)
+  for _, l in ipairs(blocklines) do
+    local t = l:match("^%-%-%-@return%s+(%S+)")
+    if t then return t end
+  end
+  return nil
+end
+
+-- Q6 self-check: the shapes first_return_type must and must not flag,
+-- exercised directly so a regression here fails by fixture instead of
+-- silently passing (or failing) real annotations. Mirrors the localtime
+-- mutation: dropping a block's value line leaves exactly the FAIL shapes.
+local NOSUCCESS_FIXTURES = {
+  -- { blocklines, expected first_return_type, is a lost-success-slot shape }
+  { { "---@return unix.BrokenDownTime|nil", "---@return string? error",
+      "---@return unix.Errno? errno" }, "unix.BrokenDownTime|nil", false },
+  { { "---@return string? error", "---@return unix.Errno? errno" },
+    "string?", true },
+  { { "---@return string? error" }, "string?", true },
+  { { "---@return unix.Errno? errno" }, "unix.Errno?", true },
+  { { "---@return string? filename associated with the connection" },
+    "string?", true }, -- a bare optional-string SUCCESS value is still
+                        -- indistinguishable from the failure tail by type
+                        -- alone; real cases like this ride QALLOW_NOSUCCESS
+  { { "---@return boolean" }, "boolean", false },
+  { { "--- no @return line at all" }, nil, false },
+}
+for _, fx in ipairs(NOSUCCESS_FIXTURES) do
+  local blocklines, want_type, want_flagged = fx[1], fx[2], fx[3]
+  local got_type = first_return_type(blocklines)
+  assert(got_type == want_type, "Q6 self-check: first_return_type mismatch " ..
+    "for " .. table.concat(blocklines, " / "))
+  local flagged = got_type == "string?" or got_type == "unix.Errno?"
+  assert(flagged == want_flagged, "Q6 self-check: flagged mismatch for " ..
+    table.concat(blocklines, " / "))
+end
+
+-- The full text of a block's FIRST `---@return` line -- the shape
+-- QALLOW_NOSUCCESS keys its exemptions to. first_return_type alone cannot
+-- distinguish a genuinely bare success value from a failure tail that
+-- lost its value line (both read as `string?`), and a plain line count
+-- cannot either: it is blind to a same-count substitution that swaps the
+-- real success line's text for a fabricated one sharing its type token.
+-- The exact head-line TEXT pins down which line is actually there, so an
+-- allowlisted NAME is exempt only when its block's first `---@return`
+-- line still reads the text it was seeded with.
+local function first_return_line(blocklines)
+  for _, l in ipairs(blocklines) do
+    if l:match("^%-%-%-@return%f[%s]") then return l end
+  end
+  return nil
+end
+
+-- Shape self-check: exercises all three mutation shapes a real block can
+-- suffer, mirroring StreamReader:read/:read_until.
+local LINE_FIXTURES = {
+  -- { blocklines, expected first_return_line }
+  { { "---@return string? chunk next chunk of data, or nil on EOF",
+      "---@return string? error error message on failure" },
+    "---@return string? chunk next chunk of data, or nil on EOF" },
+  { { "---@return string? error error message on failure" },
+    "---@return string? error error message on failure" }, -- round-1
+    -- mutation: the real value line is gone, only the (renamed) error
+    -- line remains -- text differs from the seeded head line above
+  { { "---@return string? reason secondary detail on failure " ..
+        "(success info lost)",
+      "---@return string? error error message on failure" },
+    "---@return string? reason secondary detail on failure " ..
+      "(success info lost)" }, -- round-2 mutation: the count stays at 2,
+    -- but the real value line's text was swapped for a fabricated line
+    -- sharing its `string?` token -- still a different head line
+  { { "---@return string? port" }, "---@return string? port" },
+  { { "--- no @return line at all" }, nil },
+}
+for _, fx in ipairs(LINE_FIXTURES) do
+  local blocklines, want = fx[1], fx[2]
+  local got = first_return_line(blocklines)
+  assert(got == want, "Q6 shape self-check: first_return_line mismatch for " ..
+    table.concat(blocklines, " / "))
+end
+
+local qvio = {
+  param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {},
+  nosuccess = {}, nosuccess_lines = {},
+}
 for _, d in ipairs(qdecls) do
   for rawp in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
     local p = rawp:gsub("%s", "")
@@ -917,6 +1053,13 @@ for _, d in ipairs(qdecls) do
   end
   if not (d.block:find("%-%-%-@return") or d.block:find("%-%-%-@overload")) then
     qvio.noreturn[d.disp] = true
+  end
+  do
+    local rt = first_return_type(d.blocklines)
+    if rt == "string?" or rt == "unix.Errno?" then
+      qvio.nosuccess[d.disp] = true
+      qvio.nosuccess_lines[d.disp] = first_return_line(d.blocklines)
+    end
   end
   for _, l in ipairs(d.blocklines) do
     if l:match("%-%-%-@param") or l:match("%-%-%-@return") or
@@ -1294,6 +1437,39 @@ ratchet(qvio.noreturn, QALLOW_NORETURN, "no @return/@overload")
 ratchet(qvio.inline, QALLOW_INLINE, "inline { } table type")
 ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
 ratchet(qvio.consttype, QALLOW_CONSTTYPE, "constant not declared integer")
+
+-- Q6 is not a plain name ratchet: QALLOW_NOSUCCESS exempts a binding only
+-- when its block's first `---@return` line still reads the exact text it
+-- was seeded with, so a mutation that drops the real success line --
+-- StreamReader:read and :read_until dropping their `chunk`/`data` line,
+-- leaving only a differently-named `string?` line -- or that swaps its
+-- text for a fabricated line sharing the same type token while leaving
+-- the line count unchanged, still reports by name even though the name
+-- stays in the allowlist.
+local function ratchet_nosuccess(viol, lines, allow, label)
+  for _, disp in ipairs(sorted_keys(viol)) do
+    local want_line = allow[disp]
+    if not want_line then
+      fail("annotation quality [" .. label .. "]: " .. disp ..
+        " (fix the annotation, or seed the QALLOW list)")
+    elseif want_line ~= lines[disp] then
+      fail("annotation quality [" .. label .. "]: " .. disp ..
+        " (allowlisted for a specific @return head line, but its block's " ..
+        "first @return line now reads " .. tostring(lines[disp]) .. " -- " ..
+        "the success slot may have been lost or swapped; fix the " ..
+        "annotation or reseed the QALLOW head line)")
+    end
+  end
+  for _, disp in ipairs(sorted_keys(allow)) do
+    if not viol[disp] then
+      fail("stale quality allowlist entry [" .. label ..
+        "] (now clean, remove it): " .. disp)
+    end
+  end
+end
+ratchet_nosuccess(qvio.nosuccess, qvio.nosuccess_lines, QALLOW_NOSUCCESS,
+  "first @return is the failure tail (lost success slot)")
+
 ratchet(arity_vio, ARITY_ALLOW, "annotation declares returns the C never pushes")
 
 assert(#failures == 0,
@@ -1302,7 +1478,8 @@ assert(#failures == 0,
   table.concat(failures, "\n  "))
 
 local qallowed = count(QALLOW_PARAM) + count(QALLOW_NORETURN) +
-  count(QALLOW_INLINE) + count(QALLOW_BARE) + count(QALLOW_CONSTTYPE)
+  count(QALLOW_INLINE) + count(QALLOW_BARE) + count(QALLOW_CONSTTYPE) +
+  count(QALLOW_NOSUCCESS)
 print("definitions coverage: " .. nfns .. " functions, " .. nmethods ..
   " methods, " .. nconsts .. " constants checked across " ..
   #MODULES .. " modules; " .. count(ALLOW) .. " allowlisted")
