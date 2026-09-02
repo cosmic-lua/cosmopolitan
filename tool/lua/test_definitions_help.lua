@@ -5,11 +5,21 @@
 -- Both tool/net/help.txt (redbean's embedded manual) and
 -- third_party/lua/cosmo/lunix.c (a comment above each LuaUnix* binding)
 -- restate every unix.* binding's return shape as a box-drawn block under
--- its signature line:
+-- its signature line, both for plain functions and for
+-- unix.<Type>:<method>() methods on the userdata objects (unix.Stat,
+-- unix.Rusage, unix.Sigset, unix.Dir, unix.Memory):
 --
 --   unix.getsid(pid:int)                 // unix.getsid(pid:int)
 --       ├─→ sid:int                      //     ├─→ sid:int
 --       └─→ nil, error:str, errno:int    //     └─→ nil, error:str, errno:int
+--
+--   unix.Stat:size()                     // unix.Stat:size()
+--       └─→ bytes:int                    //     └─→ bytes:int
+--
+-- The 2 sandbox.* shape blocks (sandbox.pledge, sandbox.unveil) stay
+-- outside this gate: the pattern below matches only `unix.`-prefixed
+-- signatures, and sandbox.*'s annotations live under a different table
+-- in definitions.lua.
 --
 -- definitions.lua declares the same contract as @return annotations, and
 -- only the annotations are read by anything downstream, so both copies
@@ -33,8 +43,9 @@
 --
 -- The two sources differ only in the prefix every line carries: two
 -- spaces in help.txt, `// ` in lunix.c. Under that prefix a signature
--- line is `unix.<name>(` and a branch line is four more spaces then the
--- arrow. A block may itself sit under further indentation -- lunix.c
+-- line is `unix.<name>(` or `unix.<Type>:<method>(` and a branch line
+-- is four more spaces then the arrow. A block may itself sit under
+-- further indentation -- lunix.c
 -- documents getsockopt/setsockopt per option class inside the C body,
 -- and help.txt nests those same blocks under a bullet -- so the
 -- signature's own leading whitespace is captured and every line of its
@@ -106,19 +117,32 @@ end
 -- Every documented unix.* shape block in `text`, whose lines all carry
 -- `prefix` (no pattern magic in either prefix) under the signature's own
 -- indentation: { line, names, branches }, where branches are the text
--- after the arrow, in order.
+-- after the arrow, in order. `name` (and so `names`) is `getsid` for a
+-- plain function and `Stat:size` for a method, matching how
+-- definitions.lua spells the two (`function unix.getsid(`, `function
+-- unix.Stat:size(`).
+--
+-- Second return: every line whose first non-blank content after `prefix`
+-- is `uni<letters>.` where the word isn't `unix` -- a mistyped prefix
+-- (`unid.`, `unis.`) that a `unix.`-anchored signature pattern would
+-- otherwise skip in silence. The trailing `.` (call syntax, not prose)
+-- keeps this off unrelated comments that merely start with a `uni`
+-- word, such as "uninitialized" in a sentence. Reported as a failure
+-- by line, never folded into `blocks`.
 local function shape_blocks(text, prefix)
-  local any_sig = "^( *)" .. prefix .. "unix%.([%a_][%w_]*)%s*%("
+  local any_sig = "^( *)" .. prefix .. "unix%.([%a_][%w_:]*)%s*%("
+  local typo_sig = "^ *" .. prefix .. "(uni%a*)%."
   local lines = {}
   for line in (text .. "\n"):gmatch("([^\n]*)\n") do
     lines[#lines + 1] = line
   end
   local blocks = {}
+  local typos = {}
   local i = 1
   while i <= #lines do
     local indent, name = lines[i]:match(any_sig)
     if name then
-      local sig = "^" .. indent .. prefix .. "unix%.([%a_][%w_]*)%s*%("
+      local sig = "^" .. indent .. prefix .. "unix%.([%a_][%w_:]*)%s*%("
       local branch = "^" .. indent .. prefix .. "    "
       local block = { line = i, names = { name }, branches = {} }
       local j = i + 1
@@ -146,10 +170,14 @@ local function shape_blocks(text, prefix)
       end
       i = j
     else
+      local word = lines[i]:match(typo_sig)
+      if word and word ~= "unix" then
+        typos[#typos + 1] = { line = i, text = lines[i]:match("^%s*(.-)%s*$") }
+      end
       i = i + 1
     end
   end
-  return blocks
+  return blocks, typos
 end
 
 local failures = {}
@@ -159,9 +187,15 @@ end
 
 local summary = {}
 for _, source in ipairs(SOURCES) do
-  local blocks = shape_blocks(slurp(source.path), source.prefix)
+  local blocks, typos = shape_blocks(slurp(source.path), source.prefix)
   assert(#blocks > 50, source.label .. " parsed only " .. #blocks ..
     " unix.* shape blocks; its layout changed under this parser")
+
+  for _, typo in ipairs(typos) do
+    fail(source.label .. ":" .. typo.line .. " \"" .. typo.text ..
+      "\": mistyped prefix (reads \"" .. source.prefix .. "uni...\", " ..
+      "not \"" .. source.prefix .. "unix.\")")
+  end
 
   local checked = 0
   for _, block in ipairs(blocks) do
