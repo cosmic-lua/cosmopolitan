@@ -34,9 +34,14 @@
 -- The two sources differ only in the prefix every line carries: two
 -- spaces in help.txt, `// ` in lunix.c. Under that prefix a signature
 -- line is `unix.<name>(` and a branch line is four more spaces then the
--- arrow; several signatures stacked directly above one block share it,
--- and a branch-indent line opening with `│` continues the branch above
--- it (`unix.uname`'s table wraps). A signature with no block below it
+-- arrow. A block may itself sit under further indentation -- lunix.c
+-- documents getsockopt/setsockopt per option class inside the C body,
+-- and help.txt nests those same blocks under a bullet -- so the
+-- signature's own leading whitespace is captured and every line of its
+-- block must carry it. Several signatures stacked directly above one
+-- block share it, and a branch-indent line opening with `│` continues
+-- the branch above it (`unix.uname`'s table wraps). A signature with no
+-- block below it
 -- documents no shape and is not compared, and neither is `unix.fork`,
 -- whose tree-shaped block (`├─┬─→`) lies outside this grammar in both
 -- sources. A name a source documents that definitions.lua declares no
@@ -99,11 +104,11 @@ local function def_is_fallible(slot1)
 end
 
 -- Every documented unix.* shape block in `text`, whose lines all carry
--- `prefix` (no pattern magic in either prefix): { line, names, branches },
--- where branches are the text after the arrow, in order.
+-- `prefix` (no pattern magic in either prefix) under the signature's own
+-- indentation: { line, names, branches }, where branches are the text
+-- after the arrow, in order.
 local function shape_blocks(text, prefix)
-  local sig = "^" .. prefix .. "unix%.([%a_][%w_]*)%s*%("
-  local branch = "^" .. prefix .. "    "
+  local any_sig = "^( *)" .. prefix .. "unix%.([%a_][%w_]*)%s*%("
   local lines = {}
   for line in (text .. "\n"):gmatch("([^\n]*)\n") do
     lines[#lines + 1] = line
@@ -111,8 +116,10 @@ local function shape_blocks(text, prefix)
   local blocks = {}
   local i = 1
   while i <= #lines do
-    local name = lines[i]:match(sig)
+    local indent, name = lines[i]:match(any_sig)
     if name then
+      local sig = "^" .. indent .. prefix .. "unix%.([%a_][%w_]*)%s*%("
+      local branch = "^" .. indent .. prefix .. "    "
       local block = { line = i, names = { name }, branches = {} }
       local j = i + 1
       while lines[j] and lines[j]:match(sig) do
