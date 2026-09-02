@@ -2955,14 +2955,8 @@ static int LuaUnixSissock(lua_State *L) {
 // unix.isatty(fd:int)
 //     └─→ bool
 static int LuaUnixIsatty(lua_State *L) {
-  int olderr = errno;
-  int rc = isatty(luaL_checkinteger(L, 1));
-  if (rc == -1) {
-    return LuaUnixSysretErrno(L, "isatty", olderr);
-  } else {
-    lua_pushboolean(L, rc != 0);
-    return 1;
-  }
+  lua_pushboolean(L, isatty(luaL_checkinteger(L, 1)));
+  return 1;
 }
 
 // unix.tiocgwinsz(fd:int)
