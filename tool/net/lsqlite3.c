@@ -945,6 +945,87 @@ static int db_wal_checkpoint(lua_State *L) {
 }
 
 /*
+** Registers a linked SQLite ext/misc extension (a row of the registry
+** in third_party/sqlite3/extensions.c) on this connection, by name.
+**
+** A fat binary may or may not carry a given extension, so this is a
+** runtime question a caller must be able to ask and get a real answer
+** to -- not a boolean, which would collapse three different outcomes
+** into one bit:
+**
+**   "registered"        name was in the registry and not yet a module
+**                       on this connection; its init ran just now.
+**   "present"           name is already a registered module on this
+**                       connection -- a compile-time feature such as
+**                       FTS5 that cannot be registered and does not
+**                       need to be, or an extension a prior call (or
+**                       the open path's own zipfile registration)
+**                       already registered. Nothing was done.
+**   nil, errmsg, code   name is neither present nor in the registry
+**                       (code is SQLITE_NOTFOUND), or its init failed
+**                       (code is that failure's sqlite result code).
+**
+** Presence is checked the same way callers check it themselves:
+** `SELECT ... FROM pragma_module_list WHERE name = ?`.
+**
+** Params: db, name
+*/
+static int db_register_extension(lua_State *L) {
+    sdb *db = lsqlite_checkdb(L, 1);
+    const char *name = luaL_checkstring(L, 2);
+    sqlite3_stmt *stmt;
+    int rc;
+    int present = 0;
+    const struct SqliteExtension *ext;
+
+    rc = sqlite3_prepare_v2(db->db,
+        "SELECT 1 FROM pragma_module_list WHERE name = ?1", -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
+        lua_pushinteger(L, rc);
+        return 3;
+    }
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) present = 1;
+    sqlite3_finalize(stmt);
+    if (!present && rc != SQLITE_DONE) {
+        lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
+        lua_pushinteger(L, rc);
+        return 3;
+    }
+
+    if (present) {
+        lua_pushstring(L, "present");
+        return 1;
+    }
+
+    for (ext = kSqliteExtensions; ext->name; ext++) {
+        if (strcmp(ext->name, name) == 0) {
+            char *errmsg = 0;
+            rc = ext->init(db->db, &errmsg, 0);
+            if (rc != SQLITE_OK) {
+                lua_pushnil(L);
+                lua_pushstring(L, errmsg ? errmsg : sqlite3_errstr(rc));
+                lua_pushinteger(L, rc);
+                if (errmsg) sqlite3_free(errmsg);
+                return 3;
+            }
+            if (errmsg) sqlite3_free(errmsg);
+            lua_pushstring(L, "registered");
+            return 1;
+        }
+    }
+
+    lua_pushnil(L);
+    lua_pushfstring(L, "extension '%s' is not available in this build", name);
+    lua_pushinteger(L, SQLITE_NOTFOUND);
+    return 3;
+}
+
+/*
 ** Registering SQL functions:
 */
 
@@ -2540,6 +2621,25 @@ static int lsqlite_lversion(lua_State *L) {
 }
 
 /*
+** Returns the linked SQLite ext/misc extension registry (the registry
+** in third_party/sqlite3/extensions.c) as an array of names, so a
+** caller can discover what this build carries -- and so pass a name
+** `db:register_extension` will recognize -- rather than guessing from
+** a version number.
+*/
+static int lsqlite_extensions(lua_State *L) {
+    const struct SqliteExtension *ext;
+    int i = 0;
+
+    lua_newtable(L);
+    for (ext = kSqliteExtensions; ext->name; ext++) {
+        lua_pushstring(L, ext->name);
+        lua_rawseti(L, -2, ++i);
+    }
+    return 1;
+}
+
+/*
 ** =======================================================
 ** Register functions
 ** =======================================================
@@ -2657,6 +2757,7 @@ static const luaL_Reg dblib[] = {
     {"interrupt",           db_interrupt            },
     {"db_filename",         db_db_filename          },
     {"wal_checkpoint",      db_wal_checkpoint       },
+    {"register_extension",  db_register_extension   },
 
     {"create_function",     db_create_function      },
     {"create_aggregate",    db_create_aggregate     },
@@ -2814,6 +2915,7 @@ static const luaL_Reg sqlitelib[] = {
     {"open",            lsqlite_open            },
     {"open_memory",     lsqlite_open_memory     },
     {"config",          lsqlite_config          },
+    {"extensions",      lsqlite_extensions      },
 
     {"__newindex",      lsqlite_newindex        },
     {NULL, NULL}
