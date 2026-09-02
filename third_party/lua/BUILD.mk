@@ -228,6 +228,14 @@ $(THIRD_PARTY_LUA_UNIX_A).pkg:					\
 		$(THIRD_PARTY_LUA_UNIX_OBJS)			\
 		$(foreach x,$(THIRD_PARTY_LUA_UNIX_DIRECTDEPS),$($(x)_A).pkg)
 
+# lunix.o is a binding object; see the MODE=cov block in
+# tool/lua/BUILD.mk.
+ifeq ($(MODE),cov)
+$(THIRD_PARTY_LUA_UNIX_OBJS): private				\
+		CFLAGS +=					\
+			$(COVERAGE_CFLAGS)
+endif
+
 ################################################################################
 # lua
 

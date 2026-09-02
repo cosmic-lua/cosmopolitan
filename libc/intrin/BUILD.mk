@@ -153,8 +153,13 @@ o/$(MODE)/libc/intrin/aarch64/%.o: libc/intrin/aarch64/%.S
 	@$(COMPILE) -AOBJECTIFY.S $(OBJECTIFY.S) $(OUTPUT_OPTION) -c $<
 o/$(MODE)/libc/intrin/fenv.o: libc/intrin/fenv.S
 	@$(COMPILE) -AOBJECTIFY.S $(OBJECTIFY.S) $(OUTPUT_OPTION) -c $<
+ifeq ($(MODE),cov)
+o/$(MODE)/libc/intrin/gcov.o: libc/intrin/gcov.c
+	@$(COMPILE) -AOBJECTIFY.c $(OBJECTIFY.c) $(OUTPUT_OPTION) -c $<
+else
 o/$(MODE)/libc/intrin/gcov.o: libc/intrin/gcov.S
 	@$(COMPILE) -AOBJECTIFY.S $(OBJECTIFY.S) $(OUTPUT_OPTION) -c $<
+endif
 o/$(MODE)/libc/intrin/cosmo_futex_thunk.o: libc/intrin/cosmo_futex_thunk.S
 	@$(COMPILE) -AOBJECTIFY.S $(OBJECTIFY.S) $(OUTPUT_OPTION) -c $<
 o/$(MODE)/libc/intrin/typeinfo.o: libc/intrin/typeinfo.S

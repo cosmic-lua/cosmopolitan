@@ -123,6 +123,14 @@ o/$(MODE)/tool/net/lsqlite3.o: private					\
 		CFLAGS +=						\
 			-DSQLITE_ENABLE_DESERIALIZE
 
+# lfuncs.o is the one binding object outside TOOL_LUA_LUA_MODULES; see
+# the MODE=cov block in tool/lua/BUILD.mk.
+ifeq ($(MODE),cov)
+o/$(MODE)/tool/net/lfuncs.o: private					\
+		CFLAGS +=						\
+			$(COVERAGE_CFLAGS)
+endif
+
 # REDBEAN-DEMO
 #
 # This redbean-demo program is the same as redbean except it
