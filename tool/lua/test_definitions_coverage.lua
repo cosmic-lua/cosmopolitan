@@ -553,13 +553,23 @@ end
 -- `integer| cols` is a dangling bar with the slot name after it, not a
 -- two-member union, and `integer |nil rows` is the bare type `integer`
 -- with `|nil rows` read as its name -- the nil silently dropped. The same
--- rule holds for a fun(...)'s return colon: `fun() : integer` ends the type
--- at `fun()`, so the colon must follow the closing paren directly. Inside a
--- bracketed group the closing bracket delimits instead and whitespace
--- around `|` or before `:` is part of the type (`(integer | string)?`).
--- This is exactly how cosmic's gentype tokenizes the same text, so the
--- gate refuses what the generator would drop.
--- Every parse_* below takes `grouped` = true when parsing inside a group.
+-- rule holds for everything after a fun(...)'s closing paren: `fun() : integer`
+-- ends the type at `fun()`, so the return colon must follow the paren
+-- directly, as must its optional `?` (`fun() ?: integer` is `fun()` with
+-- `?: integer` as its name) and the inner colon of a typed vararg return
+-- (`fun(): ... : string` is a bare `...` return with `: string` as its
+-- name). A fun return list at depth 0 admits no comma either: whitespace
+-- after the first value ends the type, so `fun(): boolean, string` is a
+-- return of `boolean,` -- a multi-value return is one `---@return` line per
+-- value. The one exception is an `---@overload`, whose fun return list runs
+-- to the end of the line with no name after it, so `fun(...): T?, string?`
+-- is read whole there (`multi` = true below). Inside a bracketed group the
+-- closing bracket delimits instead, whitespace around `|` or before `:` is
+-- part of the type (`(integer | string)?`), and a comma separates list
+-- entries. This is exactly how cosmic's gentype tokenizes the same text,
+-- so the gate refuses what the generator would drop.
+-- Every parse_* below takes `grouped` = true when parsing inside a group,
+-- and `multi` = true when parsing an @overload line's type at depth 0.
 do
   local parse_union
 
@@ -599,10 +609,12 @@ do
     return parse_union(s, grouped)
   end
 
-  local function parse_labeled_typelist(s, grouped)
+  -- A comma continues the list inside a group or on an @overload line; at
+  -- depth 0 anywhere else it is left in place for type_ok to refuse.
+  local function parse_labeled_typelist(s, grouped, multi)
     s = parse_labeled_union(s, grouped)
     if not s then return nil end
-    while s:match("^%s*,") do
+    while (grouped or multi) and s:match("^%s*,") do
       s = s:gsub("^%s*,%s*", "")
       s = parse_labeled_union(s, grouped)
       if not s then return nil end
@@ -614,7 +626,7 @@ do
   -- here); after the closing paren an optional `: <labeled typelist>` or
   -- typed-vararg (`: ...: string`) return annotation. The return list sits
   -- after the closing paren, so it is at the caller's depth.
-  local function parse_fun(s, grouped)
+  local function parse_fun(s, grouped, multi)
     local depth = 0
     for k = 4, #s do
       local c = s:sub(k, k)
@@ -624,20 +636,26 @@ do
         depth = depth - 1
         if depth == 0 then
           local rest = s:sub(k + 1)
-          -- Depth rule: at depth 0 the colon must follow the `)` (or `)?`)
-          -- directly; whitespace there would end the type before the return
-          -- annotation, so refuse rather than leave it as the name.
-          if not grouped and rest:match("^%??%s+:") then return nil end
+          -- Depth rule: at depth 0 the `?` must follow the `)` directly, and
+          -- the colon must follow the `)` (or `)?`) directly; whitespace
+          -- there would end the type before the return annotation, so
+          -- refuse rather than leave it as the name.
+          if not grouped and (rest:match("^%s+%?") or rest:match("^%??%s+:")) then
+            return nil
+          end
           local colon = rest:match(grouped and "^%??%s*:%s*" or "^%??:%s*")
           if colon then
             rest = rest:sub(#colon + 1)
             if rest:match("^%.%.%.") then
               rest = rest:sub(4)
-              local c2 = rest:match("^:%s*")
+              -- The same depth rule for the typed vararg's inner colon:
+              -- `...:` must be flush, or `: string` becomes the name.
+              if not grouped and rest:match("^%s+:") then return nil end
+              local c2 = rest:match(grouped and "^%s*:%s*" or "^:%s*")
               if c2 then return parse_union(rest:sub(#c2 + 1), grouped) end
               return rest
             end
-            return parse_labeled_typelist(rest, grouped)
+            return parse_labeled_typelist(rest, grouped, multi)
           end
           return rest
         end
@@ -646,9 +664,9 @@ do
     return nil -- unbalanced
   end
 
-  local function parse_atom(s, grouped)
+  local function parse_atom(s, grouped, multi)
     if s == "" then return nil end
-    if s:match("^fun%(") then return parse_fun(s, grouped) end
+    if s:match("^fun%(") then return parse_fun(s, grouped, multi) end
     if s:match('^"') then
       local lit = s:match('^"[^"]*"')
       return lit and s:sub(#lit + 1) or nil
@@ -693,8 +711,8 @@ do
     return rest
   end
 
-  local function parse_postfix(s, grouped)
-    s = parse_atom(s, grouped)
+  local function parse_postfix(s, grouped, multi)
+    s = parse_atom(s, grouped, multi)
     if not s then return nil end
     while true do
       if s:match("^%?") then
@@ -708,16 +726,16 @@ do
     return s
   end
 
-  parse_union = function(s, grouped)
+  parse_union = function(s, grouped, multi)
     s = s:gsub("^%s+", "")
-    s = parse_postfix(s, grouped)
+    s = parse_postfix(s, grouped, multi)
     if not s then return nil end
     while s:match("^%s*|") do
       -- Depth rule: whitespace around the bar is skipped only inside a
       -- group. At depth 0 only a flush `|` is stripped, so whitespace on
       -- either side of it reaches parse_postfix, which refuses it.
       s = s:gsub(grouped and "^%s*|%s*" or "^|", "")
-      s = parse_postfix(s, grouped)
+      s = parse_postfix(s, grouped, multi)
       if not s then return nil end
     end
     return s
@@ -727,10 +745,12 @@ do
   -- head and ends at a clean boundary: end of line, whitespace (a name or
   -- description follows), or `#` (LuaLS description marker). A comma directly
   -- after the first type (`nil, string, integer`) is NOT a clean boundary:
-  -- multi-value returns must be one `---@return` line per value.
-  local function type_ok(region)
+  -- multi-value returns must be one `---@return` line per value. `multi`
+  -- marks an @overload line, the one place a fun return list keeps its
+  -- commas (they are consumed inside the type, never left at the boundary).
+  local function type_ok(region, multi)
     if region:match("^%.%.%.") then return true end -- bare variadic
-    local rest = parse_union(region)
+    local rest = parse_union(region, false, multi)
     if not rest then return false end
     return rest == "" or rest:match("^[%s#]") ~= nil
   end
@@ -739,6 +759,7 @@ do
   -- grammar regression fails here by fixture instead of silently passing
   -- (or failing) real annotations. The dangling-bar shapes are the ones a
   -- whitespace-skipping union loop reads as well-formed two-member unions.
+  -- A third field marks the region as an @overload line's (`multi`).
   local TYPE_FIXTURES = {
     { "integer|string", true },
     { "integer|nil rows", true },
@@ -754,9 +775,17 @@ do
     { "fun(fd: integer): integer| nil", false },
     { "fun() : integer", false },
     { "nil,|nil string", false },
+    { "fun()?: integer", true },
+    { "fun() ?: integer", false },
+    { "fun(): ...: string", true },
+    { "fun(): ... : string", false },
+    { "fun(): boolean", true },
+    { "fun(): boolean, string", false },
+    { "fun(): zip.Writer?, string?", true, true },
+    { "fun(): zip.Writer?, string?", false },
   }
   for _, fx in ipairs(TYPE_FIXTURES) do
-    assert(type_ok(fx[1]) == fx[2], "check 9 self-check: `" .. fx[1] ..
+    assert(type_ok(fx[1], fx[3]) == fx[2], "check 9 self-check: `" .. fx[1] ..
       "` must be " .. (fx[2] and "accepted" or "refused") ..
       " by the type grammar")
   end
@@ -767,9 +796,13 @@ do
     local region = line:match("^%-%-%-@param%s+[%w_%.]+%??%s+(.+)$") or
       line:match("^%-%-%-@return%s+(.+)$") or
       line:match("^%-%-%-@field%s+[%w_%.]+%??%s+(.+)$") or
-      line:match("^%-%-%-@overload%s+(.+)$") or
       line:match("^%s*%-%-%-@type%s+(.+)$")
-    if region and not type_ok(region) then
+    local multi = false
+    if not region then
+      region = line:match("^%-%-%-@overload%s+(.+)$")
+      multi = region ~= nil
+    end
+    if region and not type_ok(region, multi) then
       fail("line " .. lineno .. ": unparseable type expression (one " ..
         "`---@return` line per value; see the grammar in check 9): " .. line)
     end
