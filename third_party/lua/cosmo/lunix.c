@@ -2953,9 +2953,7 @@ static int LuaUnixSissock(lua_State *L) {
 }
 
 // unix.isatty(fd:int)
-//     ├─→ true
-//     ├─→ false
-//     └─→ nil, error:str, errno:int
+//     └─→ bool
 static int LuaUnixIsatty(lua_State *L) {
   int olderr = errno;
   int rc = isatty(luaL_checkinteger(L, 1));
