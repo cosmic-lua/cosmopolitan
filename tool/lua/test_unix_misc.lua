@@ -17,7 +17,7 @@ local cosmo = require("cosmo")
 local unix = require("cosmo.unix")
 
 gotsigusr1 = false
-tmpdir = "%s/o/tmp/lunix_test.%d" % {os.getenv('TMPDIR'), unix.getpid()}
+tmpdir = "%s/o/tmp/lunix_test.%d" % {os.getenv('TMPDIR') or os.tmpname():gsub('/[^/]*$', ''), unix.getpid()}
 
 function string.starts(String,Start)
    return string.sub(String,1,string.len(Start))==Start
