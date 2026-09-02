@@ -798,6 +798,15 @@ end
 --       Teal `number`, and every bit-op call site on it then needs an
 --       `as integer` cast (whilp/cosmopolitan#142). Declaring it here is
 --       what keeps cosmic's generated `integer` honest.
+--   Q6: a block that documents any `---@return` line documents a success
+--       slot -- its FIRST `---@return` is the one downstream generators
+--       (cosmic's gentype) read as the binding's success type, and this
+--       file's dialect spells the failure tail's two slots exactly
+--       `---@return string? error` / `---@return unix.Errno? errno`
+--       (D24/#151), never anything else. A block whose first line is
+--       bare `string?` or `unix.Errno?` has lost its value line and left
+--       only the failure tail -- invisible to every OTHER check here,
+--       since the tail is still syntactically well-formed and non-empty.
 -- Each QALLOW_* is a RATCHET seeded at today's counts: an entry may only be
 -- removed (by improving the annotation), never added. A newly-violating
 -- binding, or a stale entry that no longer violates, fails this test.
@@ -863,6 +872,21 @@ local QALLOW_BARE = set({
 -- empty and must stay that way. Do not seed it -- annotate the constant.
 local QALLOW_CONSTTYPE = set({})
 
+-- Q6: bindings whose declared success value genuinely IS a bare optional
+-- string, with no error/errno slot of its own (a single ---@return line,
+-- or -- StreamReader's read family -- a second, differently-named string?
+-- slot that is its OWN error message, not a stray copy of the failure
+-- tail). None of these can be produced by dropping a value line off a
+-- standard `T|nil value / string? error / unix.Errno? errno` block.
+local QALLOW_NOSUCCESS = set({
+  "cosmo.ParseHost",
+  "cosmo.StreamReader:read",
+  "cosmo.StreamReader:read_until",
+  "lsqlite3.Database:db_filename",
+  "lsqlite3.Statement:bind_parameter_name",
+  "lsqlite3.VM:bind_parameter_name",
+})
+
 -- Collect module function/method declarations paired with the contiguous run
 -- of `---` annotation lines that immediately precedes each.
 local qdecls = {}
@@ -905,7 +929,50 @@ local function qbare(t)
   return false
 end
 
-local qvio = { param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {} }
+-- The type token of a block's FIRST `---@return` line, or nil when the
+-- block declares none. Only the head token is read (the same word gentype
+-- takes as the slot's type), so a description trailing it doesn't matter.
+local function first_return_type(blocklines)
+  for _, l in ipairs(blocklines) do
+    local t = l:match("^%-%-%-@return%s+(%S+)")
+    if t then return t end
+  end
+  return nil
+end
+
+-- Q6 self-check: the shapes first_return_type must and must not flag,
+-- exercised directly so a regression here fails by fixture instead of
+-- silently passing (or failing) real annotations. Mirrors the localtime
+-- mutation: dropping a block's value line leaves exactly the FAIL shapes.
+local NOSUCCESS_FIXTURES = {
+  -- { blocklines, expected first_return_type, is a lost-success-slot shape }
+  { { "---@return unix.BrokenDownTime|nil", "---@return string? error",
+      "---@return unix.Errno? errno" }, "unix.BrokenDownTime|nil", false },
+  { { "---@return string? error", "---@return unix.Errno? errno" },
+    "string?", true },
+  { { "---@return string? error" }, "string?", true },
+  { { "---@return unix.Errno? errno" }, "unix.Errno?", true },
+  { { "---@return string? filename associated with the connection" },
+    "string?", true }, -- a bare optional-string SUCCESS value is still
+                        -- indistinguishable from the failure tail by type
+                        -- alone; real cases like this ride QALLOW_NOSUCCESS
+  { { "---@return boolean" }, "boolean", false },
+  { { "--- no @return line at all" }, nil, false },
+}
+for _, fx in ipairs(NOSUCCESS_FIXTURES) do
+  local blocklines, want_type, want_flagged = fx[1], fx[2], fx[3]
+  local got_type = first_return_type(blocklines)
+  assert(got_type == want_type, "Q6 self-check: first_return_type mismatch " ..
+    "for " .. table.concat(blocklines, " / "))
+  local flagged = got_type == "string?" or got_type == "unix.Errno?"
+  assert(flagged == want_flagged, "Q6 self-check: flagged mismatch for " ..
+    table.concat(blocklines, " / "))
+end
+
+local qvio = {
+  param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {},
+  nosuccess = {},
+}
 for _, d in ipairs(qdecls) do
   for rawp in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
     local p = rawp:gsub("%s", "")
@@ -917,6 +984,12 @@ for _, d in ipairs(qdecls) do
   end
   if not (d.block:find("%-%-%-@return") or d.block:find("%-%-%-@overload")) then
     qvio.noreturn[d.disp] = true
+  end
+  do
+    local rt = first_return_type(d.blocklines)
+    if rt == "string?" or rt == "unix.Errno?" then
+      qvio.nosuccess[d.disp] = true
+    end
   end
   for _, l in ipairs(d.blocklines) do
     if l:match("%-%-%-@param") or l:match("%-%-%-@return") or
@@ -1294,6 +1367,8 @@ ratchet(qvio.noreturn, QALLOW_NORETURN, "no @return/@overload")
 ratchet(qvio.inline, QALLOW_INLINE, "inline { } table type")
 ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
 ratchet(qvio.consttype, QALLOW_CONSTTYPE, "constant not declared integer")
+ratchet(qvio.nosuccess, QALLOW_NOSUCCESS,
+  "first @return is the failure tail (lost success slot)")
 ratchet(arity_vio, ARITY_ALLOW, "annotation declares returns the C never pushes")
 
 assert(#failures == 0,
@@ -1302,7 +1377,8 @@ assert(#failures == 0,
   table.concat(failures, "\n  "))
 
 local qallowed = count(QALLOW_PARAM) + count(QALLOW_NORETURN) +
-  count(QALLOW_INLINE) + count(QALLOW_BARE) + count(QALLOW_CONSTTYPE)
+  count(QALLOW_INLINE) + count(QALLOW_BARE) + count(QALLOW_CONSTTYPE) +
+  count(QALLOW_NOSUCCESS)
 print("definitions coverage: " .. nfns .. " functions, " .. nmethods ..
   " methods, " .. nconsts .. " constants checked across " ..
   #MODULES .. " modules; " .. count(ALLOW) .. " allowlisted")
