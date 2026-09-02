@@ -374,6 +374,10 @@ o/$(MODE)/tool/lua/test_unix_openpty.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/tes
 	$< tool/lua/test_unix_openpty.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_build_mk_touch.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_build_mk_touch.lua tool/lua/BUILD.mk
+	$< tool/lua/test_build_mk_touch.lua
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -440,7 +444,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_jsontestsuite_fail4.ok			\
 	o/$(MODE)/tool/lua/test_jsontestsuite_okay.ok			\
 	o/$(MODE)/tool/lua/test_jsontestsuite_pass.ok			\
-	o/$(MODE)/tool/lua/test_ljson.ok
+	o/$(MODE)/tool/lua/test_ljson.ok				\
+	o/$(MODE)/tool/lua/test_build_mk_touch.ok
 
 .PHONY: o/$(MODE)/tool/lua
 o/$(MODE)/tool/lua:							\
