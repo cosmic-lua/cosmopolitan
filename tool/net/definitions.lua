@@ -6650,6 +6650,13 @@ function unix.shutdown(fd, how) end
 ---@return unix.Sigset oldmask
 function unix.sigprocmask(how, newmask) end
 
+--- Previous signal disposition returned by `sigaction`.
+---@class unix.SignalAction
+---@field handler function|integer Previous handler: a Lua function,
+--- `SIG_IGN`, `SIG_DFL`, or a raw function pointer.
+---@field flags integer Previous `sa_flags`.
+---@field mask unix.Sigset Previous signal mask.
+
 ---@param sig integer can be one of:
 ---
 --- - `unix.SIGINT`
@@ -6734,7 +6741,7 @@ function unix.sigprocmask(how, newmask) end
 --- It's a good idea to not do too much work in a signal handler.
 ---
 ---@param mask? unix.Sigset
----@return function|integer|nil oldhandler, integer flags, unix.Sigset mask
+---@return unix.SignalAction|nil previous
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.sigaction(sig, handler, flags, mask) end

@@ -2676,7 +2676,7 @@ static void LuaUnixOnSignal(int sig, siginfo_t *si, void *ctx) {
 }
 
 // unix.sigaction(sig:int[, handler:func|int[, flags:int[, mask:unix.Sigset]]])
-//     ├─→ oldhandler:func|int, flags:int, mask:unix.Sigset
+//     ├─→ previous:table
 //     └─→ nil, error:str, errno:int
 static int LuaUnixSigaction(lua_State *L) {
   sigset_t *mask;
@@ -2752,10 +2752,18 @@ static int LuaUnixSigaction(lua_State *L) {
     }
     // remove the signal handler table from stack
     lua_remove(L, -2);
-    // finish pushing the last 2/3 results
+    // bundle the previous disposition into one table, so the error
+    // string and errno never share a slot with flags and mask. the old
+    // handler is already on top: slide the table beneath it, then
+    // consume it as the table's first field.
+    lua_newtable(L);
+    lua_insert(L, -2);
+    lua_setfield(L, -2, "handler");
     lua_pushinteger(L, oldsa.sa_flags);
+    lua_setfield(L, -2, "flags");
     LuaPushSigset(L, oldsa.sa_mask);
-    return 3;
+    lua_setfield(L, -2, "mask");
+    return 1;
   } else {
     return LuaUnixSysretErrno(L, "sigaction", olderr);
   }
