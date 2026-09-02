@@ -881,18 +881,35 @@ local QALLOW_CONSTTYPE = set({})
 -- EXCEPT by type token alone: `string?`/`unix.Errno?` is exactly what a
 -- failure tail that lost its value line still reads as, so allowlisting
 -- a NAME here cannot tell "genuinely bare" from "just got mutilated".
--- Each entry is keyed instead to the `---@return` line count its block
--- was seeded with, and the ratchet below only exempts a block whose
--- count still matches -- StreamReader:read/:read_until dropping their
--- real `chunk`/`data` line (2 lines -> 1) loses the exemption and
--- reports by name even though the name is still listed.
+-- Each entry is keyed instead to the exact TEXT of the `---@return` line
+-- its block's real success line was seeded with, and the ratchet below
+-- only exempts a block whose first `---@return` line still reads that
+-- text. A line count is not enough: StreamReader:read and :read_until
+-- both already carry two `string?` lines (their real success line and
+-- their `error` line), so a mutation that swaps the real line's text for
+-- a fabricated one sharing the same `string?` token -- keeping the count
+-- at 2 -- is invisible to a count check but changes the head line's text.
+-- Keying to text also still catches the coarser mutations: dropping the
+-- real line entirely (count 2 -> 1, and the surviving line's text is the
+-- `error` line's, not this one's) or dropping the block's only line
+-- (falls out of `qvio.nosuccess` into the Q2 `noreturn` check instead).
 local QALLOW_NOSUCCESS = {
-  ["cosmo.ParseHost"] = 1,
-  ["cosmo.StreamReader:read"] = 2,
-  ["cosmo.StreamReader:read_until"] = 2,
-  ["lsqlite3.Database:db_filename"] = 1,
-  ["lsqlite3.Statement:bind_parameter_name"] = 1,
-  ["lsqlite3.VM:bind_parameter_name"] = 1,
+  ["cosmo.ParseHost"] =
+    "---@return string? port",
+  ["cosmo.StreamReader:read"] =
+    "---@return string? chunk next chunk of data, or nil on EOF",
+  ["cosmo.StreamReader:read_until"] =
+    "---@return string? data bytes before the delimiter (or the final " ..
+    "remainder), or nil on EOF",
+  ["lsqlite3.Database:db_filename"] =
+    "---@return string? filename associated with database `name` of " ..
+    "connection `db`.",
+  ["lsqlite3.Statement:bind_parameter_name"] =
+    "---@return string? -- the name of the n-th parameter in prepared " ..
+    "statement.",
+  ["lsqlite3.VM:bind_parameter_name"] =
+    "---@return string? parameter_name nil for a positional (`?`) " ..
+    "parameter, which has no name.",
 }
 
 -- Collect module function/method declarations paired with the contiguous run
@@ -977,37 +994,47 @@ for _, fx in ipairs(NOSUCCESS_FIXTURES) do
     table.concat(blocklines, " / "))
 end
 
--- The count of `---@return` lines in a block -- the shape QALLOW_NOSUCCESS
--- keys its exemptions to. first_return_type alone cannot distinguish a
--- genuinely bare success value from a failure tail that lost its value
--- line (both read as `string?`), so an allowlisted NAME is exempt only
--- when its block still has the line count it was seeded for.
-local function return_line_count(blocklines)
-  local n = 0
+-- The full text of a block's FIRST `---@return` line -- the shape
+-- QALLOW_NOSUCCESS keys its exemptions to. first_return_type alone cannot
+-- distinguish a genuinely bare success value from a failure tail that
+-- lost its value line (both read as `string?`), and a plain line count
+-- cannot either: it is blind to a same-count substitution that swaps the
+-- real success line's text for a fabricated one sharing its type token.
+-- The exact head-line TEXT pins down which line is actually there, so an
+-- allowlisted NAME is exempt only when its block's first `---@return`
+-- line still reads the text it was seeded with.
+local function first_return_line(blocklines)
   for _, l in ipairs(blocklines) do
-    if l:match("^%-%-%-@return") then n = n + 1 end
+    if l:match("^%-%-%-@return%f[%s]") then return l end
   end
-  return n
+  return nil
 end
 
--- Shape self-check: mirrors the StreamReader:read/:read_until mutation --
--- dropping a block's real value line while keeping a differently-named
--- string? line changes the count, which is exactly what must cost an
--- allowlisted entry its exemption below.
-local COUNT_FIXTURES = {
-  -- { blocklines, expected return_line_count }
+-- Shape self-check: exercises all three mutation shapes a real block can
+-- suffer, mirroring StreamReader:read/:read_until.
+local LINE_FIXTURES = {
+  -- { blocklines, expected first_return_line }
   { { "---@return string? chunk next chunk of data, or nil on EOF",
-      "---@return string? error error message on failure" }, 2 },
-  { { "---@return string? error error message on failure" }, 1 }, -- the
-    -- StreamReader:read mutation: the value line is gone, only the
-    -- (renamed) error line remains
-  { { "---@return string? port" }, 1 },
-  { { "--- no @return line at all" }, 0 },
+      "---@return string? error error message on failure" },
+    "---@return string? chunk next chunk of data, or nil on EOF" },
+  { { "---@return string? error error message on failure" },
+    "---@return string? error error message on failure" }, -- round-1
+    -- mutation: the real value line is gone, only the (renamed) error
+    -- line remains -- text differs from the seeded head line above
+  { { "---@return string? reason secondary detail on failure " ..
+        "(success info lost)",
+      "---@return string? error error message on failure" },
+    "---@return string? reason secondary detail on failure " ..
+      "(success info lost)" }, -- round-2 mutation: the count stays at 2,
+    -- but the real value line's text was swapped for a fabricated line
+    -- sharing its `string?` token -- still a different head line
+  { { "---@return string? port" }, "---@return string? port" },
+  { { "--- no @return line at all" }, nil },
 }
-for _, fx in ipairs(COUNT_FIXTURES) do
+for _, fx in ipairs(LINE_FIXTURES) do
   local blocklines, want = fx[1], fx[2]
-  local got = return_line_count(blocklines)
-  assert(got == want, "Q6 shape self-check: return_line_count mismatch for " ..
+  local got = first_return_line(blocklines)
+  assert(got == want, "Q6 shape self-check: first_return_line mismatch for " ..
     table.concat(blocklines, " / "))
 end
 
@@ -1031,7 +1058,7 @@ for _, d in ipairs(qdecls) do
     local rt = first_return_type(d.blocklines)
     if rt == "string?" or rt == "unix.Errno?" then
       qvio.nosuccess[d.disp] = true
-      qvio.nosuccess_lines[d.disp] = return_line_count(d.blocklines)
+      qvio.nosuccess_lines[d.disp] = first_return_line(d.blocklines)
     end
   end
   for _, l in ipairs(d.blocklines) do
@@ -1412,22 +1439,25 @@ ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
 ratchet(qvio.consttype, QALLOW_CONSTTYPE, "constant not declared integer")
 
 -- Q6 is not a plain name ratchet: QALLOW_NOSUCCESS exempts a binding only
--- for the `---@return` line count its block was seeded with, so a
--- mutation that drops the real success line -- StreamReader:read and
--- :read_until dropping their `chunk`/`data` line, leaving only a
--- differently-named `string?` line -- still reports by name even though
--- the name stays in the allowlist.
+-- when its block's first `---@return` line still reads the exact text it
+-- was seeded with, so a mutation that drops the real success line --
+-- StreamReader:read and :read_until dropping their `chunk`/`data` line,
+-- leaving only a differently-named `string?` line -- or that swaps its
+-- text for a fabricated line sharing the same type token while leaving
+-- the line count unchanged, still reports by name even though the name
+-- stays in the allowlist.
 local function ratchet_nosuccess(viol, lines, allow, label)
   for _, disp in ipairs(sorted_keys(viol)) do
-    local want_lines = allow[disp]
-    if not want_lines then
+    local want_line = allow[disp]
+    if not want_line then
       fail("annotation quality [" .. label .. "]: " .. disp ..
         " (fix the annotation, or seed the QALLOW list)")
-    elseif want_lines ~= lines[disp] then
+    elseif want_line ~= lines[disp] then
       fail("annotation quality [" .. label .. "]: " .. disp ..
-        " (allowlisted for a " .. want_lines .. "-line @return block, but " ..
-        "its block now has " .. lines[disp] .. " -- the success slot may " ..
-        "have been lost; fix the annotation or reseed the QALLOW line count)")
+        " (allowlisted for a specific @return head line, but its block's " ..
+        "first @return line now reads " .. tostring(lines[disp]) .. " -- " ..
+        "the success slot may have been lost or swapped; fix the " ..
+        "annotation or reseed the QALLOW head line)")
     end
   end
   for _, disp in ipairs(sorted_keys(allow)) do
