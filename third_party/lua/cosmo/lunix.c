@@ -1313,17 +1313,25 @@ static int LuaUnixRaise(lua_State *L) {
 }
 
 // unix.wait([pid:int, options:int])
-//     ├─→ pid:int, wstatus:int, unix.Rusage
+//     ├─→ result:table
 //     └─→ nil, error:str, errno:int
 static int LuaUnixWait(lua_State *L) {
   struct rusage ru;
   int pid, wstatus, olderr = errno;
   if ((pid = wait4(luaL_optinteger(L, 1, -1), &wstatus,
                    luaL_optinteger(L, 2, 0), &ru)) != -1) {
+    // bundle pid/wstatus/rusage into one table, so the error string and
+    // errno never share a slot with wstatus and rusage on the failure
+    // branch. matches the shape unix.sigaction's previous-disposition
+    // table uses.
+    lua_newtable(L);
     lua_pushinteger(L, pid);
+    lua_setfield(L, -2, "pid");
     lua_pushinteger(L, wstatus);
+    lua_setfield(L, -2, "wstatus");
     LuaPushRusage(L, &ru);
-    return 3;
+    lua_setfield(L, -2, "rusage");
+    return 1;
   } else {
     return LuaUnixSysretErrno(L, "wait", olderr);
   }

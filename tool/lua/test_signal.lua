@@ -139,8 +139,10 @@ do
     unix.sigaction(unix.SIGALRM, unix.SIG_DFL)
     unix.exit(0)
   else
-    local _, wstatus = unix.wait(pid)
-    assert(unix.WIFEXITED(wstatus) and unix.WEXITSTATUS(wstatus) == 0,
+    -- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+    -- rusage=}), not positional values -- slot 2 always means error.
+    local result = unix.wait(pid)
+    assert(unix.WIFEXITED(result.wstatus) and unix.WEXITSTATUS(result.wstatus) == 0,
       "the EINTR nanosleep child must exit cleanly")
   end
 end

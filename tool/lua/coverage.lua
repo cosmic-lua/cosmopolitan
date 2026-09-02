@@ -166,10 +166,14 @@ local function spawn(argv, fd, on_line)
     on_line(rest)
   end
   unix.close(pipe.reader)
-  local _, wstatus = unix.wait(pid)
+  local result, waiterr = unix.wait(pid)
   if killed then
     return nil, "killed at " .. TRACE_LINE_CAP .. " FUN lines"
   end
+  if not result then
+    return nil, "wait: " .. tostring(waiterr)
+  end
+  local wstatus = result.wstatus
   if unix.WIFEXITED(wstatus) then
     local code = unix.WEXITSTATUS(wstatus)
     if code == 0 then

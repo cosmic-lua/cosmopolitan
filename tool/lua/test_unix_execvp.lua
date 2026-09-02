@@ -63,10 +63,10 @@ if true_path then
     -- if we get here, exec failed
     unix.exit(1)
   elseif pid then
-    local wpid, wstatus = unix.wait(pid)
-    assert(wpid == pid, "wait should return the forked pid")
-    assert(unix.WIFEXITED(wstatus), "child should exit normally after execvp")
-    assert(unix.WEXITSTATUS(wstatus) == 0, "execvp'd true should exit 0")
+    local result = unix.wait(pid)
+    assert(result.pid == pid, "wait should return the forked pid")
+    assert(unix.WIFEXITED(result.wstatus), "child should exit normally after execvp")
+    assert(unix.WEXITSTATUS(result.wstatus) == 0, "execvp'd true should exit 0")
   end
 end
 
@@ -80,12 +80,12 @@ if echo_path then
       {"MY_EXIT_CODE=42", "PATH=/bin:/usr/bin"})
     unix.exit(1)
   elseif pid then
-    local wpid, wstatus = unix.wait(pid)
-    assert(wpid == pid, "wait should return the forked pid")
-    assert(unix.WIFEXITED(wstatus), "child should exit normally after execvpe")
-    assert(unix.WEXITSTATUS(wstatus) == 42,
+    local result = unix.wait(pid)
+    assert(result.pid == pid, "wait should return the forked pid")
+    assert(unix.WIFEXITED(result.wstatus), "child should exit normally after execvpe")
+    assert(unix.WEXITSTATUS(result.wstatus) == 42,
       "execvpe should pass custom environment, got exit " ..
-      tostring(unix.WEXITSTATUS(wstatus)))
+      tostring(unix.WEXITSTATUS(result.wstatus)))
   end
 end
 
@@ -98,11 +98,11 @@ if true_path then
       unix.fexecve(fd, {true_path})
       unix.exit(1)
     elseif pid then
-      local wpid, wstatus = unix.wait(pid)
-      assert(wpid == pid, "wait should return the forked pid")
+      local result = unix.wait(pid)
+      assert(result.pid == pid, "wait should return the forked pid")
       -- fexecve may not work in all environments (e.g. noexec mounts)
       -- so we just check the child exited
-      assert(unix.WIFEXITED(wstatus), "child should exit after fexecve attempt")
+      assert(unix.WIFEXITED(result.wstatus), "child should exit after fexecve attempt")
     end
     unix.close(fd)
   end
@@ -116,12 +116,12 @@ if sh_path then
     unix.execvp(sh_path, {sh_path, "-c", "exit 7"})
     unix.exit(1)
   elseif pid then
-    local wpid, wstatus = unix.wait(pid)
-    assert(wpid == pid, "wait should return the forked pid")
-    assert(unix.WIFEXITED(wstatus), "child should exit normally")
-    assert(unix.WEXITSTATUS(wstatus) == 7,
+    local result = unix.wait(pid)
+    assert(result.pid == pid, "wait should return the forked pid")
+    assert(unix.WIFEXITED(result.wstatus), "child should exit normally")
+    assert(unix.WEXITSTATUS(result.wstatus) == 7,
       "execvp'd sh -c 'exit 7' should exit 7, got " ..
-      tostring(unix.WEXITSTATUS(wstatus)))
+      tostring(unix.WEXITSTATUS(result.wstatus)))
   end
 end
 

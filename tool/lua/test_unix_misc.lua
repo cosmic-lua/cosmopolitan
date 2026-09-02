@@ -80,9 +80,11 @@ function UnixTest()
       end
       unix.exit(42)
    end
-   pid, ws = assert(unix.wait())
-   assert(unix.WIFEXITED(ws))
-   assert(unix.WEXITSTATUS(ws) == 42)
+   -- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+   -- rusage=}), not positional values -- slot 2 always means error.
+   wr = assert(unix.wait())
+   assert(unix.WIFEXITED(wr.wstatus))
+   assert(unix.WEXITSTATUS(wr.wstatus) == 42)
 
    -- pledge
    -- 1. fork off a process
@@ -100,10 +102,10 @@ function UnixTest()
        end
        unix.close(pipe.writer)
        unix.close(pipe.reader)
-       pid, ws = assert(unix.wait())
-       assert(unix.WIFSIGNALED(ws))
-       assert(unix.WTERMSIG(ws) == unix.SIGSYS or  -- Linux
-              unix.WTERMSIG(ws) == unix.SIGABRT)   -- OpenBSD
+       wr = assert(unix.wait())
+       assert(unix.WIFSIGNALED(wr.wstatus))
+       assert(unix.WTERMSIG(wr.wstatus) == unix.SIGSYS or  -- Linux
+              unix.WTERMSIG(wr.wstatus) == unix.SIGABRT)   -- OpenBSD
    end
 
    -- sigaction
