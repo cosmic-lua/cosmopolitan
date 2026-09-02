@@ -378,6 +378,16 @@ o/$(MODE)/tool/lua/test_build_mk_touch.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/t
 	$< tool/lua/test_build_mk_touch.lua
 	@touch $@
 
+# Function coverage floor: ftrace every enrolled test, intersect the
+# reached functions with nm's per-file listing of the binding sources,
+# and fail when a file's covered count drops below tool/lua/coverage_floor.lua.
+# The enrolled list is TOOL_LUA_TESTS mapped back to its scripts, so a
+# test joins the coverage pass by being enrolled; COVERAGE_BASELINE=1
+# rewrites the floor.
+o/$(MODE)/tool/lua/test_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/coverage.lua tool/lua/coverage_floor.lua tool/lua/BUILD.mk $(wildcard tool/lua/test_*.lua)
+	$< tool/lua/coverage.lua $< $(TOOLCHAIN)nm o/$(MODE)/tool/lua tool/lua/coverage_floor.lua $(patsubst o/$(MODE)/tool/lua/%.ok,tool/lua/%.lua,$(filter-out %/test_coverage.ok,$(TOOL_LUA_TESTS)))
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -445,7 +455,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_jsontestsuite_okay.ok			\
 	o/$(MODE)/tool/lua/test_jsontestsuite_pass.ok			\
 	o/$(MODE)/tool/lua/test_ljson.ok				\
-	o/$(MODE)/tool/lua/test_build_mk_touch.ok
+	o/$(MODE)/tool/lua/test_build_mk_touch.ok			\
+	o/$(MODE)/tool/lua/test_coverage.ok
 
 .PHONY: o/$(MODE)/tool/lua
 o/$(MODE)/tool/lua:							\
