@@ -5409,9 +5409,12 @@ UNIX MODULE
         st = assert(unix.stat('/etc/passwd'))
         unixts, nanos = st:birthtim()
         t = assert(unix.localtime(unixts))
-        Write('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.9d%+.2d%.2d % {
+        sign = t.gmtoffsec < 0 and '-' or '+'
+        hh = math.abs(t.gmtoffsec) // 3600
+        mm = math.abs(t.gmtoffsec) // 60 % 60
+        Write('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.9d%s%.2d%.2d' % {
                  t.year, t.mon, t.mday, t.hour, t.min, t.sec, nanos,
-                 t.gmtoffsec / (60 * 60), math.abs(t.gmtoffsec) % 60})
+                 sign, hh, mm})
 
   unix.Stat:mtim()
       └─→ unixts:int, nanos:int
