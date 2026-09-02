@@ -2961,18 +2961,10 @@ static int LuaUnixSissock(lua_State *L) {
 }
 
 // unix.isatty(fd:int)
-//     ├─→ true
-//     ├─→ false
-//     └─→ nil, error:str, errno:int
+//     └─→ bool
 static int LuaUnixIsatty(lua_State *L) {
-  int olderr = errno;
-  int rc = isatty(luaL_checkinteger(L, 1));
-  if (rc == -1) {
-    return LuaUnixSysretErrno(L, "isatty", olderr);
-  } else {
-    lua_pushboolean(L, rc != 0);
-    return 1;
-  }
+  lua_pushboolean(L, isatty(luaL_checkinteger(L, 1)));
+  return 1;
 }
 
 // unix.tiocgwinsz(fd:int)
@@ -3596,13 +3588,13 @@ static int LuaUnixRusageIxrss(lua_State *L) {
   return ReturnInteger(L, GetUnixRusage(L)->ru_ixrss);
 }
 
-// unid.Rusage:idrss()
+// unix.Rusage:idrss()
 //     └─→ integralkilobytes:int
 static int LuaUnixRusageIdrss(lua_State *L) {
   return ReturnInteger(L, GetUnixRusage(L)->ru_idrss);
 }
 
-// unis.Rusage:isrss()
+// unix.Rusage:isrss()
 //     └─→ integralkilobytes:int
 static int LuaUnixRusageIsrss(lua_State *L) {
   return ReturnInteger(L, GetUnixRusage(L)->ru_isrss);
@@ -3898,28 +3890,28 @@ static int LuaUnixMemoryCmpxchg(lua_State *L) {
   return 2;
 }
 
-// unix.Memory:add(word_index:int, value:int)
+// unix.Memory:fetch_add(word_index:int, value:int)
 //     └─→ old:int
 static int LuaUnixMemoryAdd(lua_State *L) {
   lua_pushinteger(L, atomic_fetch_add(GetWord(L), luaL_checkinteger(L, 3)));
   return 1;
 }
 
-// unix.Memory:and(word_index:int, value:int)
+// unix.Memory:fetch_and(word_index:int, value:int)
 //     └─→ old:int
 static int LuaUnixMemoryAnd(lua_State *L) {
   lua_pushinteger(L, atomic_fetch_and(GetWord(L), luaL_checkinteger(L, 3)));
   return 1;
 }
 
-// unix.Memory:or(word_index:int, value:int)
+// unix.Memory:fetch_or(word_index:int, value:int)
 //     └─→ old:int
 static int LuaUnixMemoryOr(lua_State *L) {
   lua_pushinteger(L, atomic_fetch_or(GetWord(L), luaL_checkinteger(L, 3)));
   return 1;
 }
 
-// unix.Memory:xor(word_index:int, value:int)
+// unix.Memory:fetch_xor(word_index:int, value:int)
 //     └─→ old:int
 static int LuaUnixMemoryXor(lua_State *L) {
   lua_pushinteger(L, atomic_fetch_xor(GetWord(L), luaL_checkinteger(L, 3)));

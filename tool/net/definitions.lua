@@ -533,6 +533,12 @@ lsqlite3 = {
 --- https://www.sqlite.org/c3ref/open.html).
 ---@alias lsqlite3.OpenFlag integer
 
+--- Name of an SQLite ext/misc extension linked into the library: a row of
+--- the registry in `third_party/sqlite3/extensions.c`, whose init is
+--- `sqlite3_<name>_init`. A name here means the extension is available,
+--- not that any connection has it registered.
+---@alias lsqlite3.Extension "regexp"|"series"|"zipfile"
+
 --- Opens (or creates if it does not exist) an SQLite database with name filename
 --- and returns its handle as userdata (the returned object should be used for all
 --- further method calls in connection with this specific database, see Database
@@ -7235,7 +7241,8 @@ function unix.gmtime(unixts) end
 --- Breaks down UNIX timestamp into local time numbers, e.g.
 ---
 ---     >: unix.localtime(unix.clock_gettime())
----     2022    4       28      2       14      22      -25200  4       117     1       "PDT"
+---     {year=2022, mon=4, mday=28, hour=2, min=14, sec=22,
+---      gmtoffsec=-25200, wday=4, yday=117, dst=1, zone="PDT"}
 ---
 --- This follows the same API as `gmtime()` which has further details.
 ---

@@ -4,11 +4,21 @@
 PKGS += TOOL_LUA
 
 TOOL_LUA_FILES := $(wildcard tool/lua/*)
-TOOL_LUA_SRCS = $(filter %.c,$(TOOL_LUA_FILES))
 TOOL_LUA_HDRS = $(filter %.h,$(TOOL_LUA_FILES))
 
+# TOOL_LUA_SRCS is what the root SRCS aggregate hands to mkdeps for this
+# package, and it carries one source this directory does not own:
+# tool/net/lfetch.c compiles against Mbed TLS 3.6 and links only into
+# the lua binary, so tool/net/BUILD.mk keeps it out of TOOL_NET_SRCS, and
+# listing it here is what gives o/$(MODE)/tool/net/lfetch.o its header
+# and .inc edges in o/$(MODE)/depend. The object list stays this
+# directory's own sources; lfetch.o is linked via TOOL_LUA_LUA_MODULES.
+TOOL_LUA_SRCS =								\
+	$(filter %.c,$(TOOL_LUA_FILES))					\
+	tool/net/lfetch.c
+
 TOOL_LUA_OBJS =								\
-	$(TOOL_LUA_SRCS:%.c=o/$(MODE)/%.o)
+	$(patsubst %.c,o/$(MODE)/%.o,$(filter %.c,$(TOOL_LUA_FILES)))
 
 TOOL_LUA_BINS =								\
 	$(TOOL_LUA_COMS)						\
@@ -36,13 +46,6 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/net/lgetopt.o					\
 	o/$(MODE)/tool/net/lzip.o					\
 	o/$(MODE)/tool/net/lcov.o
-
-# lfetch.c is excluded from TOOL_NET_SRCS (see tool/net/BUILD.mk), so
-# mkdeps never scans it and o/$(MODE)/depend carries no header edges for
-# it; give it the one that matters for incremental builds by hand.
-o/$(MODE)/tool/net/lfetch.o:						\
-		tool/net/lfetch.c					\
-		tool/net/fetch.inc
 
 TOOL_LUA_DIRECTDEPS =							\
 	DSP_SCALE							\
@@ -230,6 +233,14 @@ o/$(MODE)/tool/lua/test_definitions_conformance.ok: o/$(MODE)/tool/lua/lua.dbg t
 	$< tool/lua/test_definitions_conformance.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_definitions_help.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_help.lua tool/net/definitions.lua tool/net/help.txt third_party/lua/cosmo/lunix.c
+	$< tool/lua/test_definitions_help.lua
+	@touch $@
+
+o/$(MODE)/tool/lua/test_sqlite_extensions.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sqlite_extensions.lua tool/net/definitions.lua third_party/sqlite3/extensions.h third_party/sqlite3/BUILD.mk $(THIRD_PARTY_SQLITE3_A_SRCS)
+	$< tool/lua/test_sqlite_extensions.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_ssl_roots.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_ssl_roots.lua net/https/sslroots.c $(wildcard usr/share/ssl/root/*.pem)
 	$< tool/lua/test_ssl_roots.lua
 	@touch $@
@@ -370,6 +381,28 @@ o/$(MODE)/tool/lua/test_unix_openpty.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/tes
 	$< tool/lua/test_unix_openpty.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_build_mk_touch.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_build_mk_touch.lua tool/lua/BUILD.mk
+	$< tool/lua/test_build_mk_touch.lua
+	@touch $@
+
+# Dependency-scan gate: every .c this build compiled under tool/net,
+# tool/lua and third_party/lua/cosmo must be in o/$(MODE)/srcs.txt, or
+# mkdeps never scans it and its object goes stale on a header edit.
+# srcs.txt is a prerequisite so any BUILD.mk change re-runs the check.
+o/$(MODE)/tool/lua/test_srcs_scan.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_srcs_scan.lua o/$(MODE)/srcs.txt
+	$< tool/lua/test_srcs_scan.lua o/$(MODE)/srcs.txt
+	@touch $@
+
+# Function coverage floor: ftrace every enrolled test, intersect the
+# reached functions with nm's per-file listing of the binding sources,
+# and fail when a file's covered count drops below tool/lua/coverage_floor.lua.
+# The enrolled list is TOOL_LUA_TESTS mapped back to its scripts, so a
+# test joins the coverage pass by being enrolled; COVERAGE_BASELINE=1
+# rewrites the floor.
+o/$(MODE)/tool/lua/test_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/coverage.lua tool/lua/coverage_floor.lua tool/lua/BUILD.mk $(wildcard tool/lua/test_*.lua)
+	$< tool/lua/coverage.lua $< $(TOOLCHAIN)nm o/$(MODE)/tool/lua tool/lua/coverage_floor.lua $(patsubst o/$(MODE)/tool/lua/%.ok,tool/lua/%.lua,$(filter-out %/test_coverage.ok,$(TOOL_LUA_TESTS)))
+	@touch $@
+
 TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_cosmo.ok				\
 	o/$(MODE)/tool/lua/test_getopt.ok				\
@@ -420,6 +453,8 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_landlock_abi.ok				\
 	o/$(MODE)/tool/lua/test_definitions_coverage.ok			\
 	o/$(MODE)/tool/lua/test_definitions_conformance.ok		\
+	o/$(MODE)/tool/lua/test_definitions_help.ok			\
+	o/$(MODE)/tool/lua/test_sqlite_extensions.ok			\
 	o/$(MODE)/tool/lua/test_ssl_roots.ok				\
 	o/$(MODE)/tool/lua/test_sqlite_readonly.ok			\
 	o/$(MODE)/tool/lua/test_sqlite_serialize.ok			\
@@ -435,7 +470,35 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_jsontestsuite_fail4.ok			\
 	o/$(MODE)/tool/lua/test_jsontestsuite_okay.ok			\
 	o/$(MODE)/tool/lua/test_jsontestsuite_pass.ok			\
-	o/$(MODE)/tool/lua/test_ljson.ok
+	o/$(MODE)/tool/lua/test_ljson.ok				\
+	o/$(MODE)/tool/lua/test_build_mk_touch.ok			\
+	o/$(MODE)/tool/lua/test_srcs_scan.ok				\
+	o/$(MODE)/tool/lua/test_coverage.ok
+
+ifeq ($(MODE),cov)
+# Line coverage of the binding sources: gcc instruments these objects
+# (COVERAGE_CFLAGS, build/config.mk) and the runtime in
+# libc/intrin/gcov.c dumps a .gcda beside each one at exit. Read with
+# the host gcov, from the object directory:
+#   gcov -o o/cov/tool/net o/cov/tool/net/lsqlite3.o.gcno
+$(TOOL_LUA_LUA_MODULES): private				\
+		CFLAGS +=					\
+			$(COVERAGE_CFLAGS)
+
+# The ftrace function floor is a measurement of the default mode's -O2
+# binary (tool/lua/coverage.lua): at -O0 nothing is inlined and a
+# single test's trace runs past its line cap, so the pass cannot finish
+# here. This mode measures lines with gcov instead.
+TOOL_LUA_TESTS := $(filter-out %/test_coverage.ok,$(TOOL_LUA_TESTS))
+
+# The writer never merges: every process that exits rewrites the file
+# whole. So a test run starts from no .gcda at all, and every test
+# reruns, so what is left afterwards was written by this run.
+.PHONY: o/$(MODE)/tool/lua/gcda.clean
+o/$(MODE)/tool/lua/gcda.clean:
+	find o/$(MODE) -name '*.gcda' -delete
+$(TOOL_LUA_TESTS): o/$(MODE)/tool/lua/gcda.clean
+endif
 
 .PHONY: o/$(MODE)/tool/lua
 o/$(MODE)/tool/lua:							\
