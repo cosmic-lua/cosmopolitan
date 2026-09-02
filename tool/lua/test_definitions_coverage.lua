@@ -539,13 +539,23 @@ end
 --
 -- Grammar (recursive descent; each parse_* returns the text remaining after
 -- what it consumed, or nil on syntax error):
---   union    := postfix ('|' postfix)*
+--   union    := postfix ('|' postfix)*    -- see the depth rule below
 --   postfix  := atom ('?' | '[]')*
 --   atom     := 'fun' '(' ... ')' (':' labeled-typelist)?
 --             | '{' ... '}'                  -- balance-checked table shape
 --             | '(' union ')'
 --             | '"'str'"' | "'"str"'" | int  -- literal types
 --             | dotted-ident ('<' typelist '>')?
+--
+-- Depth rule: at bracket depth 0 of the type region -- outside any `()`,
+-- `{}`, `<>` -- whitespace is what ENDS the type (a name or description
+-- follows it), so a `|` there must be followed immediately by a type
+-- character: `integer| cols` is a dangling bar with the slot name after it,
+-- not a two-member union. Inside a bracketed group the closing bracket
+-- delimits instead and whitespace around `|` is part of the type
+-- (`(integer | string)?`). This is exactly how cosmic's gentype tokenizes
+-- the same text, so the gate refuses what the generator would refuse.
+-- Every parse_* below takes `grouped` = true when parsing inside a group.
 do
   local parse_union
 
@@ -561,12 +571,13 @@ do
     return s
   end
 
+  -- Only reached inside a generic application's `<...>`, so always grouped.
   local function parse_typelist(s)
-    s = parse_union(s)
+    s = parse_union(s, true)
     if not s then return nil end
     while s:match("^%s*,") do
       s = s:gsub("^%s*,%s*", "")
-      s = parse_union(s)
+      s = parse_union(s, true)
       if not s then return nil end
     end
     return s
@@ -574,22 +585,22 @@ do
 
   -- A fun(...) return-list entry may carry a `label:` prefix
   -- (`fun(fd: integer): flags: integer`).
-  local function parse_labeled_union(s)
+  local function parse_labeled_union(s, grouped)
     s = s:gsub("^%s+", "")
     local label = s:match("^[%a_][%w_%.]*%s*:%s*")
     if label then
-      local rest = parse_union(s:sub(#label + 1))
+      local rest = parse_union(s:sub(#label + 1), grouped)
       if rest then return rest end
     end
-    return parse_union(s)
+    return parse_union(s, grouped)
   end
 
-  local function parse_labeled_typelist(s)
-    s = parse_labeled_union(s)
+  local function parse_labeled_typelist(s, grouped)
+    s = parse_labeled_union(s, grouped)
     if not s then return nil end
     while s:match("^%s*,") do
       s = s:gsub("^%s*,%s*", "")
-      s = parse_labeled_union(s)
+      s = parse_labeled_union(s, grouped)
       if not s then return nil end
     end
     return s
@@ -597,8 +608,9 @@ do
 
   -- fun(...) with balanced parens (parameter internals are not typechecked
   -- here); after the closing paren an optional `: <labeled typelist>` or
-  -- typed-vararg (`: ...: string`) return annotation.
-  local function parse_fun(s)
+  -- typed-vararg (`: ...: string`) return annotation. The return list sits
+  -- after the closing paren, so it is at the caller's depth.
+  local function parse_fun(s, grouped)
     local depth = 0
     for k = 4, #s do
       local c = s:sub(k, k)
@@ -614,10 +626,10 @@ do
             if rest:match("^%.%.%.") then
               rest = rest:sub(4)
               local c2 = rest:match("^:%s*")
-              if c2 then return parse_union(rest:sub(#c2 + 1)) end
+              if c2 then return parse_union(rest:sub(#c2 + 1), grouped) end
               return rest
             end
-            return parse_labeled_typelist(rest)
+            return parse_labeled_typelist(rest, grouped)
           end
           return rest
         end
@@ -626,9 +638,9 @@ do
     return nil -- unbalanced
   end
 
-  local function parse_atom(s)
+  local function parse_atom(s, grouped)
     if s == "" then return nil end
-    if s:match("^fun%(") then return parse_fun(s) end
+    if s:match("^fun%(") then return parse_fun(s, grouped) end
     if s:match('^"') then
       local lit = s:match('^"[^"]*"')
       return lit and s:sub(#lit + 1) or nil
@@ -638,7 +650,7 @@ do
       return lit and s:sub(#lit + 1) or nil
     end
     if s:match("^%(") then
-      local rest = parse_union(s:sub(2))
+      local rest = parse_union(s:sub(2), true)
       if not rest then return nil end
       rest = rest:gsub("^%s+", "")
       if rest:sub(1, 1) ~= ")" then return nil end
@@ -673,8 +685,8 @@ do
     return rest
   end
 
-  local function parse_postfix(s)
-    s = parse_atom(s)
+  local function parse_postfix(s, grouped)
+    s = parse_atom(s, grouped)
     if not s then return nil end
     while true do
       if s:match("^%?") then
@@ -688,13 +700,16 @@ do
     return s
   end
 
-  parse_union = function(s)
+  parse_union = function(s, grouped)
     s = s:gsub("^%s+", "")
-    s = parse_postfix(s)
+    s = parse_postfix(s, grouped)
     if not s then return nil end
-    while s:match("^%s*|%s*[^%s]") do
-      s = s:gsub("^%s*|%s*", "")
-      s = parse_postfix(s)
+    while s:match("^%s*|") do
+      -- Depth rule: whitespace after the bar is skipped only inside a
+      -- group; at depth 0 the next member must start right after the `|`,
+      -- so parse_postfix sees the whitespace (or the end) and refuses it.
+      s = s:gsub(grouped and "^%s*|%s*" or "^%s*|", "")
+      s = parse_postfix(s, grouped)
       if not s then return nil end
     end
     return s
@@ -710,6 +725,28 @@ do
     local rest = parse_union(region)
     if not rest then return false end
     return rest == "" or rest:match("^[%s#]") ~= nil
+  end
+
+  -- Parser self-check: the classifications the scan below relies on, so a
+  -- grammar regression fails here by fixture instead of silently passing
+  -- (or failing) real annotations. The dangling-bar shapes are the ones a
+  -- whitespace-skipping union loop reads as well-formed two-member unions.
+  local TYPE_FIXTURES = {
+    { "integer|string", true },
+    { "integer|nil rows", true },
+    { "(integer | string)?", true },
+    { "(true|nil | string)", true },
+    { "table<string, integer|nil>", true },
+    { "fun(fd: integer): integer|nil", true },
+    { "integer| cols", false },
+    { "integer|", false },
+    { "fun(fd: integer): integer| nil", false },
+    { "nil,|nil string", false },
+  }
+  for _, fx in ipairs(TYPE_FIXTURES) do
+    assert(type_ok(fx[1]) == fx[2], "check 9 self-check: `" .. fx[1] ..
+      "` must be " .. (fx[2] and "accepted" or "refused") ..
+      " by the type grammar")
   end
 
   local lineno = 0
