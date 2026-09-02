@@ -230,7 +230,7 @@ o/$(MODE)/tool/lua/test_definitions_conformance.ok: o/$(MODE)/tool/lua/lua.dbg t
 	$< tool/lua/test_definitions_conformance.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/test_definitions_help.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_help.lua tool/net/definitions.lua tool/net/help.txt
+o/$(MODE)/tool/lua/test_definitions_help.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_help.lua tool/net/definitions.lua tool/net/help.txt third_party/lua/cosmo/lunix.c
 	$< tool/lua/test_definitions_help.lua
 	@touch $@
 
