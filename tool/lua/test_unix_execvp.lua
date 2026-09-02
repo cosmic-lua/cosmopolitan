@@ -16,9 +16,6 @@
 local unix = require("cosmo.unix")
 
 -- Tests for unix.execvp(), unix.execvpe(), and unix.fexecve()
---
--- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
--- rusage=}), not positional values -- slot 2 always means error.
 
 -- Test function existence
 assert(type(unix.execvp) == "function", "execvp should be a function")

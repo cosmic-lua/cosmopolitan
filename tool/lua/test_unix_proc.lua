@@ -1,7 +1,4 @@
 -- Tests for unix process management functions
---
--- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
--- rusage=}), not positional values -- slot 2 always means error.
 local unix = require("cosmo.unix")
 
 local function test_function_exists(name)
