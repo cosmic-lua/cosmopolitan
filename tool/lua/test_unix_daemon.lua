@@ -43,9 +43,11 @@ if pid == 0 then
   unix.exit(0)
 elseif pid then
   -- parent: wait for the original child (which exits after daemon() forks)
-  local wpid, wstatus = unix.wait(pid)
-  assert(wpid == pid, "wait should return the forked pid")
-  assert(unix.WIFEXITED(wstatus), "child should exit normally")
+  -- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+  -- rusage=}), not positional values -- slot 2 always means error.
+  local result = unix.wait(pid)
+  assert(result.pid == pid, "wait should return the forked pid")
+  assert(unix.WIFEXITED(result.wstatus), "child should exit normally")
 
   -- Give the daemon child a moment to write its marker file
   unix.nanosleep(0, 200000000) -- 200ms

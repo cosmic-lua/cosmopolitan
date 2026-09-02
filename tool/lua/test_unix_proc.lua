@@ -1,4 +1,7 @@
 -- Tests for unix process management functions
+--
+-- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+-- rusage=}), not positional values -- slot 2 always means error.
 local unix = require("cosmo.unix")
 
 local function test_function_exists(name)
@@ -41,19 +44,19 @@ if true_path then
   assert(type(pid) == "number", "pid should be a number")
   assert(pid > 0, "pid should be positive")
   -- Wait for child to complete
-  local wpid, wstatus = unix.wait(pid)
-  assert(wpid == pid, "wait should return the spawned pid")
-  assert(unix.WIFEXITED(wstatus), "child should exit normally")
-  assert(unix.WEXITSTATUS(wstatus) == 0, "child should exit with 0")
+  local result = unix.wait(pid)
+  assert(result.pid == pid, "wait should return the spawned pid")
+  assert(unix.WIFEXITED(result.wstatus), "child should exit normally")
+  assert(unix.WEXITSTATUS(result.wstatus) == 0, "child should exit with 0")
 end
 
 -- Test spawnp (uses PATH search)
 local pid, err = unix.spawnp("true", {"true"})
 if pid then
   assert(type(pid) == "number", "pid should be a number")
-  local wpid, wstatus = unix.wait(pid)
-  assert(wpid == pid, "wait should return the spawned pid")
-  assert(unix.WIFEXITED(wstatus), "child should exit normally")
+  local result = unix.wait(pid)
+  assert(result.pid == pid, "wait should return the spawned pid")
+  assert(unix.WIFEXITED(result.wstatus), "child should exit normally")
 end
 
 -- Test spawn with arguments
@@ -61,9 +64,9 @@ local echo_path = unix.commandv("echo")
 if echo_path then
   local pid, err = unix.spawn(echo_path, {echo_path, "hello", "world"})
   assert(pid ~= nil, "spawn with args should return pid: " .. tostring(err))
-  local wpid, wstatus = unix.wait(pid)
-  assert(unix.WIFEXITED(wstatus), "echo should exit normally")
-  assert(unix.WEXITSTATUS(wstatus) == 0, "echo should exit with 0")
+  local result = unix.wait(pid)
+  assert(unix.WIFEXITED(result.wstatus), "echo should exit normally")
+  assert(unix.WEXITSTATUS(result.wstatus) == 0, "echo should exit with 0")
 end
 
 -- Test spawn with custom environment
@@ -71,8 +74,8 @@ local env_path = unix.commandv("env")
 if env_path then
   local pid, err = unix.spawn(env_path, {env_path}, {"TEST_VAR=hello"})
   assert(pid ~= nil, "spawn with env should return pid: " .. tostring(err))
-  local wpid, wstatus = unix.wait(pid)
-  assert(unix.WIFEXITED(wstatus), "env should exit normally")
+  local result = unix.wait(pid)
+  assert(unix.WIFEXITED(result.wstatus), "env should exit normally")
 end
 
 -- Test killpg with invalid pgrp (should fail with proper error)

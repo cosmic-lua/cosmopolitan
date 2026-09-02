@@ -43,8 +43,10 @@ local function run_unprivileged(body)
     chunks[#chunks + 1] = chunk
   end
   unix.close(r)
-  local _, wstatus = assert(unix.wait(pid))
-  assert(unix.WIFEXITED(wstatus), "probe child should exit normally")
+  -- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+  -- rusage=}), not positional values -- slots 2/3 always mean error/errno.
+  local result = assert(unix.wait(pid))
+  assert(unix.WIFEXITED(result.wstatus), "probe child should exit normally")
   return table.concat(chunks)
 end
 

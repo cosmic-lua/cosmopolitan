@@ -4942,6 +4942,14 @@ function unix.dup(oldfd, newfd, flags, lowest) end
 ---@nodiscard
 function unix.pipe(flags) end
 
+--- A terminated child's pid, wait status, and resource usage, as
+--- returned by `wait`.
+---@class unix.WaitResult
+---@field pid integer Process id of the child that changed state.
+---@field wstatus integer Raw wait status; decode with `unix.WIFEXITED`,
+--- `unix.WEXITSTATUS`, `unix.WIFSIGNALED`, `unix.WTERMSIG`, etc.
+---@field rusage unix.Rusage Resource usage accumulated by the child.
+
 --- Waits for subprocess to terminate.
 ---
 --- `pid` defaults to `-1` which means any child process. Setting
@@ -4953,37 +4961,38 @@ function unix.pipe(flags) end
 --- the existence of processes that are already dead (technically
 --- speaking zombies) and if so harvest them immediately.
 ---
---- Returns the process id of the child that terminated. In other
---- cases, the returned `pid` is nil and `errno` is non-nil.
+--- Returns one `unix.WaitResult` table with `pid`, `wstatus`, and
+--- `rusage` fields; on failure the error string and errno are always
+--- in slots 2 and 3, never sharing them with a result field.
 ---
---- The returned `wstatus` contains information about the process
---- exit status. It's a complicated integer and there's functions
---- that can help interpret it. For example:
+--- The returned `wstatus` field contains information about the
+--- process exit status. It's a complicated integer and there's
+--- functions that can help interpret it. For example:
 ---
 ---     -- wait for zombies
 ---     -- traditional technique for SIGCHLD handlers
 ---     while true do
----        pid, status, errno = unix.wait(-1, unix.WNOHANG)
----        if pid then
----           if unix.WIFEXITED(status) then
----              print('child', pid, 'exited with',
----                    unix.WEXITSTATUS(status))
----           elseif unix.WIFSIGNALED(status) then
----              print('child', pid, 'crashed with',
----                    unix.strsignal(unix.WTERMSIG(status)))
+---        local result, err, errno = unix.wait(-1, unix.WNOHANG)
+---        if result then
+---           if unix.WIFEXITED(result.wstatus) then
+---              print('child', result.pid, 'exited with',
+---                    unix.WEXITSTATUS(result.wstatus))
+---           elseif unix.WIFSIGNALED(result.wstatus) then
+---              print('child', result.pid, 'crashed with',
+---                    unix.strsignal(unix.WTERMSIG(result.wstatus)))
 ---           end
 ---        elseif errno == unix.ECHILD then
 ---           Log(kLogDebug, 'no more zombies')
 ---           break
 ---        else
----           Log(kLogWarn, status)
+---           Log(kLogWarn, err)
 ---           break
 ---        end
 ---     end
 ---
 ---@param pid? integer
 ---@param options? integer
----@return integer|nil pid, integer wstatus, unix.Rusage rusage
+---@return unix.WaitResult|nil result
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.wait(pid, options) end
