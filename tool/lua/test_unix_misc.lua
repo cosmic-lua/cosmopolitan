@@ -61,8 +61,23 @@ function UnixTest()
 
    -- fork
    -- basic subprocess creation
+   --
+   -- Under --ftrace every C call this child makes, including after its
+   -- own pledge(), is logged with a write() to the trace fd. pledge("")
+   -- revokes stdio entirely, so on a traced run that trace write is
+   -- itself the violation: the child dies of SIGSYS before it reaches
+   -- exit(42), and the WIFEXITED/WEXITSTATUS assertions below would
+   -- fail. tool/lua/coverage.lua sets COVERAGE_FTRACE=1 on the traced
+   -- runs it drives, so only there does the child keep just enough
+   -- (stdio) to survive its own tracing; the plain .ok run still
+   -- pledges away everything, and the assertions are unchanged either
+   -- way.
    if assert(unix.fork()) == 0 then
-      assert(unix.pledge(""))
+      if os.getenv("COVERAGE_FTRACE") then
+         assert(unix.pledge("stdio"))
+      else
+         assert(unix.pledge(""))
+      end
       unix.exit(42)
    end
    pid, ws = assert(unix.wait())

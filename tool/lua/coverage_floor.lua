@@ -3,7 +3,7 @@
 -- tests tool/lua/BUILD.mk enrols. Rewrite with COVERAGE_BASELINE=1;
 -- never lower a covered count by hand.
 return {
-  ["third_party/lua/cosmo/lunix.c"] = { defined = 264, covered = 113 },
+  ["third_party/lua/cosmo/lunix.c"] = { defined = 264, covered = 130 },
   ["tool/lua/lcosmo.c"] = { defined = 9, covered = 8 },
   ["tool/net/largon2.c"] = { defined = 4, covered = 4 },
   ["tool/net/lcov.c"] = { defined = 9, covered = 9 },
