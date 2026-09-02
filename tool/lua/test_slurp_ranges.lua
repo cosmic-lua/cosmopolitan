@@ -17,7 +17,7 @@ local cosmo = require("cosmo")
 local unix = require("cosmo.unix")
 local Slurp, Barf = cosmo.Slurp, cosmo.Barf
 
-tmpdir = "%s/o/tmp/lunix_test.%d" % {os.getenv('TMPDIR'), unix.getpid()}
+tmpdir = "%s/o/tmp/lunix_test.%d" % {os.getenv('TMPDIR') or os.tmpname():gsub('/[^/]*$', ''), unix.getpid()}
 
 local function Path(name)
    return tmpdir .. '/' .. name
