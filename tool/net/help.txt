@@ -3127,12 +3127,14 @@ UNIX MODULE
     treated like `SIGKILL`.
 
   unix.raise(sig:int)
-      ├─→ rc:int
-      └─→ nil, error:str, errno:int
+      └─→ rc:int
 
     Triggers signal in current process.
 
-    This is pretty much the same as `kill(getpid(), sig)`.
+    This is pretty much the same as `kill(getpid(), sig)`. Raises a
+    bad-argument error if `sig` is not `0` (existence check only, like
+    `kill(pid, 0)`) or a valid signal number, which is the only failure
+    POSIX documents for raise(); there is no failure tuple.
 
   unix.access(path:str, how:int[, flags:int[, dirfd:int]])
       ├─→ true
@@ -3500,10 +3502,12 @@ UNIX MODULE
     Gets session id.
 
   unix.getpgrp()
-      ├─→ pgid:int
-      └─→ nil, error:str, errno:int
+      └─→ pgid:int
 
     Gets process group id.
+
+    This function does not fail: getpgrp(2) takes no argument and POSIX
+    guarantees it is always successful.
 
   unix.setpgrp()
       ├─→ pgid:int
@@ -3682,8 +3686,7 @@ UNIX MODULE
     WIN32 it uses the ReportEvent() facility.
 
   unix.clock_gettime([clock:int])
-      ├─→ seconds:int, nanos:int
-      └─→ nil, error:str, errno:int
+      └─→ seconds:int, nanos:int
 
     Returns nanosecond precision timestamp from system, e.g.
 
@@ -3762,21 +3765,38 @@ UNIX MODULE
       was actively scheduled. This is similar to getrusage() and clock().
       Cosmopoiltan guarantees this clock will never raise `EINVAL`.
 
-    Returns `EINVAL` if clock isn't supported on platform.
-
-    This function only fails if `clock` is invalid.
+    An invalid clock id, or one this platform cannot serve (the `_COARSE`
+    clocks on extremely old Linux distros), raises a bad-argument error
+    rather than returning `EINVAL`; wrap the call in `pcall` to
+    feature-probe a nonstandard clock. The per-clock guarantees above
+    name the clocks that can never fail.
 
     This function goes fastest on Linux and Windows.
 
   unix.nanosleep(seconds:int[, nanos:int])
-      ├─→ remseconds:int, remnanos:int
-      └─→ nil, error:str, errno:int
+      ├─→ remaining:unix.SleepRemainder
+      └─→ nil, error:str, errno:int[, remaining:unix.SleepRemainder]
 
     Sleeps with nanosecond precision.
 
-    Returns `EINTR` if a signal was received while waiting.
+    The remainder is a single `unix.SleepRemainder` table with the
+    following fields:
+
+    - `seconds`  whole seconds left to sleep
+    - `nanos`    nanoseconds left to sleep, past `seconds`
+
+    A sleep that completes returns a remainder of zero. Returns `EINTR`
+    if a signal was received while waiting; on that failure a fourth
+    return value carries the kernel's unslept remainder, so an
+    interrupted sleep can be resumed without re-deriving it from a
+    clock. The error always occupies slot 2; no field of the remainder
+    ever shares a slot with it.
 
   unix.sync()
+
+    Asks the operating system to flush every filesystem's cached writes
+    to the physical medium. Returns nothing: sync(2) cannot fail.
+
   unix.fsync(fd:int)
       ├─→ true
       └─→ nil, error:str, errno:int
@@ -4230,8 +4250,7 @@ UNIX MODULE
     should log rather than assert failures reported by shutdown().
 
   unix.sigprocmask(how:int, newmask:unix.Sigset)
-      ├─→ oldmask:unix.Sigset
-      └─→ nil, error:str, errno:int
+      └─→ oldmask:unix.Sigset
 
     Manipulates bitset of signals blocked by process.
 
@@ -4241,21 +4260,33 @@ UNIX MODULE
     - `SIG_UNBLOCK`: removes bits in `mask` from set of blocked signals
     - `SIG_SETMASK`: replaces process signal mask with `mask`
 
-    `mask` is a unix.Sigset() object (see section below).
+    `mask` is a unix.sigset() object (see section below).
 
     For example, to temporarily block `SIGTERM` and `SIGINT` so critical
     work won't be interrupted, sigprocmask() can be used as follows:
 
-        newmask = unix.Sigset(unix.SIGTERM)
+        newmask = unix.sigset(unix.SIGTERM)
         oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, newmask))
         -- do something...
         assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
 
   unix.sigaction(sig:int[, handler:func|int[, flags:int[, mask:unix.Sigset]]])
-      ├─→ oldhandler:func|int, flags:int, mask:unix.Sigset
+      ├─→ previous:unix.SignalAction
       └─→ nil, error:str, errno:int
 
     Changes action taken upon receipt of a specific signal.
+
+    On success this returns a single `unix.SignalAction` table holding
+    the previous disposition, with the following fields:
+
+    - `handler`  previous handler: a Lua function, `unix.SIG_IGN`,
+                 `unix.SIG_DFL`, or a raw function pointer
+    - `flags`    previous `sa_flags`
+    - `mask`     previous signal mask, a `unix.Sigset`
+
+    On failure it returns `nil`, an error string, and the errno. The
+    error always occupies slot 2; no field of the table ever shares a
+    slot with it.
 
     `sig` can be one of:
 
@@ -4316,7 +4347,7 @@ UNIX MODULE
           gotsigusr1 = true
         end
         gotsigusr1 = false
-        oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.Sigset(unix.SIGUSR1)))
+        oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.sigset(unix.SIGUSR1)))
         assert(unix.sigaction(unix.SIGUSR1, OnSigUsr1))
         assert(unix.raise(unix.SIGUSR1))
         assert(not gotsigusr1)
@@ -4852,19 +4883,21 @@ UNIX MODULE
     close it automatically when garbage collected.
 
   unix.isatty(fd:int)
-      ├─→ true
-      └─→ nil, error:str, errno:int
+      └─→ bool
 
-    Returns true if file descriptor is a teletypewriter. Otherwise nil
-    with an Errno object holding one of the following values:
+    Returns true if file descriptor is a teletypewriter, false
+    otherwise, including when:
 
-    - `ENOTTY` if `fd` is valid but not a teletypewriter
-    - `EBADF` if `fd` isn't a valid file descriptor.
-    - `EPERM` if pledge() is used without `tty` in lenient mode
+    - `fd` is valid but not a teletypewriter (`ENOTTY`)
+    - `fd` isn't a valid file descriptor (`EBADF`)
+    - pledge() is used without `tty` in lenient mode (`EPERM`)
 
-    No other error numbers are possible.
+    The underlying isatty() never signals failure through its return
+    value, only through `errno`, which this binding does not surface,
+    so there is no nil case: a bad fd and a valid non-terminal fd are
+    indistinguishable here.
 
-  unix.tcgetwinsize(fd:int)
+  unix.tiocgwinsz(fd:int)
       ├─→ rows:int, cols:int
       └─→ nil, error:str, errno:int
 
@@ -5613,10 +5646,11 @@ UNIX MODULE
   contain 128 entries. See `unix.NSIG` to find out how many signals
   your operating system actually supports.
 
-  unix.Sigset(sig:int, ...)
+  unix.sigset(sig:int, ...)
       └─→ unix.Sigset
 
-    Constructs new signal bitset object.
+    Constructs new signal bitset object. The constructor is
+    `unix.sigset` (lowercase); `unix.Sigset` names the class it builds.
 
   unix.Sigset:add(sig:int)
 
