@@ -43,19 +43,32 @@
 --
 -- The two sources differ only in the prefix every line carries: two
 -- spaces in help.txt, `// ` in lunix.c. Under that prefix a signature
--- line is `unix.<name>(` or `unix.<Type>:<method>(` and a branch line
--- is four more spaces then the arrow. A block may itself sit under
--- further indentation -- lunix.c
--- documents getsockopt/setsockopt per option class inside the C body,
--- and help.txt nests those same blocks under a bullet -- so the
--- signature's own leading whitespace is captured and every line of its
--- block must carry it. Several signatures stacked directly above one
--- block share it, and a branch-indent line opening with `│` continues
--- the branch above it (`unix.uname`'s table wraps). A signature with no
--- block below it
--- documents no shape and is not compared, and neither is `unix.fork`,
--- whose tree-shaped block (`├─┬─→`) lies outside this grammar in both
--- sources. A name a source documents that definitions.lua declares no
+-- line is `<callee>(` -- `unix.<name>(` or `unix.<Type>:<method>(`,
+-- and in help.txt also the other modules' calls (`DecodeJson(`,
+-- `re.search(`, `path.join(`), whose blocks open and close under the
+-- same grammar but are not compared -- and a branch line is four more
+-- spaces then the arrow. A block may itself sit under further
+-- indentation -- lunix.c documents getsockopt/setsockopt per option
+-- class inside the C body, and help.txt nests those same blocks under
+-- a bullet -- so the signature's own leading whitespace is captured and
+-- every line of its block must carry it. Several signatures stacked
+-- directly above one block share it, and a branch-indent line opening
+-- with `│` continues the branch above it (`unix.uname`'s table wraps).
+-- A signature with no block below it documents no shape and is not
+-- compared, and neither is `unix.fork`, whose tree-shaped block
+-- (`├─┬─→`, then `│`-led lines) is consumed and skipped in both
+-- sources.
+--
+-- A line opening with a shape glyph (`├─→`, `└─→`, `│`, `├─┬─→`) that
+-- belongs to no block -- its indent is not the four-space step below
+-- the signature above it, or nothing above it opens a block -- is a
+-- failure by line, never a skip: a block the parser cannot read would
+-- otherwise leave the gate in silence. For the same reason each
+-- source's count of names put through the gate (the number the gate
+-- prints) is pinned as `floor` in SOURCES; a commit that adds blocks
+-- raises it, so a vanished block fails by count.
+--
+-- A name a source documents that definitions.lua declares no
 -- function for is a mismatch too: the copy is describing a call that no
 -- longer exists under that name. Every mismatch is reported with its
 -- source file and line; fix the copy (definitions.lua is the source of
@@ -71,13 +84,18 @@ end
 local D = slurp("tool/net/definitions.lua")
 
 local SOURCES = {
-  { label = "help.txt", path = "tool/net/help.txt", prefix = "  " },
-  { label = "lunix.c", path = "third_party/lua/cosmo/lunix.c", prefix = "// " },
+  { label = "help.txt", path = "tool/net/help.txt", prefix = "  ", floor = 179 },
+  { label = "lunix.c", path = "third_party/lua/cosmo/lunix.c", prefix = "// ",
+    floor = 219 },
 }
 
 local SUCCESS_BRANCH = "├─→"
 local FINAL_BRANCH = "└─→"
 local CONTINUATION = "│"
+local TREE_BRANCH = "├─┬─→"
+-- Listed one by one: a `[...]` class over these would match their UTF-8
+-- bytes, and so `─` and `┬` too.
+local GLYPHS = { SUCCESS_BRANCH, FINAL_BRANCH, CONTINUATION, TREE_BRANCH }
 
 -- The first `@return` of the `---` block directly above
 -- `function unix.<name>(`. Returns the declared slot-1 type, "" when the
@@ -120,7 +138,9 @@ end
 -- after the arrow, in order. `name` (and so `names`) is `getsid` for a
 -- plain function and `Stat:size` for a method, matching how
 -- definitions.lua spells the two (`function unix.getsid(`, `function
--- unix.Stat:size(`).
+-- unix.Stat:size(`). A block under any other callee (help.txt's
+-- `DecodeJson(`, `re.search(`) is walked by the same grammar so its
+-- lines are accounted for, and dropped.
 --
 -- Second return: every line whose first non-blank content after `prefix`
 -- is `uni<letters>.` where the word isn't `unix` -- a mistyped prefix
@@ -129,25 +149,48 @@ end
 -- keeps this off unrelated comments that merely start with a `uni`
 -- word, such as "uninitialized" in a sentence. Reported as a failure
 -- by line, never folded into `blocks`.
+--
+-- Third return: every line whose first non-blank content after `prefix`
+-- is a shape glyph yet lies in no block -- the line above it neither
+-- opens a block nor continues one at the indent this line carries.
+-- Also a failure by line: such a line is a branch the gate never saw.
 local function shape_blocks(text, prefix)
-  local any_sig = "^( *)" .. prefix .. "unix%.([%a_][%w_:]*)%s*%("
+  local any_sig = "^( *)" .. prefix .. "([%a_][%w_.:]*)%s*%("
   local typo_sig = "^ *" .. prefix .. "(uni%a*)%."
+  local glyph = "^ *" .. prefix .. " *"
   local lines = {}
   for line in (text .. "\n"):gmatch("([^\n]*)\n") do
     lines[#lines + 1] = line
   end
+  -- A signature line's indent and callee; nil for a mistyped `uni...`
+  -- callee, which stays a line for the typo report to see.
+  local function signature(line)
+    local indent, callee = line:match(any_sig)
+    local word = callee and callee:match("^(uni%a*)%.")
+    if callee and not (word and word ~= "unix") then
+      return indent, callee
+    end
+  end
   local blocks = {}
   local typos = {}
+  local orphans = {}
   local i = 1
   while i <= #lines do
-    local indent, name = lines[i]:match(any_sig)
-    if name then
-      local sig = "^" .. indent .. prefix .. "unix%.([%a_][%w_:]*)%s*%("
+    local indent = signature(lines[i])
+    if indent then
       local branch = "^" .. indent .. prefix .. "    "
-      local block = { line = i, names = { name }, branches = {} }
-      local j = i + 1
-      while lines[j] and lines[j]:match(sig) do
-        block.names[#block.names + 1] = lines[j]:match(sig)
+      local block = { line = i, names = {}, branches = {} }
+      local tree = false
+      local j = i
+      while lines[j] do
+        local sig_indent, callee = signature(lines[j])
+        if sig_indent ~= indent then
+          break
+        end
+        local name = callee:match("^unix%.(.+)$")
+        if name then
+          block.names[#block.names + 1] = name
+        end
         j = j + 1
       end
       while lines[j] do
@@ -159,13 +202,15 @@ local function shape_blocks(text, prefix)
         end
         if arrow then
           block.branches[#block.branches + 1] = { arrow = arrow, shape = shape }
-        elseif not (#block.branches > 0 and
+        elseif lines[j]:match(branch .. TREE_BRANCH) then
+          tree = true
+        elseif not ((tree or #block.branches > 0) and
                     lines[j]:match(branch .. CONTINUATION)) then
           break
         end
         j = j + 1
       end
-      if #block.branches > 0 then
+      if #block.branches > 0 and #block.names > 0 and not tree then
         blocks[#blocks + 1] = block
       end
       i = j
@@ -173,11 +218,19 @@ local function shape_blocks(text, prefix)
       local word = lines[i]:match(typo_sig)
       if word and word ~= "unix" then
         typos[#typos + 1] = { line = i, text = lines[i]:match("^%s*(.-)%s*$") }
+      else
+        for _, g in ipairs(GLYPHS) do
+          if lines[i]:match(glyph .. g) then
+            orphans[#orphans + 1] =
+              { line = i, text = lines[i]:match("^%s*(.-)%s*$") }
+            break
+          end
+        end
       end
       i = i + 1
     end
   end
-  return blocks, typos
+  return blocks, typos, orphans
 end
 
 local failures = {}
@@ -187,14 +240,19 @@ end
 
 local summary = {}
 for _, source in ipairs(SOURCES) do
-  local blocks, typos = shape_blocks(slurp(source.path), source.prefix)
-  assert(#blocks > 50, source.label .. " parsed only " .. #blocks ..
-    " unix.* shape blocks; its layout changed under this parser")
+  local blocks, typos, orphans =
+    shape_blocks(slurp(source.path), source.prefix)
 
   for _, typo in ipairs(typos) do
     fail(source.label .. ":" .. typo.line .. " \"" .. typo.text ..
       "\": mistyped prefix (reads \"" .. source.prefix .. "uni...\", " ..
       "not \"" .. source.prefix .. "unix.\")")
+  end
+  for _, orphan in ipairs(orphans) do
+    fail(source.label .. ":" .. orphan.line .. " \"" .. orphan.text ..
+      "\": shape line in no block (a branch line sits exactly four " ..
+      "spaces deeper than its signature; nothing above opens a block " ..
+      "at this indent)")
   end
 
   local checked = 0
@@ -233,6 +291,11 @@ for _, source in ipairs(SOURCES) do
         end
       end
     end
+  end
+  if checked < source.floor then
+    fail(source.label .. ": " .. checked .. " unix.* shape blocks reach " ..
+      "the gate, below its floor of " .. source.floor .. " (a block " ..
+      "left the gate; `floor` in SOURCES moves only with the blocks)")
   end
   summary[#summary + 1] = "definitions help: " .. checked ..
     " unix.* shape blocks in " .. source.label ..
