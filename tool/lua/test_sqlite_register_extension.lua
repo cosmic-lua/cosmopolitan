@@ -56,6 +56,51 @@ do
   assert(db:close())
 end
 
+-- a second call with the SAME name on the SAME connection must report
+-- "present", not silently rerun the extension's init -- this is the
+-- part that pragma_module_list-based presence detection gets wrong for
+-- regexp and series, since neither's init installs a SQL module named
+-- after its registry key (regexp installs functions, no module at
+-- all; series's module is "generate_series"), so pragma_module_list
+-- never shows a "regexp" or "series" row for either to match against.
+do
+  local db = assert(sqlite3.open_memory())
+
+  local status1 = assert(db:register_extension("regexp"))
+  assert(status1 == "registered",
+    "first regexp call: expected 'registered', got: " .. tostring(status1))
+  local status2, errmsg2, errcode2 = db:register_extension("regexp")
+  assert(status2 == "present",
+    "second regexp call on the same connection: expected 'present', got: " ..
+    tostring(status2))
+  assert(errmsg2 == nil and errcode2 == nil)
+
+  assert(db:close())
+end
+
+do
+  local db = assert(sqlite3.open_memory())
+
+  local status1 = assert(db:register_extension("series"))
+  assert(status1 == "registered",
+    "first series call: expected 'registered', got: " .. tostring(status1))
+  local status2, errmsg2, errcode2 = db:register_extension("series")
+  assert(status2 == "present",
+    "second series call on the same connection: expected 'present', got: " ..
+    tostring(status2))
+  assert(errmsg2 == nil and errcode2 == nil)
+
+  -- a fresh connection starts over: tracking is per-connection, not global
+  local db2 = assert(sqlite3.open_memory())
+  local fresh_status = assert(db2:register_extension("series"))
+  assert(fresh_status == "registered",
+    "a fresh connection should not inherit another connection's " ..
+    "registration, got: " .. tostring(fresh_status))
+  assert(db2:close())
+
+  assert(db:close())
+end
+
 -- outcome 2a: already present as a compile-time feature -- FTS5 is
 -- compiled into libsqlite3.a (SQLITE_ENABLE_FTS5) and auto-registers on
 -- every connection at open, without going through the extensions

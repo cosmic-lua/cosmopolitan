@@ -116,6 +116,16 @@ struct sdb {
 
     int rollback_hook_cb; /* rollback_hook callback */
     int rollback_hook_udata;
+
+    /* one bit per kSqliteExtensions row (bit index == its position in
+       that array), set once its init has run on this connection --
+       by db_register_extension() or, for zipfile, by the open path's
+       own default registration. Tracked directly instead of inferred
+       from pragma_module_list, because that only works when a row's
+       registry name matches the SQL-visible name its init installs,
+       which is true for zipfile but not regexp (registers functions,
+       no module at all) or series (module is "generate_series"). */
+    unsigned int registered_extensions;
 };
 
 static const char *const sqlite_meta      = ":sqlite3";
@@ -598,6 +608,7 @@ static sdb *newdb (lua_State *L) {
     db->L = L;
     db->db = NULL;  /* database handle is currently `closed' */
     db->func = NULL;
+    db->registered_extensions = 0;
 
     db->busy_cb =
     db->busy_udata =
@@ -945,6 +956,28 @@ static int db_wal_checkpoint(lua_State *L) {
 }
 
 /*
+** Finds `name`'s row in the linked extension registry
+** (third_party/sqlite3/extensions.c) and returns its position, or -1
+** if `name` names no linked extension. The position doubles as the
+** bit index into sdb.registered_extensions, so it must fit; the
+** registry is a handful of rows today; -1 is also what a registry
+** grown past 32 rows falls back to for the overflowing rows, which
+** simply stops tracking presence for them (see the caller).
+*/
+static int extension_registry_index(const char *name) {
+    const struct SqliteExtension *ext;
+    int i;
+
+    for (ext = kSqliteExtensions, i = 0; ext->name; ext++, i++) {
+        if (strcmp(ext->name, name) == 0) {
+            if (i >= (int)(sizeof(unsigned int) * 8)) return -1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
 ** Registers a linked SQLite ext/misc extension (a row of the registry
 ** in third_party/sqlite3/extensions.c) on this connection, by name.
 **
@@ -965,8 +998,16 @@ static int db_wal_checkpoint(lua_State *L) {
 **                       (code is SQLITE_NOTFOUND), or its init failed
 **                       (code is that failure's sqlite result code).
 **
-** Presence is checked the same way callers check it themselves:
-** `SELECT ... FROM pragma_module_list WHERE name = ?`.
+** A registry row's presence is tracked directly on the connection
+** (sdb.registered_extensions), set here and by the open path's own
+** default zipfile registration -- NOT inferred from
+** `pragma_module_list`, because that only agrees with a row's
+** registry name for zipfile: regexp registers SQL functions, not a
+** module at all, and series's module is named "generate_series", so
+** neither ever appears in pragma_module_list under its registry name.
+** A name that is not in the registry (e.g. "fts5", a compile-time
+** feature with no registry row) still falls back to
+** `pragma_module_list`, which is how such names are actually exposed.
 **
 ** Params: db, name
 */
@@ -976,8 +1017,37 @@ static int db_register_extension(lua_State *L) {
     sqlite3_stmt *stmt;
     int rc;
     int present = 0;
+    int idx = extension_registry_index(name);
     const struct SqliteExtension *ext;
 
+    if (idx >= 0) {
+        if (db->registered_extensions & (1u << idx)) {
+            lua_pushstring(L, "present");
+            return 1;
+        }
+
+        for (ext = kSqliteExtensions; ext->name; ext++) {
+            if (strcmp(ext->name, name) == 0) {
+                char *errmsg = 0;
+                rc = ext->init(db->db, &errmsg, 0);
+                if (rc != SQLITE_OK) {
+                    lua_pushnil(L);
+                    lua_pushstring(L, errmsg ? errmsg : sqlite3_errstr(rc));
+                    lua_pushinteger(L, rc);
+                    if (errmsg) sqlite3_free(errmsg);
+                    return 3;
+                }
+                if (errmsg) sqlite3_free(errmsg);
+                db->registered_extensions |= (1u << idx);
+                lua_pushstring(L, "registered");
+                return 1;
+            }
+        }
+    }
+
+    /* Not a tracked registry row (or the registry outgrew the bitmask):
+       fall back to the pragma, which is how a compile-time module such
+       as FTS5 is actually exposed. */
     rc = sqlite3_prepare_v2(db->db,
         "SELECT 1 FROM pragma_module_list WHERE name = ?1", -1, &stmt, 0);
     if (rc != SQLITE_OK) {
@@ -1000,23 +1070,6 @@ static int db_register_extension(lua_State *L) {
     if (present) {
         lua_pushstring(L, "present");
         return 1;
-    }
-
-    for (ext = kSqliteExtensions; ext->name; ext++) {
-        if (strcmp(ext->name, name) == 0) {
-            char *errmsg = 0;
-            rc = ext->init(db->db, &errmsg, 0);
-            if (rc != SQLITE_OK) {
-                lua_pushnil(L);
-                lua_pushstring(L, errmsg ? errmsg : sqlite3_errstr(rc));
-                lua_pushinteger(L, rc);
-                if (errmsg) sqlite3_free(errmsg);
-                return 3;
-            }
-            if (errmsg) sqlite3_free(errmsg);
-            lua_pushstring(L, "registered");
-            return 1;
-        }
     }
 
     lua_pushnil(L);
@@ -2513,7 +2566,10 @@ static int lsqlite_do_open(lua_State *L, const char *filename, int flags) {
 
     if (sqlite3_open_v2(filename, &db->db, flags, 0) == SQLITE_OK) {
         /* database handle already in the stack - return it */
-        sqlite3_zipfile_init(db->db, 0, 0);
+        if (sqlite3_zipfile_init(db->db, 0, 0) == SQLITE_OK) {
+            int idx = extension_registry_index("zipfile");
+            if (idx >= 0) db->registered_extensions |= (1u << idx);
+        }
         return 1;
     }
 

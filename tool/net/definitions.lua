@@ -933,8 +933,14 @@ function lsqlite3.Database:readonly(name) end
 ---   it. Any other error code means the extension was found and its
 ---   init genuinely failed.
 ---
---- Presence is checked the same way a caller would check it directly:
---- `SELECT ... FROM pragma_module_list WHERE name = ?`.
+--- Presence of a registry row (regexp, series, zipfile) is tracked
+--- directly on the connection, not inferred from `pragma_module_list`
+--- -- that only agrees with a row's registry name for zipfile, since
+--- regexp registers SQL functions rather than a module and series's
+--- module is named `generate_series`. A name outside the registry
+--- (such as `"fts5"`, a compile-time feature with no registry row) is
+--- still checked the way a caller would check it directly: `SELECT
+--- ... FROM pragma_module_list WHERE name = ?`.
 ---@param name lsqlite3.Extension
 ---@return "registered"|"present"|nil status
 ---@return string? errormsg
