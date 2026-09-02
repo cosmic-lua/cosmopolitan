@@ -12,7 +12,7 @@
 #                                library for the lua zipfile() binding)
 #
 # both are verified by sha256 before use. after replacing the pristine
-# sources, two mechanical steps keep them buildable in this hermetic
+# sources, three mechanical steps keep them buildable in this hermetic
 # monorepo:
 #
 #   1. include paths of vendored dependencies are rewritten to full repo
@@ -22,6 +22,11 @@
 #      (windows sdk, tcl test harness, autoconf config header) are
 #      replaced with #error so enabling them without vendoring the
 #      headers fails loudly
+#   3. every registered extension whose unit is vendored from shell.c's
+#      inlined copy (extensions.c's registry, minus SRC_TREE_UNITS) is
+#      re-extracted from the new shell.c -- see extract_shell_unit()
+#      below and third_party/sqlite3/README.cosmo's EXTRACTED UNITS
+#      section for the rule
 #
 # any further deviation must be checked into patches/ as a numbered
 # patch so version bumps stay mechanical. after running, update
@@ -70,6 +75,58 @@ rewrite_includes() {
   done
 }
 
+# Units whose source is the sqlite source tree, not shell.c's inlined
+# copy -- mirrors tool/lua/test_sqlite_extensions.lua's FROM_SRC_TREE.
+SRC_TREE_UNITS=" zipfile "
+
+# Extension names from third_party/sqlite3/extensions.c's kSqliteExtensions
+# registry, in file order: rows look like {"name", sqlite3_name_init},
+registry_names() {
+  sed -n 's/^ *{"\([a-z][a-z0-9_]*\)", *sqlite3_[a-z0-9_]*_init},$/\1/p' \
+    "$DIR/extensions.c"
+}
+
+# Re-extracts third_party/sqlite3/<name>.c from shell.c's inlined
+# ext/misc/<name>.c section, by the rule
+# tool/lua/test_sqlite_extensions.lua checks each unit against: the
+# bytes between the Begin/End markers, with the commented-out
+# sqlite3ext.h include rewritten to the repo path and any
+# commented-out typedef (the shell inliner comments out redeclarations
+# that would collide with its own) restored.
+extract_shell_unit() {
+  name=$1
+  unit="$DIR/$name.c"
+  sed -n "/Begin ext\\/misc\\/$name\\.c /,/End ext\\/misc\\/$name\\.c /{
+    /Begin ext\\/misc\\/$name\\.c /d
+    /End ext\\/misc\\/$name\\.c /d
+    p
+  }" "$DIR/shell.c" >"$unit.new"
+  [ -s "$unit.new" ] || {
+    echo "update.sh: no shell.c section for ext/misc/$name.c" >&2
+    exit 1
+  }
+  n=$(grep -c '^/\* #include "sqlite3ext.h" \*/$' "$unit.new" || true)
+  [ "$n" = 1 ] || {
+    echo "update.sh: expected exactly one inlined sqlite3ext.h include" \
+      "in ext/misc/$name.c, got $n" >&2
+    exit 1
+  }
+  sed -i \
+    -e 's!^/\* #include "sqlite3ext.h" \*/$!#include "third_party/sqlite3/sqlite3ext.h"!' \
+    -e 's!^/\* \(typedef[^;]*;\) \*/$!\1!' \
+    "$unit.new"
+  mv "$unit.new" "$unit"
+}
+
+extract_shell_units() {
+  for name in $(registry_names); do
+    case "$SRC_TREE_UNITS" in
+    *" $name "*) continue ;;
+    esac
+    extract_shell_unit "$name"
+  done
+}
+
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 echo "fetching $AMALG_URL" >&2
@@ -90,4 +147,5 @@ for p in "$DIR"/patches/*.patch; do
   echo "applying $p" >&2
   patch -p1 <"$p"
 done
+extract_shell_units
 echo "done; now update $DIR/README.cosmo and rebuild" >&2
