@@ -21,6 +21,8 @@
 #include "libc/dce.h"
 #include "libc/intrin/kprintf.h"
 #include "libc/intrin/promises.h"
+#include "libc/intrin/weaken.h"
+#include "libc/mem/mem.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/at.h"
 #include "libc/sysv/consts/o.h"
@@ -49,15 +51,22 @@
  * libgcov-driver.c's read-add-write merge, __gcov_merge_add
  * semantics — so a suite of many short-lived processes accumulates
  * one file's counts across all of them instead of each exit
- * clobbering the last. A first pass reads the whole existing file
- * read-only, checking that its magic, version, stamp and checksum
- * match this object and that every function and counter record has
- * the shape this object's table predicts; only if that pass fully
- * validates does a second pass reopen the file and add its counters
- * into the live values. Any mismatch — no file, a foreign header, a
- * length or checksum that does not line up — aborts the merge with
- * the live counters untouched, so the write proceeds as if the file
- * were fresh.
+ * clobbering the last. A single pass opens the file once and reads
+ * it start to finish, checking that its magic, version, stamp and
+ * checksum match this object and that every function and counter
+ * record has the shape this object's table predicts; every on-disk
+ * counter value it reads goes into a scratch buffer, never straight
+ * into the live counters. Only once that whole read validates does a
+ * second, in-memory pass add the scratch values into the live ones —
+ * a pass over already-checked data that cannot itself fail. Any
+ * mismatch during the read — no file, a foreign header, a length or
+ * checksum that does not line up, the file being rewritten out from
+ * under us by another process mid-read — aborts the merge with the
+ * live counters untouched, so the write proceeds as if the file were
+ * fresh: nothing is ever applied until the entire file is known
+ * good, and the single open (rather than reopening the path for a
+ * second pass) closes the window where a concurrent writer could
+ * swap the file between validation and application.
  *
  * The writer opens with raw Linux flag values, so it dumps on Linux
  * and stays silent elsewhere. A process that pledged away wpath or
@@ -200,20 +209,51 @@ static bool __gcov_get32(struct GcovReader *r, gcov_unsigned_t *out) {
 }
 
 /**
+ * Counts how many gcov_type counter values info's own tables predict
+ * across every valid function and active counter kind — the exact
+ * number a matching on-disk file must carry, and so the exact size
+ * the merge scratch buffer needs. Depends only on info, never on any
+ * file, so it is stable for the whole call regardless of what a
+ * concurrent writer does to the path.
+ */
+static gcov_unsigned_t __gcov_count_values(const struct gcov_info *info) {
+  gcov_unsigned_t total = 0;
+  for (unsigned i = 0; i < info->n_functions; ++i) {
+    const struct gcov_fn_info *fn = info->functions[i];
+    if (!fn || fn->key != info)
+      continue;
+    const struct gcov_ctr_info *ctr = fn->ctrs;
+    for (unsigned t = 0; t < GCOV_COUNTERS; ++t) {
+      if (!info->merge[t])
+        continue;
+      total += ctr->num;
+      ++ctr;
+    }
+  }
+  return total;
+}
+
+/**
  * Reads one whole .gcda file already at info->filename and checks
  * that it belongs to this object: same magic, version, stamp and
  * checksum, and every function/counter record the same shape
- * info's own table predicts. With apply=false this only validates,
- * touching nothing; with apply=true it additionally adds each
- * on-disk counter into the matching live value. Returns false on
- * any mismatch — a foreign or corrupt file, treated as fresh — with
- * *runs left unset.
+ * info's own table predicts. Every on-disk counter value is written
+ * into scratch, in the same order __gcov_apply_scratch() below walks
+ * — never into a live ctr->values — so a mismatch discovered anywhere
+ * in the file, including one caused by another process rewriting it
+ * partway through this read, leaves every live counter untouched.
+ * scratch must hold at least __gcov_count_values(info) entries.
+ * Returns false on any mismatch — a foreign or corrupt file, or the
+ * file changing under us mid-read — with *runs and scratch's
+ * contents undefined.
  */
-static bool __gcov_merge_pass(const struct gcov_info *info, int fd, bool apply,
-                              gcov_unsigned_t *runs) {
+static bool __gcov_read_and_validate(const struct gcov_info *info, int fd,
+                                     gcov_type *scratch,
+                                     gcov_unsigned_t *runs) {
   struct GcovReader r = {0};
   r.fd = fd;
   gcov_unsigned_t magic, version, stamp, checksum, tag, len, sum_max;
+  unsigned k = 0;
   if (!__gcov_get32(&r, &magic) || magic != GCOV_DATA_MAGIC)
     return false;
   if (!__gcov_get32(&r, &version) || version != info->version)
@@ -264,11 +304,9 @@ static bool __gcov_merge_pass(const struct gcov_info *info, int fd, bool apply,
         gcov_unsigned_t lo, hi;
         if (!__gcov_get32(&r, &lo) || !__gcov_get32(&r, &hi))
           return false;
-        if (apply) {
-          unsigned long long bits = (unsigned long long)lo |
-                                     ((unsigned long long)hi << 32);
-          ctr->values[j] += (gcov_type)bits;
-        }
+        unsigned long long bits = (unsigned long long)lo |
+                                   ((unsigned long long)hi << 32);
+        scratch[k++] = (gcov_type)bits;
       }
       ++ctr;
     }
@@ -277,34 +315,73 @@ static bool __gcov_merge_pass(const struct gcov_info *info, int fd, bool apply,
 }
 
 /**
+ * Adds every value in scratch into its matching live counter, in the
+ * same function/counter-kind/index order __gcov_read_and_validate()
+ * above filled it. Only ever called after that whole read validated,
+ * over data already fully in memory, so unlike the read this cannot
+ * fail partway through: once __gcov_merge() decides to apply, it
+ * always applies completely.
+ */
+static void __gcov_apply_scratch(const struct gcov_info *info,
+                                 const gcov_type *scratch) {
+  unsigned k = 0;
+  for (unsigned i = 0; i < info->n_functions; ++i) {
+    const struct gcov_fn_info *fn = info->functions[i];
+    if (!fn || fn->key != info)
+      continue;
+    const struct gcov_ctr_info *ctr = fn->ctrs;
+    for (unsigned t = 0; t < GCOV_COUNTERS; ++t) {
+      if (!info->merge[t])
+        continue;
+      for (unsigned j = 0; j < ctr->num; ++j)
+        ctr->values[j] += scratch[k++];
+      ++ctr;
+    }
+  }
+}
+
+/**
  * Merges an existing .gcda at info->filename into info's live
- * counters: a read-only validating pass, then — only if that pass
- * fully matches — a second pass that adds. On success *prior_runs
- * holds the run count the file recorded, so the write that follows
- * can report one more; on any failure (no file, a pledge that
- * forbids reading, a mismatch) the live counters are untouched and
- * *prior_runs is left at 0.
+ * counters: one open, one read-and-validate pass into a scratch
+ * buffer, then — only if that pass fully matches — an in-memory
+ * apply pass that cannot itself fail. On success *prior_runs holds
+ * the run count the file recorded, so the write that follows can
+ * report one more; on any failure (no file, a pledge that forbids
+ * reading, a mismatch, an allocation failure, the file being
+ * rewritten out from under us mid-read) the live counters are
+ * untouched — never partially applied — and *prior_runs is left at
+ * 0.
  */
 static bool __gcov_merge(const struct gcov_info *info,
                          gcov_unsigned_t *prior_runs) {
   if (!PLEDGED(RPATH))
     return false;
+  gcov_unsigned_t total = __gcov_count_values(info);
+  gcov_type *scratch = 0;
+  if (total) {
+    if (!_weaken(malloc))
+      return false;
+    scratch = _weaken(malloc)((size_t)total * sizeof(gcov_type));
+    if (!scratch)
+      return false;
+  }
   int fd = __sys_openat(AT_FDCWD, info->filename, O_RDONLY, 0);
-  if (fd < 0)
+  if (fd < 0) {
+    if (_weaken(free))
+      _weaken(free)(scratch);
     return false;
+  }
   gcov_unsigned_t runs = 0;
-  bool ok = __gcov_merge_pass(info, fd, false, &runs);
+  bool ok = __gcov_read_and_validate(info, fd, scratch, &runs);
   sys_close(fd);
-  if (!ok)
+  if (!ok) {
+    if (_weaken(free))
+      _weaken(free)(scratch);
     return false;
-  fd = __sys_openat(AT_FDCWD, info->filename, O_RDONLY, 0);
-  if (fd < 0)
-    return false;
-  gcov_unsigned_t runs2 = 0;
-  ok = __gcov_merge_pass(info, fd, true, &runs2);
-  sys_close(fd);
-  if (!ok)
-    return false;
+  }
+  __gcov_apply_scratch(info, scratch);
+  if (_weaken(free))
+    _weaken(free)(scratch);
   *prior_runs = runs;
   return true;
 }
@@ -385,8 +462,9 @@ void __gcov_exit(void) {
  * Referenced from every gcov_info's merge table so gcc's generated
  * code links; the address is only ever a non-null marker for "this
  * counter kind is active" here, checked via info->merge[t] — the
- * actual merge is __gcov_merge_pass() above, which reads and adds
- * counter records directly rather than calling through this pointer.
+ * actual merge is __gcov_read_and_validate()/__gcov_apply_scratch()
+ * above, which read and add counter records directly rather than
+ * calling through this pointer.
  */
 void __gcov_merge_add(gcov_type *counters, gcov_unsigned_t n) {
 }
