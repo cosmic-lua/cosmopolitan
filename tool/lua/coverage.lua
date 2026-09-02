@@ -29,7 +29,11 @@
 -- Trace line: `FUN <pid> <tid> <ticks> <depth> <name>`; pid and tid
 -- carry ANSI colour, so the name is taken as the last whitespace field.
 -- Optimizer clones (`db_do_rows.isra.0`, `lsqlite_checkdb.constprop.0`)
--- are folded onto their function on both sides of the intersection.
+-- are folded onto their function on both sides of the intersection. Some
+-- clones carry no numeric suffix (`LuaUnixDup.cold`): a cold partition has
+-- no patchable entry, so it never appears in a FUN line, but it is still a
+-- `t` symbol nm lists on its own -- folded into its parent so it does not
+-- inflate `defined` with a row that can never be covered.
 --
 -- Inlining caveat: this runs on the binary the test target already
 -- builds, and in the default mode that binary is compiled at -O2, so a
@@ -184,6 +188,7 @@ local function fold_clone(name)
       or name:match("^(.+)%.constprop%.%d+$")
       or name:match("^(.+)%.part%.%d+$")
       or name:match("^(.+)%.cold%.%d+$")
+      or name:match("^(.+)%.cold$")
     if base == nil then
       return name
     end
