@@ -549,12 +549,16 @@ end
 --
 -- Depth rule: at bracket depth 0 of the type region -- outside any `()`,
 -- `{}`, `<>` -- whitespace is what ENDS the type (a name or description
--- follows it), so a `|` there must be followed immediately by a type
--- character: `integer| cols` is a dangling bar with the slot name after it,
--- not a two-member union. Inside a bracketed group the closing bracket
--- delimits instead and whitespace around `|` is part of the type
--- (`(integer | string)?`). This is exactly how cosmic's gentype tokenizes
--- the same text, so the gate refuses what the generator would refuse.
+-- follows it), so a `|` there must sit flush against both members:
+-- `integer| cols` is a dangling bar with the slot name after it, not a
+-- two-member union, and `integer |nil rows` is the bare type `integer`
+-- with `|nil rows` read as its name -- the nil silently dropped. The same
+-- rule holds for a fun(...)'s return colon: `fun() : integer` ends the type
+-- at `fun()`, so the colon must follow the closing paren directly. Inside a
+-- bracketed group the closing bracket delimits instead and whitespace
+-- around `|` or before `:` is part of the type (`(integer | string)?`).
+-- This is exactly how cosmic's gentype tokenizes the same text, so the
+-- gate refuses what the generator would drop.
 -- Every parse_* below takes `grouped` = true when parsing inside a group.
 do
   local parse_union
@@ -620,7 +624,11 @@ do
         depth = depth - 1
         if depth == 0 then
           local rest = s:sub(k + 1)
-          local colon = rest:match("^%??%s*:%s*")
+          -- Depth rule: at depth 0 the colon must follow the `)` (or `)?`)
+          -- directly; whitespace there would end the type before the return
+          -- annotation, so refuse rather than leave it as the name.
+          if not grouped and rest:match("^%??%s+:") then return nil end
+          local colon = rest:match(grouped and "^%??%s*:%s*" or "^%??:%s*")
           if colon then
             rest = rest:sub(#colon + 1)
             if rest:match("^%.%.%.") then
@@ -705,10 +713,10 @@ do
     s = parse_postfix(s, grouped)
     if not s then return nil end
     while s:match("^%s*|") do
-      -- Depth rule: whitespace after the bar is skipped only inside a
-      -- group; at depth 0 the next member must start right after the `|`,
-      -- so parse_postfix sees the whitespace (or the end) and refuses it.
-      s = s:gsub(grouped and "^%s*|%s*" or "^%s*|", "")
+      -- Depth rule: whitespace around the bar is skipped only inside a
+      -- group. At depth 0 only a flush `|` is stripped, so whitespace on
+      -- either side of it reaches parse_postfix, which refuses it.
+      s = s:gsub(grouped and "^%s*|%s*" or "^|", "")
       s = parse_postfix(s, grouped)
       if not s then return nil end
     end
@@ -738,9 +746,13 @@ do
     { "(true|nil | string)", true },
     { "table<string, integer|nil>", true },
     { "fun(fd: integer): integer|nil", true },
+    { "(integer |nil)", true },
+    { "fun(): integer", true },
     { "integer| cols", false },
+    { "integer |nil rows", false },
     { "integer|", false },
     { "fun(fd: integer): integer| nil", false },
+    { "fun() : integer", false },
     { "nil,|nil string", false },
   }
   for _, fx in ipairs(TYPE_FIXTURES) do
