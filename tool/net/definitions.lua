@@ -603,6 +603,16 @@ function lsqlite3.version() end
 ---@return integer? errorcode
 function lsqlite3.config(option, func, udata) end
 
+--- Lists the SQLite ext/misc extensions linked into this build (the
+--- registry in `third_party/sqlite3/extensions.c`), so a caller can
+--- discover what a fat binary carries at runtime instead of guessing
+--- from a version number. A name here means the extension is
+--- available, not that any connection has it registered -- pass one
+--- of these names to `db:register_extension()` to register it.
+---@return lsqlite3.Extension[] names
+---@nodiscard
+function lsqlite3.extensions() end
+
 --- The context passed to a user-defined SQL function: its aggregate state
 --- and the slot its result is returned through.
 ---@class lsqlite3.Context: userdata
@@ -903,6 +913,40 @@ function lsqlite3.Database:prepare(sql) end
 ---@return string? error
 ---@nodiscard
 function lsqlite3.Database:readonly(name) end
+
+--- Registers a linked SQLite ext/misc extension (see `lsqlite3.extensions()`
+--- for the names this build carries) on this connection, by name.
+---
+--- Distinguishes three outcomes instead of collapsing them into a
+--- boolean, because a fat binary's carried extensions are a runtime
+--- property a caller cannot assume from a version number:
+---
+--- - `"registered"`: `name` was in the registry and not yet a module on
+---   this connection; its init ran just now.
+--- - `"present"`: `name` is already a registered module on this
+---   connection -- a compile-time feature such as FTS5, which cannot be
+---   registered and does not need to be, or an extension a prior call
+---   (or the open path's own default registration) already registered.
+---   Nothing was done, and nothing needed to be.
+--- - `nil` plus an error message and `lsqlite3.NOTFOUND`: `name` is
+---   neither present nor in the registry -- this build does not carry
+---   it. Any other error code means the extension was found and its
+---   init genuinely failed.
+---
+--- Presence of a registry row (regexp, series, zipfile) is tracked
+--- directly on the connection, not inferred from `pragma_module_list`
+--- -- that only agrees with a row's registry name for zipfile, since
+--- regexp registers SQL functions rather than a module and series's
+--- module is named `generate_series`. A name outside the registry
+--- (such as `"fts5"`, a compile-time feature with no registry row) is
+--- still checked the way a caller would check it directly: `SELECT
+--- ... FROM pragma_module_list WHERE name = ?`.
+---@param name lsqlite3.Extension
+---@return "registered"|"present"|nil status
+---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
+---@nodiscard
+function lsqlite3.Database:register_extension(name) end
 
 --- This function installs a rollback_hook callback handler.
 --- See: `db:commit_hook` and `db:update_hook`
