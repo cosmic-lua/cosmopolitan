@@ -83,6 +83,16 @@ evidence a board item may link, never duplicate.
   is the error — an annotation that deviates is a bug, and a contract
   change to conform is made deliberately (`definitions.lua` same
   commit, conformance probe same PR), never inside another change.
+  Slot 3 defaults to `errno`, but a binding with no syscall in play —
+  a parser refusing its input rather than an OS call failing — may
+  carry a different, still-documented slot 3 instead:
+  `cosmo.DecodeLua`'s is the 1-based byte offset the refusal happened
+  at, not `unix.Errno`, kept out of slot 2's message so a caller that
+  wants a line number counts newlines up to the offset once, on the
+  refusal path, rather than the binding counting them on every parse.
+  Such a deviation is a per-binding exception recorded in its
+  `definitions.lua` `@return` doc, never a silent drift from the
+  archetype.
 
 ## Releases and the cosmic pin
 
