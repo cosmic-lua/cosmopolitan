@@ -254,6 +254,10 @@ o/$(MODE)/tool/lua/test_sqlite_prepare_error.ok: o/$(MODE)/tool/lua/lua.dbg tool
 	$< tool/lua/test_sqlite_prepare_error.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_sqlite_deterministic.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_sqlite_deterministic.lua
+	$< tool/lua/test_sqlite_deterministic.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_jsonorg_fail.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_jsonorg_fail.lua
 	$< tool/lua/test_jsonorg_fail.lua
 	@touch $@
@@ -422,6 +426,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_sqlite_open_error.ok			\
 	o/$(MODE)/tool/lua/test_sqlite_config_error.ok			\
 	o/$(MODE)/tool/lua/test_sqlite_prepare_error.ok		\
+	o/$(MODE)/tool/lua/test_sqlite_deterministic.ok		\
 	o/$(MODE)/tool/lua/test_jsonorg_fail.ok				\
 	o/$(MODE)/tool/lua/test_jsonorg_pass.ok				\
 	o/$(MODE)/tool/lua/test_jsontestsuite_fail1.ok			\

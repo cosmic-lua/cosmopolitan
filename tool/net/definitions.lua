@@ -712,6 +712,11 @@ function lsqlite3.Database:commit_hook(func, udata) end
 ---@param final fun(ctx: lsqlite3.Context) a function that is called once after all rows have been processed.
 --- It receives one argument, the function context.
 ---@param userdata? any If provided, userdata can be any Lua value and would be returned by the `context:user_data()` method.
+---@param deterministic? boolean If `true`, the function is registered with `SQLITE_DETERMINISTIC`,
+--- which lets it appear in an index on an expression and in a partial index `WHERE` clause,
+--- and lets SQLite evaluate it once instead of once per row. Default `false` (volatile).
+--- This is a promise SQLite holds you to: a function marked deterministic that returns
+--- different results for the same arguments produces wrong query results, not an error.
 ---
 --- The function context can be used inside the two callback functions to
 --- communicate with SQLite3. Here is a simple example:
@@ -740,7 +745,7 @@ function lsqlite3.Database:commit_hook(func, udata) end
 ---     Sum of col 2:   66
 ---
 ---@return boolean success
-function lsqlite3.Database:create_aggregate(name, nargs, step, final, userdata) end
+function lsqlite3.Database:create_aggregate(name, nargs, step, final, userdata, deterministic) end
 
 --- This creates a collation callback. A collation callback is used to establish
 --- a collation order, mostly for string comparisons and sorting purposes.
@@ -776,6 +781,11 @@ function lsqlite3.Database:create_collation(name, func) end
 --- It should accept a function context (see Methods for callback contexts) plus
 --- the same number of parameters as given in `nargs`.
 ---@param userdata? any If provided, userdata can be any Lua value and would be returned by the `context:user_data()` method.
+---@param deterministic? boolean If `true`, the function is registered with `SQLITE_DETERMINISTIC`,
+--- which lets it appear in an index on an expression and in a partial index `WHERE` clause,
+--- and lets SQLite evaluate it once instead of once per row. Default `false` (volatile).
+--- This is a promise SQLite holds you to: a function marked deterministic that returns
+--- different results for the same arguments produces wrong query results, not an error.
 --- Here is an example:
 ---
 ---     db:exec'CREATE TABLE test(col1,col2,col3)'
@@ -790,7 +800,7 @@ function lsqlite3.Database:create_collation(name, func) end
 ---     end
 ---
 ---@return boolean success
-function lsqlite3.Database:create_function(name, nargs, func, userdata) end
+function lsqlite3.Database:create_function(name, nargs, func, userdata, deterministic) end
 
 ---@return string? filename associated with database `name` of connection `db`.
 ---@nodiscard

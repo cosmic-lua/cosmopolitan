@@ -1091,8 +1091,18 @@ static void db_sql_finalize_function(sqlite3_context *context) {
 
 /*
 ** Register a normal function
-** Params: db, function name, number arguments, [ callback | step, finalize], user data
+** Params: db, function name, number arguments, [ callback | step, finalize],
+**         user data, deterministic
 ** Returns: true on success
+**
+** `deterministic` is an optional boolean, default false. When true the
+** function is registered with SQLITE_DETERMINISTIC, which lets it appear
+** in an index on an expression, in a partial index WHERE clause, and be
+** factored out of a loop instead of re-evaluated per row. It is a promise
+** the caller makes and SQLite holds it to: a function marked deterministic
+** that returns different values for the same arguments yields wrong query
+** results, not an error. Anything other than nil/none/boolean is an
+** argument error.
 **
 ** Normal function:
 ** Params: context, params
@@ -1105,6 +1115,7 @@ static int db_register_function(lua_State *L, int aggregate) {
     sdb *db = lsqlite_checkdb(L, 1);
     const char *name;
     int args;
+    int flags;
     int result;
     sdb_func *func;
 
@@ -1116,6 +1127,13 @@ static int db_register_function(lua_State *L, int aggregate) {
     luaL_checktype(L, 4, LUA_TFUNCTION);
     if (aggregate) luaL_checktype(L, 5, LUA_TFUNCTION);
 
+    /* optional deterministic flag sits after the user data slot */
+    flags = SQLITE_UTF8;
+    if (!lua_isnoneornil(L, 6 + aggregate)) {
+        luaL_checktype(L, 6 + aggregate, LUA_TBOOLEAN);
+        if (lua_toboolean(L, 6 + aggregate)) flags |= SQLITE_DETERMINISTIC;
+    }
+
     /* maybe an alternative way to allocate memory should be used/avoided */
     func = (sdb_func*)malloc(sizeof(sdb_func));
     if (func == NULL) {
@@ -1123,7 +1141,7 @@ static int db_register_function(lua_State *L, int aggregate) {
     }
 
     result = sqlite3_create_function(
-        db->db, name, args, SQLITE_UTF8, func,
+        db->db, name, args, flags, func,
         aggregate ? NULL : db_sql_normal_function,
         aggregate ? db_sql_normal_function : NULL,
         aggregate ? db_sql_finalize_function : NULL
