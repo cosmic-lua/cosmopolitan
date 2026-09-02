@@ -63,11 +63,13 @@ assert(lua_dbg and nm and outdir and floor_path and arg[5],
 
 local TRACE_LINE_CAP = 8000000
 
+-- Every test spawned below inherits this: it tells a test that its own
+-- --ftrace trace writes are in flight, for the rare case (pledge tests
+-- that revoke stdio) where that fact changes what a child may safely do
+-- without weakening what the test asserts. See test_unix_misc.lua.
+unix.setenv("COVERAGE_FTRACE", "1", true)
+
 local SKIP = {
-  ["tool/lua/test_unix_misc.lua"] =
-    "forks a child that pledges \"\" (no stdio) and exits; under --ftrace " ..
-    "the child's own trace write is the pledge violation, SIGSYS kills it, " ..
-    "and the parent's wait-status assertion fails",
   ["tool/lua/test_definitions_conformance.lua"] =
     "pure-Lua source parser; every VM-internal C call is traced, ~28 MB/s " ..
     "of trace with no bound in sight (25 GB written without finishing)",
