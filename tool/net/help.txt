@@ -3929,7 +3929,7 @@ UNIX MODULE
     calling bind() at all, since the above behavior is the default.
 
   unix.siocgifconf()
-      ├─→ {{name:str,ip:uint32,netmask:uint32}, ...}
+      ├─→ unix.IfAddr[]
       └─→ nil, error:str, errno:int
 
     Returns list of network adapter addresses.
