@@ -55,7 +55,7 @@ local function main()
          end
          Write('<dt>Payload\r\n')
          Write('<dd><pre>')
-         Write(EscapeHtml(VisualizeControlCodes(payload)))
+         Write(EscapeHtml(payload))
          Write('</pre>\r\n')
          Write('</dl>\r\n')
       else
@@ -63,7 +63,7 @@ local function main()
          WriteForm(GetParam('url'))
          Write('<h3>Error</h3>\n')
          Write('<p>')
-         Write(EscapeHtml(VisualizeControlCodes(err)))
+         Write(EscapeHtml(err))
       end
    else
       ServeError(405)
