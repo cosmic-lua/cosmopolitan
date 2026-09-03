@@ -1049,8 +1049,9 @@ function lsqlite3.Database:urows(sql) end
 
 ---@param mode integer?
 ---@param name string?
----@return integer|nil nlog, integer nckpt
----@return string? errormsg
+---@return integer|nil nlog
+---@return integer|string nckpt total number of frames in the log file on
+--- success, or the error message on failure
 ---@return lsqlite3.ResultCode? errno
 function lsqlite3.Database:wal_checkpoint(mode, name) end
 
@@ -5278,8 +5279,9 @@ function unix.mkdtemp(template) end
 ---     unix.unlink(result.path)
 ---
 ---@param template string template path ending in XXXXXX
----@return integer|nil fd, unix.MkstempPath path
----@return string? error
+---@return integer|nil fd
+---@return unix.MkstempPath|string path the created file's path on success, or
+--- the error string on failure
 ---@return unix.Errno? errno
 function unix.mkstemp(template) end
 
@@ -8051,9 +8053,12 @@ function unix.Dir:close() end
 --- Note: This function also serves as the `__call` metamethod, so that
 --- `unix.Dir` objects may be used as a for loop iterator.
 ---
----@return string|nil name, integer kind, integer ino, integer off
----@return string? error
----@return unix.Errno? errno
+---@return string|nil name
+---@return integer|string kind directory entry type on success, or the error
+--- string on failure
+---@return integer|unix.Errno ino inode number on success, or the errno on
+--- failure
+---@return integer off
 ---@nodiscard
 function unix.Dir:read() end
 
