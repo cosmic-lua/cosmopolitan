@@ -14,6 +14,9 @@ const struct SqliteExtension kSqliteExtensions[] = {
     {"series", sqlite3_series_init},
     {"sha", sqlite3_sha_init},
     {"shathree", sqlite3_shathree_init},
+    {"sqlar", sqlite3_sqlar_init},
+    {"stmtrand", sqlite3_stmtrand_init},
+    {"uint", sqlite3_uint_init},
     {"zipfile", sqlite3_zipfile_init},
     {0, 0},
 };

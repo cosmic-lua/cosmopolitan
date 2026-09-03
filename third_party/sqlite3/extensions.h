@@ -18,6 +18,9 @@ int sqlite3_regexp_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_series_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_sha_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_shathree_init(sqlite3 *, char **, const sqlite3_api_routines *);
+int sqlite3_sqlar_init(sqlite3 *, char **, const sqlite3_api_routines *);
+int sqlite3_stmtrand_init(sqlite3 *, char **, const sqlite3_api_routines *);
+int sqlite3_uint_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_zipfile_init(sqlite3 *, char **, const sqlite3_api_routines *);
 
 /*

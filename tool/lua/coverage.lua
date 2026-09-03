@@ -102,6 +102,11 @@ local SKIP = {
   ["tool/lua/test_definitions_help.lua"] =
     "pure-Lua source parser, no bindings called; ~28 MB/s of trace, past " ..
     "400 MB in 15 s",
+  ["tool/lua/test_sqlite_extensions.lua"] =
+    "pure-Lua source parser, no bindings called; byte-for-byte re-checks " ..
+    "each registered unit's extraction against shell.c's 37k-line source " ..
+    "(measured 2026-09-03, 11 units registered: 10.1M FUN lines, past " ..
+    "TRACE_LINE_CAP, with no binding call in sight)",
 }
 
 local tests, skipped = {}, {}
