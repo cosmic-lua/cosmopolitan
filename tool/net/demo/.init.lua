@@ -75,7 +75,7 @@ function OnHttpRequest()
     if GetHeader('User-Agent') then
         Log(kLogInfo, "client is running %s and reports %s" % {
                 finger.GetSynFingerOs(finger.FingerSyn(syn)),
-                VisualizeControlCodes(GetHeader('User-Agent'))})
+                GetHeader('User-Agent')})
     end
     if HasParam('magic') then
         Write('<p>\r\n')

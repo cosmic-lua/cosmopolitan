@@ -1806,12 +1806,6 @@ FUNCTIONS
           reset at the end of the http request, so it can be used to disable
           access log and message logging.
 
-  VisualizeControlCodes(str) → str
-          Replaces C0 control codes and trojan source characters with
-          descriptive UNICODE pictorial representation. This function
-          also canonicalizes overlong encodings. C1 control codes are
-          replaced with a JavaScript-like escape sequence.
-
   Underlong(str) → str
           Canonicalizes overlong encodings.
 
