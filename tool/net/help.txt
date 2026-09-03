@@ -2969,7 +2969,7 @@ UNIX MODULE
     those numbers.
 
   unix.pipe([flags:int])
-      ├─→ reader:int, writer:int
+      ├─→ unix.Pipe
       └─→ nil, error:str, errno:int
 
     Creates fifo which enables communication between processes.
@@ -2984,26 +2984,26 @@ UNIX MODULE
       as they're no larger than `PIPE_BUF` (guaranteed to be 512+ bytes)
       with support limited to Linux, Windows NT, FreeBSD, and NetBSD.
 
-    Returns two file descriptors: one for reading and one for writing.
+    Returns one `unix.Pipe` table with `reader` and `writer` fields.
 
     Here's an example of how pipe(), fork(), dup(), etc. may be used
     to serve an HTTP response containing the output of a subprocess.
 
         local unix = require "unix"
         ls = assert(unix.commandv("ls"))
-        reader, writer = assert(unix.pipe())
+        pipe = assert(unix.pipe())
         if assert(unix.fork()) == 0 then
            unix.close(1)
-           unix.dup(writer)
-           unix.close(writer)
-           unix.close(reader)
+           unix.dup(pipe.writer)
+           unix.close(pipe.writer)
+           unix.close(pipe.reader)
            unix.execve(ls, {ls, "-Shal"})
            unix.exit(127)
         else
-           unix.close(writer)
+           unix.close(pipe.writer)
            SetHeader('Content-Type', 'text/plain')
            while true do
-              data, err, errno = unix.read(reader)
+              data, err, errno = unix.read(pipe.reader)
               if data then
                  if data ~= "" then
                     Write(data)
@@ -3015,7 +3015,7 @@ UNIX MODULE
                  break
               end
            end
-           assert(unix.close(reader))
+           assert(unix.close(pipe.reader))
            assert(unix.wait())
         end
 
@@ -4378,11 +4378,15 @@ UNIX MODULE
     system call. `mask` specifies which signals should be blocked.
 
   unix.setitimer(which[, intervalsec, intns, valuesec, valuens])
-      ├─→ intervalsec:int, intervalns:int, valuesec:int, valuens:int
+      ├─→ unix.Itimerval
       └─→ nil, error:str, errno:int
 
     Causes `SIGALRM` signals to be generated at some point(s) in the
     future. The `which` parameter should be `ITIMER_REAL`.
+
+    Returns one `unix.Itimerval` table with `intervalsec`, `intervalns`,
+    `valuesec`, and `valuens` fields, describing the timer's previous
+    setting.
 
     Here's an example of how to create a 400 ms interval timer:
 
@@ -4454,10 +4458,11 @@ UNIX MODULE
     `hard` defaults to whatever was specified in `soft`.
 
   unix.getrlimit(resource:int)
-      ├─→ soft:int, hard:int
+      ├─→ unix.Rlimit
       └─→ nil, error:str, errno:int
 
-    Returns information about resource limits for current process.
+    Returns one `unix.Rlimit` table with `soft` and `hard` fields,
+    describing resource limits for current process.
 
   unix.getrusage([who:int])
       ├─→ unix.Rusage
@@ -5183,7 +5188,8 @@ UNIX MODULE
 
   unix.Dir:read()
       ├─→ name:str, kind:int, ino:int, off:int
-      └─→ nil
+      ├─→ nil
+      └─→ nil, error:str, errno:int
 
     Reads entry from directory stream.
 
