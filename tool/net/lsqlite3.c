@@ -150,6 +150,37 @@ static int log_udata;
 ** =======================================================
 */
 
+/*
+** Maps a SQLite runtime type constant (SQLITE_INTEGER, _FLOAT, _TEXT,
+** _BLOB, _NULL) to the same lowercase name SQLite's own typeof() SQL
+** function returns for that value, and pushes it onto the Lua stack.
+** This is the runtime type -- what the value actually is right now --
+** distinct from the declared schema type get_type()/get_named_types()
+** report, which SQLite's dynamic typing can disagree with.
+*/
+static void push_sqlite_typename(lua_State *L, int type) {
+    switch (type) {
+        case SQLITE_INTEGER:
+            lua_pushliteral(L, "integer");
+            break;
+        case SQLITE_FLOAT:
+            lua_pushliteral(L, "real");
+            break;
+        case SQLITE_TEXT:
+            lua_pushliteral(L, "text");
+            break;
+        case SQLITE_BLOB:
+            lua_pushliteral(L, "blob");
+            break;
+        case SQLITE_NULL:
+            lua_pushliteral(L, "null");
+            break;
+        default:
+            lua_pushliteral(L, "unknown");
+            break;
+    }
+}
+
 static void vm_push_column(lua_State *L, sqlite3_stmt *vm, int idx) {
     switch (sqlite3_column_type(vm, idx)) {
         case SQLITE_INTEGER:
@@ -354,6 +385,19 @@ static int dbvm_get_type(lua_State *L) {
     int index = luaL_checknumber(L, 2);
     dbvm_check_index(L, svm, index);
     lua_pushstring(L, sqlite3_column_decltype(svm->vm, index));
+    return 1;
+}
+
+/* the runtime type of column n's current value (SQLITE_INTEGER, _FLOAT,
+** _TEXT, _BLOB or _NULL) -- unlike get_type()'s declared schema type,
+** this is what lets a caller tell a BLOB apart from TEXT that happens
+** to hold the same bytes. */
+static int dbvm_column_type(lua_State *L) {
+    sdb_vm *svm = lsqlite_checkvm(L, 1);
+    int index = luaL_checkint(L, 2);
+    dbvm_check_contents(L, svm);
+    dbvm_check_index(L, svm, index);
+    push_sqlite_typename(L, sqlite3_column_type(svm->vm, index));
     return 1;
 }
 
@@ -721,6 +765,11 @@ static sdb *lsqlite_checkdb(lua_State *L, int index) {
 typedef struct {
     sqlite3_context *ctx;
     int ud;
+    /* the raw argument values for the call in progress, so value_type()
+    ** can report an argument's runtime type; valid only for the
+    ** duration of that call, like ctx above. */
+    sqlite3_value **argv;
+    int argc;
 } lcontext;
 
 static lcontext *lsqlite_make_context(lua_State *L) {
@@ -729,6 +778,8 @@ static lcontext *lsqlite_make_context(lua_State *L) {
     lua_setmetatable(L, -2);
     ctx->ctx = NULL;
     ctx->ud = LUA_NOREF;
+    ctx->argv = NULL;
+    ctx->argc = 0;
     return ctx;
 }
 
@@ -783,6 +834,20 @@ static int lcontext_set_aggregate_context(lua_State *L) {
     luaL_unref(L, LUA_REGISTRYINDEX, ctx->ud);
     ctx->ud = luaL_ref(L, LUA_REGISTRYINDEX);
     return 0;
+}
+
+/* the runtime type of argument n (1-based, matching the function's own
+** call signature `function(ctx, arg1, arg2, ...)`) -- the value itself
+** already arrived as a plain Lua value indistinguishable between BLOB
+** and TEXT, so a UDF that needs to tell them apart calls this. */
+static int lcontext_value_type(lua_State *L) {
+    lcontext *ctx = lsqlite_checkcontext(L, 1);
+    int n = luaL_checkint(L, 2);
+    if (n < 1 || n > ctx->argc) {
+        luaL_error(L, "argument index (%d) out of range [1..%d]", n, ctx->argc);
+    }
+    push_sqlite_typename(L, sqlite3_value_type(ctx->argv[n - 1]));
+    return 1;
 }
 
 #if 0
@@ -1162,6 +1227,8 @@ static void db_sql_normal_function(sqlite3_context *context, int argc, sqlite3_v
 
     /* set context */
     ctx->ctx = context;
+    ctx->argv = argv;
+    ctx->argc = argc;
 
     if (lua_pcall(L, argc + 1, 0, 0)) {
         const char *errmsg = lua_tostring(L, -1);
@@ -1171,6 +1238,8 @@ static void db_sql_normal_function(sqlite3_context *context, int argc, sqlite3_v
 
     /* invalidate context */
     ctx->ctx = NULL;
+    ctx->argv = NULL;
+    ctx->argc = 0;
 
     if (!func->aggregate) {
         luaL_unref(L, LUA_REGISTRYINDEX, ctx->ud);
@@ -2056,6 +2125,48 @@ static int liter_conflict(lua_State *L) {
     return liter_table(L, sqlite3changeset_conflict);
 }
 
+/* the runtime type of column n (1-based, matching the array old()/
+** new()/conflict() themselves return) of the value iter_func reaches
+** -- same BLOB/TEXT ambiguity db_push_value has, same fix: a separate
+** call the caller makes only when it needs to tell them apart. Pushes
+** `false`, matching liter_table, for a column iter_func reports as not
+** part of this record. */
+static int liter_value_type(
+        lua_State *L,
+        int (*iter_func)(sqlite3_changeset_iter *pIter, int val, sqlite3_value **ppValue)
+) {
+    const char *zTab;
+    int n, rc, nCol, Op, bIndirect;
+    sqlite3_value *pVal;
+    liter *litr = lsqlite_checkiter(L, 1);
+    n = luaL_checkint(L, 2);
+    sqlite3changeset_op(litr->itr, &zTab, &nCol, &Op, &bIndirect);
+    if (n < 1 || n > nCol) {
+        luaL_error(L, "index (%d) out of range [1..%d]", n, nCol);
+    }
+    if ((rc = (*iter_func)(litr->itr, n - 1, &pVal)) != SQLITE_OK) {
+        return pusherr(L, rc);
+    }
+    if (!pVal) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    push_sqlite_typename(L, sqlite3_value_type(pVal));
+    return 1;
+}
+
+static int liter_new_value_type(lua_State *L) {
+    return liter_value_type(L, sqlite3changeset_new);
+}
+
+static int liter_old_value_type(lua_State *L) {
+    return liter_value_type(L, sqlite3changeset_old);
+}
+
+static int liter_conflict_value_type(lua_State *L) {
+    return liter_value_type(L, sqlite3changeset_conflict);
+}
+
 static int liter_op(lua_State *L) {
     const char *zTab;
     int rc, nCol, Op, bIndirect;
@@ -2878,6 +2989,7 @@ static const luaL_Reg vmlib[] = {
     {"get_names",           dbvm_get_names          },
     {"get_type",            dbvm_get_type           },
     {"get_types",           dbvm_get_types          },
+    {"column_type",         dbvm_column_type        },
     {"get_uvalues",         dbvm_get_uvalues        },
     {"get_unames",          dbvm_get_unames         },
     {"get_utypes",          dbvm_get_utypes         },
@@ -2909,6 +3021,8 @@ static const luaL_Reg ctxlib[] = {
 
     {"get_aggregate_data",      lcontext_get_aggregate_context  },
     {"set_aggregate_data",      lcontext_set_aggregate_context  },
+
+    {"value_type",              lcontext_value_type             },
 
     {"result",                  lcontext_result                 },
     {"result_null",             lcontext_result_null            },
@@ -2955,6 +3069,9 @@ static const luaL_Reg itrlib[] = {
     {"old",             liter_old               },
     {"next",            liter_next              },
     {"conflict",        liter_conflict          },
+    {"new_value_type",      liter_new_value_type      },
+    {"old_value_type",      liter_old_value_type      },
+    {"conflict_value_type", liter_conflict_value_type },
     {"finalize",        liter_finalize          },
     {"fk_conflicts",    liter_fk_conflicts      },
 

@@ -627,6 +627,17 @@ function lsqlite3.Context:get_aggregate_data() end
 --- Set the user-definable data field for callback funtions to `udata`.
 function lsqlite3.Context:set_aggregate_data(udata) end
 
+--- The runtime type of argument `n` (1-based, matching the callback's own
+--- `function(ctx, arg1, arg2, ...)` signature): `"integer"`, `"real"`,
+--- `"text"`, `"blob"`, or `"null"` -- the same names SQLite's own
+--- `typeof()` SQL function returns. The argument itself arrives as a
+--- plain Lua value in which a BLOB and TEXT holding identical bytes are
+--- indistinguishable; call this to tell them apart.
+---@param n integer
+---@return string
+---@nodiscard
+function lsqlite3.Context:value_type(n) end
+
 --- Sets the result of a callback function to `res`. The type of the result
 --- depends on the type of `res` and is either a number or a string or `nil`.
 --- All other values will raise an error message.
@@ -1166,6 +1177,17 @@ function lsqlite3.Statement:get_types() end
 ---@nodiscard
 function lsqlite3.Statement:itypes() end
 
+--- The runtime type of column n's current value in the result row:
+--- `"integer"`, `"real"`, `"text"`, `"blob"`, or `"null"` -- the same
+--- names SQLite's own `typeof()` SQL function returns. Unlike
+--- `get_type()`'s declared schema type, this is what lets a caller
+--- tell a BLOB apart from TEXT holding identical bytes. (The
+--- left-most column is number 0.)
+---@param n integer
+---@return string
+---@nodiscard
+function lsqlite3.Statement:column_type(n) end
+
 ---@return string ... the names of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:get_unames() end
@@ -1331,6 +1353,16 @@ function lsqlite3.VM:get_types() end
 ---@return string[]
 ---@nodiscard
 function lsqlite3.VM:itypes() end
+
+--- The runtime type of column n's current value in the result row:
+--- `"integer"`, `"real"`, `"text"`, `"blob"`, or `"null"` -- the same
+--- names SQLite's own `typeof()` SQL function returns. Unlike
+--- `get_type()`'s declared schema type, this is what lets a caller
+--- tell a BLOB apart from TEXT holding identical bytes.
+---@param index integer
+---@return string
+---@nodiscard
+function lsqlite3.VM:column_type(index) end
 
 ---@return string ...
 ---@nodiscard
