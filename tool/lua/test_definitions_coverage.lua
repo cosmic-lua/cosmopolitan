@@ -191,12 +191,7 @@ local C_unix = slurp("third_party/lua/cosmo/lunix.c")
 local C_path = slurp("tool/net/lpath.c")
 local C_re = slurp("tool/net/lre.c")
 local C_argon2 = slurp("tool/net/largon2.c")
--- Session/changeset/rebaser support is compiled out (tool/net/BUILD.mk no
--- longer defines SQLITE_ENABLE_SESSION), so strip those #ifdef blocks before
--- scanning: the seslib/reblib/itrlib tables, the dblib session methods, and
--- the CHANGESET_* constants they guard are not part of the shipped surface.
-local C_sqlite = (slurp("tool/net/lsqlite3.c")
-  :gsub("#ifdef SQLITE_ENABLE_SESSION.-\n#endif\n", ""))
+local C_sqlite = slurp("tool/net/lsqlite3.c")
 local C_getopt = slurp("tool/net/lgetopt.c")
 local C_zip = slurp("tool/net/lzip.c")
 local C_cov = slurp("tool/net/lcov.c")
@@ -231,10 +226,7 @@ for name in C_re:gmatch('{"([%u][%w_]*)"%s*,%s*REG_') do
   re_consts[name] = true
 end
 
--- lsqlite3 constants: SC(NAME) rows in sqlite_constants[]. The session rows
--- (CHANGESET_*/CHANGESETSTART_*/CHANGESETAPPLY_*) are guarded by
--- #ifdef SQLITE_ENABLE_SESSION, which this build no longer defines and which
--- was stripped from C_sqlite above, so they're absent here.
+-- lsqlite3 constants: SC(NAME) rows in sqlite_constants[].
 local sqlite_consts = {}
 for name in C_sqlite:gmatch("SC%(%s*([%u][%w_]*)%s*%)") do
   sqlite_consts[name] = true
