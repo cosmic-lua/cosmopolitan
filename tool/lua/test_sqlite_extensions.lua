@@ -40,6 +40,14 @@ local FROM_SRC_TREE = {
   zipfile = true,
 }
 
+-- Units whose shell.c ext/misc/<stem>.c marker names a different stem than
+-- the registry name (shell.c's own source file name, not what we call the
+-- extension).
+local MARKER_STEM = {
+  ieee = "ieee754",
+  sha = "sha1",
+}
+
 -- ---- the registry -------------------------------------------------------
 
 local C = slurp(REGISTRY)
@@ -136,7 +144,8 @@ for i, name in ipairs(names) do
     -- shell.c brackets each inlined unit with
     --   /***...*** Begin ext/misc/<name>.c ***...***/
     --   /***...*** End ext/misc/<name>.c ***...***/
-    local marker = "ext/misc/" .. name .. ".c"
+    local stem = MARKER_STEM[name] or name
+    local marker = "ext/misc/" .. stem .. ".c"
     local pat = marker:gsub("%p", "%%%0")
     local _, b = S:find("\n/%*+ Begin " .. pat .. " %*+/\n")
     assert(b, SHELL .. ": no Begin marker for " .. marker)
