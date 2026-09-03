@@ -5325,7 +5325,7 @@ function unix.rmdir(path, dirfd) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(oldpath: string, newpath: string): true
+---@overload fun(oldpath: string, newpath: string): true|nil, string?, unix.Errno?
 function unix.rename(oldpath, newpath, olddirfd, newdirfd) end
 
 ---Creates hard link, so your underlying inode has two names.
@@ -5337,8 +5337,8 @@ function unix.rename(oldpath, newpath, olddirfd, newdirfd) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(existingpath: string, newpath: string, flags?: integer): true
----@overload fun(existingpath: string, newpath: string, flags: integer, olddirfd: integer, newdirfd: integer): true
+---@overload fun(existingpath: string, newpath: string, flags?: integer): true|nil, string?, unix.Errno?
+---@overload fun(existingpath: string, newpath: string, flags: integer, olddirfd: integer, newdirfd: integer): true|nil, string?, unix.Errno?
 function unix.link(existingpath, newpath, flags, olddirfd, newdirfd) end
 
 --- Creates symbolic link.
@@ -5670,11 +5670,11 @@ function unix.rmrf(path) end
 ---@return string? error
 ---@return unix.Errno? errno
 ---@overload fun(fd: integer, unix.F_GETFD: integer): flags: integer
----@overload fun(fd: integer, unix.F_SETFD: integer, flags: integer): true
+---@overload fun(fd: integer, unix.F_SETFD: integer, flags: integer): true|nil, string?, unix.Errno?
 ---@overload fun(fd: integer, unix.F_GETFL: integer): flags: integer
----@overload fun(fd: integer, unix.F_SETFL: integer, flags: integer): true
----@overload fun(fd: integer, unix.F_SETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true
----@overload fun(fd: integer, unix.F_SETLKW: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true
+---@overload fun(fd: integer, unix.F_SETFL: integer, flags: integer): true|nil, string?, unix.Errno?
+---@overload fun(fd: integer, unix.F_SETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true|nil, string?, unix.Errno?
+---@overload fun(fd: integer, unix.F_SETLKW: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true|nil, string?, unix.Errno?
 ---@overload fun(fd: integer, unix.F_GETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): unix.F_UNLCK: integer
 ---@overload fun(fd: integer, unix.F_GETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): type: integer, start: integer, len: integer, whence: integer, pid: integer
 function unix.fcntl(fd, cmd, ...) end
@@ -6230,7 +6230,7 @@ function unix.socketpair(family, type, protocol) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(fd: integer, unixpath: string): true
+---@overload fun(fd: integer, unixpath: string): true|nil, string?, unix.Errno?
 function unix.bind(fd, ip, port) end
 
 --- One network interface's IPv4 addressing, as returned in the array
@@ -6493,8 +6493,8 @@ function unix.getsockopt(fd, level, optname) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_LINGER: integer, secs:integer, enabled:boolean): true
----@overload fun(serverfd:integer, unix.SOL_TCP: integer, unix.TCP_SAVE_SYN: integer, enabled:integer): true
+---@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_LINGER: integer, secs:integer, enabled:boolean): true|nil, string?, unix.Errno?
+---@overload fun(serverfd:integer, unix.SOL_TCP: integer, unix.TCP_SAVE_SYN: integer, enabled:integer): true|nil, string?, unix.Errno?
 function unix.setsockopt(fd, level, optname, value) end
 
 --- Checks for events on a set of file descriptors.
@@ -6620,7 +6620,7 @@ function unix.accept(serverfd, flags) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(fd:integer, unixpath:string): true
+---@overload fun(fd:integer, unixpath:string): true|nil, string?, unix.Errno?
 function unix.connect(fd, ip, port) end
 
 --- Retrieves the local address of a socket.
@@ -7291,7 +7291,7 @@ function unix.pledge(promises, execpromises, mode) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(path: nil, permissions: nil): true
+---@overload fun(path: nil, permissions: nil): true|nil, string?, unix.Errno?
 function unix.unveil(path, permissions) end
 
 --- Broken-down time returned by `gmtime`/`localtime`.
