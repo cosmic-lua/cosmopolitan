@@ -47,6 +47,9 @@ THIRD_PARTY_SQLITE3_A_SRCS =					\
 	third_party/sqlite3/extensions.c			\
 	third_party/sqlite3/regexp.c				\
 	third_party/sqlite3/series.c				\
+	third_party/sqlite3/sqlar.c				\
+	third_party/sqlite3/stmtrand.c				\
+	third_party/sqlite3/uint.c				\
 	third_party/sqlite3/zipfile.c				\
 	third_party/sqlite3/sqlite3.shell.c			\
 	third_party/sqlite3/shell.c
@@ -56,6 +59,9 @@ THIRD_PARTY_SQLITE3_A_OBJS =					\
 	o/$(MODE)/third_party/sqlite3/extensions.o		\
 	o/$(MODE)/third_party/sqlite3/regexp.o			\
 	o/$(MODE)/third_party/sqlite3/series.o			\
+	o/$(MODE)/third_party/sqlite3/sqlar.o			\
+	o/$(MODE)/third_party/sqlite3/stmtrand.o			\
+	o/$(MODE)/third_party/sqlite3/uint.o			\
 	o/$(MODE)/third_party/sqlite3/zipfile.o
 
 THIRD_PARTY_SQLITE3_SHELL_OBJS =				\
