@@ -101,7 +101,9 @@ local rb_ok, rb_err = pcall(cosmo.GetRandomBytes, 0)
 assert(not rb_ok, "GetRandomBytes(0) should be rejected")
 
 -- lsqlite3: the exec/execute, errcode/error_code, errmsg/error_message dual
--- aliases were collapsed to one name each; session/changeset/rebaser is gone.
+-- aliases were collapsed to one name each; session/changeset/rebaser was
+-- never wired to a real build (SQLITE_ENABLE_SESSION was never defined for
+-- lsqlite3.o) and its ~600 lines of #ifdef'd bindings were removed outright.
 local db = assert(lsqlite3.open_memory())
 assert(type(db.exec) == "function", "db:exec should exist")
 assert(db.execute == nil, "db:execute alias should be removed")
