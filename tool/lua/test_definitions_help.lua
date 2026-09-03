@@ -24,10 +24,11 @@
 -- definitions.lua declares the same contract as @return annotations, and
 -- only the annotations are read by anything downstream, so both copies
 -- drift silently whenever a contract changes shape. This test compares
--- each copy against definitions.lua at the level those changes actually
--- move: whether the call is fallible. Deliberately count-level, not
--- per-slot type -- the parser stays trivial and the drift class is still
--- caught.
+-- each copy against definitions.lua at two levels: whether the call is
+-- fallible, and, when the success value definitions.lua declares is a
+-- `unix.*` class or array, whether that class name appears in the
+-- copy's own first branch. Still deliberately not a full per-slot
+-- parse -- the parser stays trivial and the drift class is still caught.
 --
 --   * a shape block is fallible when it carries a FAILURE branch, a line
 --     whose first value is `nil` (`└─→ nil, error:str, errno:int`). That
@@ -40,6 +41,16 @@
 --     of its annotation block admits nil (`integer|nil`, `nil`, `T?`),
 --     the fork's rule that slot 1 admitting nil makes slot 2 the error.
 --     No `@return` at all is an infallible call with no result.
+--   * a shape block's slot-1 class agrees with definitions.lua when the
+--     first `@return`'s type, stripped of a trailing `|nil` or `?`,
+--     appears verbatim (plain substring, no pattern matching) in the
+--     copy's own first branch -- checked only when that stripped type
+--     starts with `unix.` (a record such as `unix.Pipe`, or an array
+--     such as `unix.IfAddr[]`). A primitive slot 1 (`integer|nil
+--     clientfd, ...`) is compared only for fallibility, never for its
+--     literal spelling -- free-form doc prose for the multi-value
+--     exception this fork's AGENTS.md documents (`accept`,
+--     `getsockname`, `recvfrom`, ...).
 --
 -- The two sources differ only in the prefix every line carries: two
 -- spaces in help.txt, `// ` in lunix.c. Under that prefix a signature
@@ -53,11 +64,10 @@
 -- a bullet -- so the signature's own leading whitespace is captured and
 -- every line of its block must carry it. Several signatures stacked
 -- directly above one block share it, and a branch-indent line opening
--- with `│` continues the branch above it (`unix.uname`'s table wraps).
--- A signature with no block below it documents no shape and is not
--- compared, and neither is `unix.fork`, whose tree-shaped block
--- (`├─┬─→`, then `│`-led lines) is consumed and skipped in both
--- sources.
+-- with `│` continues the branch above it. A signature with no block
+-- below it documents no shape and is not compared, and neither is
+-- `unix.fork`, whose tree-shaped block (`├─┬─→`, then `│`-led lines)
+-- is consumed and skipped in both sources.
 --
 -- A line opening with a shape glyph (`├─→`, `└─→`, `│`, `├─┬─→`) that
 -- belongs to no block -- its indent is not the four-space step below
@@ -130,6 +140,18 @@ end
 local function def_is_fallible(slot1)
   return slot1 == "nil" or slot1:match("|nil%f[^%w_]") ~= nil or
     slot1:match("^nil|") ~= nil or slot1:match("%?$") ~= nil
+end
+
+-- `slot1` with a trailing `|nil` or `?` stripped -- the type a success
+-- returns, independent of whether the call is fallible. `unix.Pipe|nil`
+-- and `unix.Pipe?` both become `unix.Pipe`; `unix.IfAddr[]|nil` becomes
+-- `unix.IfAddr[]`.
+local function def_slot1_class(slot1)
+  local class = slot1:match("^(.-)|nil$")
+  if not class then
+    class = slot1:match("^(.-)%?$")
+  end
+  return class or slot1
 end
 
 -- Every documented unix.* shape block in `text`, whose lines all carry
@@ -288,6 +310,14 @@ for _, source in ipairs(SOURCES) do
             " declares " .. says .. " (" .. #block.branches .. " branch" ..
             (#block.branches == 1 and "" or "es") ..
             "), definitions.lua declares " .. def_says .. " (" .. decl .. ")")
+        end
+        local class = def_slot1_class(slot1)
+        if class:match("^unix%.") then
+          local first = block.branches[1].shape
+          if not first:find(class, 1, true) then
+            fail(where .. " unix." .. name .. ": first branch reads \"" ..
+              first .. "\", definitions.lua declares slot 1 as " .. slot1)
+          end
         end
       end
     end

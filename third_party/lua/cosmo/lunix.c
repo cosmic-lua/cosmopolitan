@@ -1031,7 +1031,7 @@ static int LuaUnixPrctl(lua_State *L) {
 }
 
 // unix.capget([pid:int])
-//     ├─→ caps:table
+//     ├─→ unix.Caps
 //     └─→ nil, error:str, errno:int
 //
 // Returns the calling thread's (or `pid`'s) capability sets as a table
@@ -1313,7 +1313,7 @@ static int LuaUnixRaise(lua_State *L) {
 }
 
 // unix.wait([pid:int, options:int])
-//     ├─→ result:table
+//     ├─→ unix.WaitResult
 //     └─→ nil, error:str, errno:int
 static int LuaUnixWait(lua_State *L) {
   struct rusage ru;
@@ -1694,8 +1694,8 @@ static int LuaUnixGettime(lua_State *L) {
 }
 
 // unix.nanosleep(seconds:int[, nanos:int])
-//     ├─→ remaining:table
-//     └─→ nil, error:str, errno:int[, remaining:table]
+//     ├─→ unix.SleepRemainder
+//     └─→ nil, error:str, errno:int[, remaining:unix.SleepRemainder]
 //
 // The success value and the EINTR remainder used to be two positional
 // integers each (remseconds, remnanos), which put the failure path's
@@ -1985,7 +1985,7 @@ static int LuaUnixStatfs(lua_State *L) {
 }
 
 // unix.fstatfs(fd:int)
-//     ├─→ unix.Stat
+//     ├─→ unix.Statfs
 //     └─→ nil, error:str, errno:int
 static int LuaUnixFstatfs(lua_State *L) {
   struct statfs f;
@@ -2267,7 +2267,7 @@ static int LuaUnixGetpeername(lua_State *L) {
 }
 
 // unix.siocgifconf()
-//     ├─→ {{name:str,ip:uint32,netmask:uint32}, ...}
+//     ├─→ unix.IfAddr[]
 //     └─→ nil, error:str, errno:int
 static int LuaUnixSiocgifconf(lua_State *L) {
   size_t n;
@@ -2684,7 +2684,7 @@ static void LuaUnixOnSignal(int sig, siginfo_t *si, void *ctx) {
 }
 
 // unix.sigaction(sig:int[, handler:func|int[, flags:int[, mask:unix.Sigset]]])
-//     ├─→ previous:table
+//     ├─→ unix.SignalAction
 //     └─→ nil, error:str, errno:int
 static int LuaUnixSigaction(lua_State *L) {
   sigset_t *mask;
@@ -2795,7 +2795,7 @@ static int LuaUnixSigpending(lua_State *L) {
 }
 
 // unix.setitimer(which[, intervalsec, intns, valuesec, valuens])
-//     ├─→ previous:table
+//     ├─→ unix.Itimerval
 //     └─→ nil, error:str, errno:int
 static int LuaUnixSetitimer(lua_State *L) {
   int which, olderr = errno;
@@ -2983,7 +2983,7 @@ static int LuaUnixTiocgwinsz(lua_State *L) {
 }
 
 // unix.tcgetattr(fd:int)
-//     ├─→ termios:table
+//     ├─→ unix.Termios
 //     └─→ nil, error:str, errno:int
 static int LuaUnixTcgetattr(lua_State *L) {
   struct termios tio;
@@ -4375,8 +4375,7 @@ static int LuaUnixSysconf(lua_State *L) {
 }
 
 // unix.uname()
-//     ├─→ {sysname:str, nodename:str, release:str,
-//     │    version:str, machine:str, domainname:str}
+//     ├─→ unix.Uname
 //     └─→ nil, error:str, errno:int
 //
 // Returns identity of the current operating system as a table.
