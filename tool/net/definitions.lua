@@ -537,7 +537,7 @@ lsqlite3 = {
 --- the registry in `third_party/sqlite3/extensions.c`, whose init is
 --- `sqlite3_<name>_init`. A name here means the extension is available,
 --- not that any connection has it registered.
----@alias lsqlite3.Extension "regexp"|"series"|"sqlar"|"stmtrand"|"uint"|"zipfile"
+---@alias lsqlite3.Extension "decimal"|"fileio"|"ieee"|"regexp"|"series"|"sha"|"shathree"|"sqlar"|"stmtrand"|"uint"|"zipfile"
 
 --- Opens (or creates if it does not exist) an SQLite database with name filename
 --- and returns its handle as userdata (the returned object should be used for all

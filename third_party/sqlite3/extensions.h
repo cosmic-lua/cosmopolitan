@@ -11,8 +11,13 @@ COSMOPOLITAN_C_START_
  * only when something calls its init on that connection.
  */
 
+int sqlite3_decimal_init(sqlite3 *, char **, const sqlite3_api_routines *);
+int sqlite3_fileio_init(sqlite3 *, char **, const sqlite3_api_routines *);
+int sqlite3_ieee_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_regexp_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_series_init(sqlite3 *, char **, const sqlite3_api_routines *);
+int sqlite3_sha_init(sqlite3 *, char **, const sqlite3_api_routines *);
+int sqlite3_shathree_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_sqlar_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_stmtrand_init(sqlite3 *, char **, const sqlite3_api_routines *);
 int sqlite3_uint_init(sqlite3 *, char **, const sqlite3_api_routines *);
