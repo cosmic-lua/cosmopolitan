@@ -17,6 +17,8 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                               │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #ifdef MODE_COV
+#include "libc/calls/calls.h"
+#include "libc/calls/struct/flock.h"
 #include "libc/calls/syscall-sysv.internal.h"
 #include "libc/dce.h"
 #include "libc/intrin/kprintf.h"
@@ -25,6 +27,7 @@
 #include "libc/mem/mem.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/at.h"
+#include "libc/sysv/consts/f.h"
 #include "libc/sysv/consts/o.h"
 
 /**
@@ -46,33 +49,42 @@
  * a counter is two int32 words low first, and a record's length is a
  * byte count.
  *
- * Before writing, __gcov_write() tries to read back whatever is
- * already at info->filename and add its counters to the live ones —
- * libgcov-driver.c's read-add-write merge, __gcov_merge_add
- * semantics — so a suite of many short-lived processes accumulates
- * one file's counts across all of them instead of each exit
- * clobbering the last. A single pass opens the file once and reads
- * it start to finish, checking that its magic, version, stamp and
- * checksum match this object and that every function and counter
- * record has the shape this object's table predicts; every on-disk
- * counter value it reads goes into a scratch buffer, never straight
- * into the live counters. Only once that whole read validates does a
- * second, in-memory pass add the scratch values into the live ones —
- * a pass over already-checked data that cannot itself fail. Any
- * mismatch during the read — no file, a foreign header, a length or
- * checksum that does not line up, the file being rewritten out from
- * under us by another process mid-read — aborts the merge with the
- * live counters untouched, so the write proceeds as if the file were
- * fresh: nothing is ever applied until the entire file is known
- * good, and the single open (rather than reopening the path for a
- * second pass) closes the window where a concurrent writer could
- * swap the file between validation and application.
+ * __gcov_write() opens info->filename once, O_RDWR|O_CREAT with no
+ * O_TRUNC, and takes a whole-file F_SETLKW write lock on that one fd
+ * before touching the file — every instrumented process runs under
+ * make -j and every one of them writes the same .gcda per object, so
+ * the open-merge-truncate-write sequence below is a critical section
+ * and the lock is what makes it one: a second process's F_SETLKW
+ * blocks until the first's fd (and so its lock) is closed, so no two
+ * processes ever read or write the file at once. Only then does it
+ * try to read back whatever is already there and add its counters to
+ * the live ones — libgcov-driver.c's read-add-write merge,
+ * __gcov_merge_add semantics — so a suite of many short-lived
+ * processes accumulates one file's counts across all of them instead
+ * of each exit clobbering the last. A single read pass over the
+ * locked fd checks that the file's magic, version, stamp and checksum
+ * match this object and that every function and counter record has
+ * the shape this object's table predicts; every on-disk counter value
+ * it reads goes into a scratch buffer, never straight into the live
+ * counters. Only once that whole read validates does a second,
+ * in-memory pass add the scratch values into the live ones — a pass
+ * over already-checked data that cannot itself fail. Any mismatch
+ * during the read — no file yet, a foreign header, a length or
+ * checksum that does not line up — aborts the merge with the live
+ * counters untouched, so the write proceeds as if the file were
+ * fresh: nothing is ever applied until the entire file is known good.
+ * With the lock held for the whole pass, such a mismatch can only
+ * mean a foreign or corrupt file — never another process's write
+ * landing mid-read, which the lock now rules out — and the same fd is
+ * then truncated to zero, seeked back to the start and rewritten,
+ * still under the lock; closing it is what releases the lock.
  *
  * The writer opens with raw Linux flag values, so it dumps on Linux
- * and stays silent elsewhere. A process that pledged away wpath or
- * cpath cannot create the file, and on Linux the attempt would be
- * killed with SIGSYS rather than refused, so such a process dumps
- * nothing: its counts are dropped, and its exit status is its own.
+ * and stays silent elsewhere. A process that pledged away wpath,
+ * cpath or flock cannot both create the file and lock it, and on
+ * Linux the attempt would be killed with SIGSYS rather than refused,
+ * so such a process dumps nothing: its counts are dropped, and its
+ * exit status is its own.
  *
  * gcc's __gcov_fork and __gcov_exec* wrappers are deliberately absent:
  * the instrumented objects are compiled with -fno-builtin on those
@@ -234,18 +246,18 @@ static gcov_unsigned_t __gcov_count_values(const struct gcov_info *info) {
 }
 
 /**
- * Reads one whole .gcda file already at info->filename and checks
- * that it belongs to this object: same magic, version, stamp and
- * checksum, and every function/counter record the same shape
- * info's own table predicts. Every on-disk counter value is written
- * into scratch, in the same order __gcov_apply_scratch() below walks
- * — never into a live ctr->values — so a mismatch discovered anywhere
- * in the file, including one caused by another process rewriting it
- * partway through this read, leaves every live counter untouched.
- * scratch must hold at least __gcov_count_values(info) entries.
- * Returns false on any mismatch — a foreign or corrupt file, or the
- * file changing under us mid-read — with *runs and scratch's
- * contents undefined.
+ * Reads one whole .gcda file already at fd, the object's own locked
+ * file, and checks that it belongs to this object: same magic,
+ * version, stamp and checksum, and every function/counter record the
+ * same shape info's own table predicts. Every on-disk counter value
+ * is written into scratch, in the same order __gcov_apply_scratch()
+ * below walks — never into a live ctr->values — so a mismatch
+ * discovered anywhere in the file leaves every live counter
+ * untouched. scratch must hold at least __gcov_count_values(info)
+ * entries. Returns false on any mismatch — a foreign or corrupt file,
+ * never a concurrent writer, since the caller holds fd's whole-file
+ * lock for the entire read — with *runs and scratch's contents
+ * undefined.
  */
 static bool __gcov_read_and_validate(const struct gcov_info *info, int fd,
                                      gcov_type *scratch,
@@ -341,21 +353,18 @@ static void __gcov_apply_scratch(const struct gcov_info *info,
 }
 
 /**
- * Merges an existing .gcda at info->filename into info's live
- * counters: one open, one read-and-validate pass into a scratch
- * buffer, then — only if that pass fully matches — an in-memory
- * apply pass that cannot itself fail. On success *prior_runs holds
- * the run count the file recorded, so the write that follows can
- * report one more; on any failure (no file, a pledge that forbids
- * reading, a mismatch, an allocation failure, the file being
- * rewritten out from under us mid-read) the live counters are
- * untouched — never partially applied — and *prior_runs is left at
- * 0.
+ * Merges whatever is already at fd — the object's own locked file,
+ * positioned at its start — into info's live counters: one
+ * read-and-validate pass into a scratch buffer, then — only if that
+ * pass fully matches — an in-memory apply pass that cannot itself
+ * fail. On success *prior_runs holds the run count the file recorded,
+ * so the write that follows can report one more; on any failure (an
+ * empty file, a mismatch, an allocation failure) the live counters
+ * are untouched — never partially applied — and *prior_runs is left
+ * at 0. Does not touch fd's lock or lifetime; the caller owns both.
  */
-static bool __gcov_merge(const struct gcov_info *info,
+static bool __gcov_merge(const struct gcov_info *info, int fd,
                          gcov_unsigned_t *prior_runs) {
-  if (!PLEDGED(RPATH))
-    return false;
   gcov_unsigned_t total = __gcov_count_values(info);
   gcov_type *scratch = 0;
   if (total) {
@@ -365,15 +374,8 @@ static bool __gcov_merge(const struct gcov_info *info,
     if (!scratch)
       return false;
   }
-  int fd = __sys_openat(AT_FDCWD, info->filename, O_RDONLY, 0);
-  if (fd < 0) {
-    if (_weaken(free))
-      _weaken(free)(scratch);
-    return false;
-  }
   gcov_unsigned_t runs = 0;
   bool ok = __gcov_read_and_validate(info, fd, scratch, &runs);
-  sys_close(fd);
   if (!ok) {
     if (_weaken(free))
       _weaken(free)(scratch);
@@ -386,16 +388,40 @@ static bool __gcov_merge(const struct gcov_info *info,
   return true;
 }
 
+/**
+ * Writes info's counters to its .gcda, merged with whatever is
+ * already there. Opens info->filename once, O_RDWR|O_CREAT with no
+ * O_TRUNC, and takes a whole-file F_SETLKW write lock on that fd
+ * before reading or writing a byte — every other process racing this
+ * one on the same path blocks in its own F_SETLKW until this fd (and
+ * so this lock) closes, so the merge-then-rewrite below runs as one
+ * critical section no other writer can interleave with. A process
+ * that pledged away wpath, cpath or flock cannot safely take that
+ * lock and returns before opening anything, exactly like the missing
+ * wpath/cpath case in __gcov_exit() below: its counts are dropped.
+ */
 static void __gcov_write(const struct gcov_info *info) {
-  gcov_unsigned_t prior_runs = 0;
-  __gcov_merge(info, &prior_runs);
-  struct GcovFile f = {0};
-  f.fd = __sys_openat(AT_FDCWD, info->filename,
-                      O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (f.fd < 0) {
-    kprintf("gcov: %s: open failed: %d\n", info->filename, -f.fd);
+  if (!PLEDGED(FLOCK))
+    return;
+  int fd = __sys_openat(AT_FDCWD, info->filename, O_RDWR | O_CREAT, 0644);
+  if (fd < 0) {
+    kprintf("gcov: %s: open failed: %d\n", info->filename, -fd);
     return;
   }
+  struct flock lock = {0};
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  if (__sys_fcntl(fd, F_SETLKW, &lock) == -1) {
+    kprintf("gcov: %s: lock failed\n", info->filename);
+    sys_close(fd);
+    return;
+  }
+  gcov_unsigned_t prior_runs = 0;
+  __gcov_merge(info, fd, &prior_runs);
+  sys_ftruncate(fd, 0, 0);
+  sys_lseek(fd, 0, SEEK_SET, 0);
+  struct GcovFile f = {0};
+  f.fd = fd;
   __gcov_put32(&f, GCOV_DATA_MAGIC);
   __gcov_put32(&f, info->version);
   __gcov_put32(&f, info->stamp);
