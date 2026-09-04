@@ -33,18 +33,6 @@ if syn then
       Write('<dd>')
       Write(EscapeHtml(EncodeLua(syn)))
       Write('\r\n')
-      Write('<dt>finger.FingerSyn(syn)\r\n')
-      Write('<dd>')
-      Write(EscapeHtml(EncodeLua(finger.FingerSyn(syn))))
-      Write('\r\n')
-      Write('<dt>finger.DescribeSyn(syn)\r\n')
-      Write('<dd>')
-      Write(EscapeHtml(EncodeLua(finger.DescribeSyn(syn))))
-      Write('\r\n')
-      Write('<dt>finger.GetSynFingerOs(finger.FingerSyn(syn))\r\n')
-      Write('<dd>')
-      Write(EscapeHtml(EncodeLua(finger.GetSynFingerOs(finger.FingerSyn(syn)))))
-      Write('\r\n')
       Write('</dl>\r\n')
    else
       Write([[
