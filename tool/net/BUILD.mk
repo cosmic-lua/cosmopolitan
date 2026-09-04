@@ -154,7 +154,6 @@ o/$(MODE)/tool/net/demo/fetch.lua.zip.o					\
 o/$(MODE)/tool/net/demo/finger.lua.zip.o				\
 o/$(MODE)/tool/net/demo/call-lua-module.lua.zip.o			\
 o/$(MODE)/tool/net/demo/store-asset.lua.zip.o				\
-o/$(MODE)/tool/net/demo/maxmind.lua.zip.o				\
 o/$(MODE)/tool/net/demo/redbean.lua.zip.o				\
 o/$(MODE)/tool/net/demo/opensource.lua.zip.o				\
 o/$(MODE)/tool/net/demo/hitcounter.lua.zip.o				\
@@ -202,7 +201,6 @@ o/$(MODE)/tool/net/redbean-demo.dbg:					\
 		o/$(MODE)/tool/net/demo/store-asset.lua.zip.o		\
 		o/$(MODE)/tool/net/demo/call-lua-module.lua.zip.o	\
 		o/$(MODE)/tool/net/demo/redbean.lua.zip.o		\
-		o/$(MODE)/tool/net/demo/maxmind.lua.zip.o		\
 		o/$(MODE)/tool/net/demo/opensource.lua.zip.o		\
 		o/$(MODE)/tool/net/demo/hitcounter.lua.zip.o		\
 		o/$(MODE)/tool/net/demo/binarytrees.lua.zip.o		\
