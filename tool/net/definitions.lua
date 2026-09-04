@@ -520,8 +520,6 @@ lsqlite3 = {
     --- truncates the log file before returning. See `db:wal_checkpoint`.
     CHECKPOINT_TRUNCATE = nil,
 
-    -- Session / Changeset Constants
-
 }
 
 --- SQLite result/status code (the OK/ERROR/BUSY/DONE/ROW/... family
