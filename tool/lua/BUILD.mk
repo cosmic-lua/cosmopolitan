@@ -519,9 +519,18 @@ $(TOOL_LUA_LUA_MODULES): private				\
 # here. This mode measures lines with gcov instead.
 TOOL_LUA_TESTS := $(filter-out %/test_coverage.ok,$(TOOL_LUA_TESTS))
 
-# The writer never merges: every process that exits rewrites the file
-# whole. So a test run starts from no .gcda at all, and every test
-# reruns, so what is left afterwards was written by this run.
+# Regression test for the __gcov_write lock (libc/intrin/gcov.c):
+# parallel processes writing the same object's .gcda must merge, never
+# drop each other's counts.
+o/$(MODE)/tool/lua/test_gcda_merge.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_gcda_merge.lua
+	$< tool/lua/test_gcda_merge.lua
+	@touch $@
+TOOL_LUA_TESTS += o/$(MODE)/tool/lua/test_gcda_merge.ok
+
+# Every test process merges its counts into the shared .gcda for each
+# object it touches, so this clean exists so a run's counts are only
+# this run's: it deletes every .gcda before any test runs, and every
+# test reruns, so what is left afterwards reflects only this run.
 .PHONY: o/$(MODE)/tool/lua/gcda.clean
 o/$(MODE)/tool/lua/gcda.clean:
 	find o/$(MODE) -name '*.gcda' -delete
