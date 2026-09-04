@@ -493,6 +493,7 @@ afr:close()
 -- Cleanup
 --------------------------------------------------------------------------------
 
-os.execute("rm -rf " .. tmpdir)
+assert(unix.rmrf(tmpdir))
+assert(not unix.stat(tmpdir), "tmpdir should not exist after cleanup")
 
 print("PASS")

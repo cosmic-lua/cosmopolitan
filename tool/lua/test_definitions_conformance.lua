@@ -251,6 +251,7 @@ probe("path.basename", path.basename, "/a/b/c.tl")
 probe("path.dirname", path.dirname, "/a/b/c.tl")
 probe("path.join", path.join, "a", "b")
 probe("unix.getpid", unix.getpid)
+probe("unix.getpgrp", unix.getpgrp)
 probe("unix.clock_gettime", unix.clock_gettime)
 
 -- --- the pure surface -------------------------------------------------
@@ -315,19 +316,24 @@ assert(rxbad == nil and type(rxerr) == "string",
   "re.compile of a bad pattern must be nil, string")
 local rx = probe("re.compile", re.compile, "a(b)c")
 
-local sv, scaps = probe("re.search", re.search, "a(b)c", "abc")
-assert(sv == "abc" and type(scaps) == "table", "re.search must match")
+local sr = probe("re.search", re.search, "a(b)c", "abc")
+assert(sr.match == "abc" and type(sr.captures) == "table", "re.search must match")
 probe("re.search", re.search, "[", "x")
 
--- the compiled-Regex methods: a match fills every declared slot, which
--- is how #247's phantom third return would have been caught here
-probe("re.Regex:search", rx.search, rx, "abc")
-probe("re.Regex:match", rx.match, rx, "abc")
+-- the compiled-Regex methods: a match fills the declared re.SearchMatch
+-- slot, which is how #247's phantom third return would have been caught
+-- here
+local rss = probe("re.Regex:search", rx.search, rx, "abc")
+assert(rss.match == "abc" and type(rss.captures) == "table",
+  "re.Regex:search must match")
+local rsm = probe("re.Regex:match", rx.match, rx, "abc")
+assert(rsm.match == "abc" and type(rsm.captures) == "table",
+  "re.Regex:match must match")
 probe("re.Regex:find", rx.find, rx, "abc")
 
-local gv, gerr = probe("getopt.parse", getopt.parse, "not-a-table", "h")
-assert(gv == nil and type(gerr) == "string",
-  "getopt.parse with a non-table argv must be nil, string")
+-- getopt.parse raises on a malformed call (an argument-shape error), so
+-- unlike re.compile/re.search above it has no nil+error slot to force;
+-- only its success path is probed here.
 probe("getopt.parse", getopt.parse, { "prog", "-h" }, "h")
 
 -- These two have a real second slot the C can push but no test can
@@ -446,7 +452,7 @@ local CONST_MODULES = {
 -- absent at runtime. A RATCHET: an entry may only be removed. Anything else
 -- that goes missing is a binding that silently vanished, and fails below.
 local CONST_ABSENT = {
-  ["unix.WCONTINUED"] = "#ifdef WCONTINUED in third_party/lua/lunix.c",
+  ["unix.WCONTINUED"] = "#ifdef WCONTINUED in third_party/lua/cosmo/lunix.c",
 }
 
 local nconst, nabsent = 0, 0
@@ -493,6 +499,23 @@ local SLOT_UNPROBED = {
   -- file tried; the arity check confirms the C can push two, so the
   -- slot is real and the probe is the missing half.
   ["cosmo.Strftime #2"] = true,
+  -- re.Regex:search/:match's error slot is LuaReSearchImpl's
+  -- regexec() failure branch (REG_ESPACE), which third_party/regex
+  -- only returns on an allocation failure -- unreachable from Lua
+  -- once a pattern has already compiled. re.search's own error slot
+  -- IS probed above (a bad pattern fails at compile time, before
+  -- LuaReSearchImpl runs), so this gap is specific to the two
+  -- already-compiled-object methods.
+  ["re.Regex:search #2"] = true,
+  ["re.Regex:match #2"] = true,
+  -- re.Regex:find's error slot only fires on a genuine regexec()
+  -- failure (REG_ESPACE: out of memory, or the backtracking matcher's
+  -- stack exhausted) against an already-compiled, valid regex_t --
+  -- unlike re.compile's bad-pattern probe above, no pattern or input
+  -- this file can construct forces that deterministically. The slot
+  -- is real: LuaReFindImpl shares LuaReReturnError with re.compile's
+  -- demonstrated nil, err path.
+  ["re.Regex:find #2"] = true,
 }
 
 local nslots, nslotallow = 0, 0

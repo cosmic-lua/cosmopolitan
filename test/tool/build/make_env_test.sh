@@ -8,7 +8,7 @@
 # jobserver handshake and recursion state survive.
 #
 # The property downstream depends on is "a hostile caller variable does
-# not reach a recipe". That is gated in whilp/cosmic, one pin bump away
+# not reach a recipe". That is gated in cosmic-lua/cosmic, one pin bump away
 # from the code that implements it — so a regression here stays green in
 # this repo and surfaces there as a mysterious hermeticity failure. This
 # is the same gate, next to the implementation.

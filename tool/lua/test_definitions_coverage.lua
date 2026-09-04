@@ -10,7 +10,7 @@
 --
 -- Covered modules (see MODULES below):
 --   * cosmo      tool/lua/lcosmo.c            kCosmoFuncs[]
---   * unix       third_party/lua/lunix.c      kLuaUnix[] + constants + methods
+--   * unix       third_party/lua/cosmo/lunix.c      kLuaUnix[] + constants + methods
 --   * path       tool/net/lpath.c             kLuaPath[]
 --   * re         tool/net/lre.c               kLuaRe[] + constants + methods
 --   * argon2     tool/net/largon2.c           largon2[]
@@ -18,7 +18,7 @@
 --   * getopt     tool/net/lgetopt.c           kLuaGetopt[]
 --   * zip        tool/net/lzip.c              kLuaZip[] + Reader/Writer/Appender
 --   * cov        tool/net/lcov.c              kLuaCov[]
---   * repl       third_party/lua/lreplmod.c   kReplFuncs[]
+--   * repl       third_party/lua/cosmo/lreplmod.c   kReplFuncs[]
 --
 -- unix constants are registered two ways, both covered here:
 --   * literal LuaSetIntField(L, "NAME", ...) calls, and
@@ -187,20 +187,15 @@ end
 
 -- ===== per-module registered surfaces =====
 
-local C_unix = slurp("third_party/lua/lunix.c")
+local C_unix = slurp("third_party/lua/cosmo/lunix.c")
 local C_path = slurp("tool/net/lpath.c")
 local C_re = slurp("tool/net/lre.c")
 local C_argon2 = slurp("tool/net/largon2.c")
--- Session/changeset/rebaser support is compiled out (tool/net/BUILD.mk no
--- longer defines SQLITE_ENABLE_SESSION), so strip those #ifdef blocks before
--- scanning: the seslib/reblib/itrlib tables, the dblib session methods, and
--- the CHANGESET_* constants they guard are not part of the shipped surface.
-local C_sqlite = (slurp("tool/net/lsqlite3.c")
-  :gsub("#ifdef SQLITE_ENABLE_SESSION.-\n#endif\n", ""))
+local C_sqlite = slurp("tool/net/lsqlite3.c")
 local C_getopt = slurp("tool/net/lgetopt.c")
 local C_zip = slurp("tool/net/lzip.c")
 local C_cov = slurp("tool/net/lcov.c")
-local C_repl = slurp("third_party/lua/lreplmod.c")
+local C_repl = slurp("third_party/lua/cosmo/lreplmod.c")
 local C_cosmo = slurp("tool/lua/lcosmo.c")
 -- kCosmoFuncs[] registers names whose implementations live here, so the
 -- return-arity scan below needs this source to resolve them.
@@ -231,10 +226,7 @@ for name in C_re:gmatch('{"([%u][%w_]*)"%s*,%s*REG_') do
   re_consts[name] = true
 end
 
--- lsqlite3 constants: SC(NAME) rows in sqlite_constants[]. The session rows
--- (CHANGESET_*/CHANGESETSTART_*/CHANGESETAPPLY_*) are guarded by
--- #ifdef SQLITE_ENABLE_SESSION, which this build no longer defines and which
--- was stripped from C_sqlite above, so they're absent here.
+-- lsqlite3 constants: SC(NAME) rows in sqlite_constants[].
 local sqlite_consts = {}
 for name in C_sqlite:gmatch("SC%(%s*([%u][%w_]*)%s*%)") do
   sqlite_consts[name] = true
@@ -539,13 +531,37 @@ end
 --
 -- Grammar (recursive descent; each parse_* returns the text remaining after
 -- what it consumed, or nil on syntax error):
---   union    := postfix ('|' postfix)*
+--   union    := postfix ('|' postfix)*    -- see the depth rule below
 --   postfix  := atom ('?' | '[]')*
 --   atom     := 'fun' '(' ... ')' (':' labeled-typelist)?
 --             | '{' ... '}'                  -- balance-checked table shape
 --             | '(' union ')'
 --             | '"'str'"' | "'"str"'" | int  -- literal types
 --             | dotted-ident ('<' typelist '>')?
+--
+-- Depth rule: at bracket depth 0 of the type region -- outside any `()`,
+-- `{}`, `<>` -- whitespace is what ENDS the type (a name or description
+-- follows it), so a `|` there must sit flush against both members:
+-- `integer| cols` is a dangling bar with the slot name after it, not a
+-- two-member union, and `integer |nil rows` is the bare type `integer`
+-- with `|nil rows` read as its name -- the nil silently dropped. The same
+-- rule holds for everything after a fun(...)'s closing paren: `fun() : integer`
+-- ends the type at `fun()`, so the return colon must follow the paren
+-- directly, as must its optional `?` (`fun() ?: integer` is `fun()` with
+-- `?: integer` as its name) and the inner colon of a typed vararg return
+-- (`fun(): ... : string` is a bare `...` return with `: string` as its
+-- name). A fun return list at depth 0 admits no comma either: whitespace
+-- after the first value ends the type, so `fun(): boolean, string` is a
+-- return of `boolean,` -- a multi-value return is one `---@return` line per
+-- value. The one exception is an `---@overload`, whose fun return list runs
+-- to the end of the line with no name after it, so `fun(...): T?, string?`
+-- is read whole there (`multi` = true below). Inside a bracketed group the
+-- closing bracket delimits instead, whitespace around `|` or before `:` is
+-- part of the type (`(integer | string)?`), and a comma separates list
+-- entries. This is exactly how cosmic's gentype tokenizes the same text,
+-- so the gate refuses what the generator would drop.
+-- Every parse_* below takes `grouped` = true when parsing inside a group,
+-- and `multi` = true when parsing an @overload line's type at depth 0.
 do
   local parse_union
 
@@ -561,12 +577,13 @@ do
     return s
   end
 
+  -- Only reached inside a generic application's `<...>`, so always grouped.
   local function parse_typelist(s)
-    s = parse_union(s)
+    s = parse_union(s, true)
     if not s then return nil end
     while s:match("^%s*,") do
       s = s:gsub("^%s*,%s*", "")
-      s = parse_union(s)
+      s = parse_union(s, true)
       if not s then return nil end
     end
     return s
@@ -574,22 +591,24 @@ do
 
   -- A fun(...) return-list entry may carry a `label:` prefix
   -- (`fun(fd: integer): flags: integer`).
-  local function parse_labeled_union(s)
+  local function parse_labeled_union(s, grouped)
     s = s:gsub("^%s+", "")
     local label = s:match("^[%a_][%w_%.]*%s*:%s*")
     if label then
-      local rest = parse_union(s:sub(#label + 1))
+      local rest = parse_union(s:sub(#label + 1), grouped)
       if rest then return rest end
     end
-    return parse_union(s)
+    return parse_union(s, grouped)
   end
 
-  local function parse_labeled_typelist(s)
-    s = parse_labeled_union(s)
+  -- A comma continues the list inside a group or on an @overload line; at
+  -- depth 0 anywhere else it is left in place for type_ok to refuse.
+  local function parse_labeled_typelist(s, grouped, multi)
+    s = parse_labeled_union(s, grouped)
     if not s then return nil end
-    while s:match("^%s*,") do
+    while (grouped or multi) and s:match("^%s*,") do
       s = s:gsub("^%s*,%s*", "")
-      s = parse_labeled_union(s)
+      s = parse_labeled_union(s, grouped)
       if not s then return nil end
     end
     return s
@@ -597,8 +616,9 @@ do
 
   -- fun(...) with balanced parens (parameter internals are not typechecked
   -- here); after the closing paren an optional `: <labeled typelist>` or
-  -- typed-vararg (`: ...: string`) return annotation.
-  local function parse_fun(s)
+  -- typed-vararg (`: ...: string`) return annotation. The return list sits
+  -- after the closing paren, so it is at the caller's depth.
+  local function parse_fun(s, grouped, multi)
     local depth = 0
     for k = 4, #s do
       local c = s:sub(k, k)
@@ -608,16 +628,26 @@ do
         depth = depth - 1
         if depth == 0 then
           local rest = s:sub(k + 1)
-          local colon = rest:match("^%??%s*:%s*")
+          -- Depth rule: at depth 0 the `?` must follow the `)` directly, and
+          -- the colon must follow the `)` (or `)?`) directly; whitespace
+          -- there would end the type before the return annotation, so
+          -- refuse rather than leave it as the name.
+          if not grouped and (rest:match("^%s+%?") or rest:match("^%??%s+:")) then
+            return nil
+          end
+          local colon = rest:match(grouped and "^%??%s*:%s*" or "^%??:%s*")
           if colon then
             rest = rest:sub(#colon + 1)
             if rest:match("^%.%.%.") then
               rest = rest:sub(4)
-              local c2 = rest:match("^:%s*")
-              if c2 then return parse_union(rest:sub(#c2 + 1)) end
+              -- The same depth rule for the typed vararg's inner colon:
+              -- `...:` must be flush, or `: string` becomes the name.
+              if not grouped and rest:match("^%s+:") then return nil end
+              local c2 = rest:match(grouped and "^%s*:%s*" or "^:%s*")
+              if c2 then return parse_union(rest:sub(#c2 + 1), grouped) end
               return rest
             end
-            return parse_labeled_typelist(rest)
+            return parse_labeled_typelist(rest, grouped, multi)
           end
           return rest
         end
@@ -626,9 +656,9 @@ do
     return nil -- unbalanced
   end
 
-  local function parse_atom(s)
+  local function parse_atom(s, grouped, multi)
     if s == "" then return nil end
-    if s:match("^fun%(") then return parse_fun(s) end
+    if s:match("^fun%(") then return parse_fun(s, grouped, multi) end
     if s:match('^"') then
       local lit = s:match('^"[^"]*"')
       return lit and s:sub(#lit + 1) or nil
@@ -638,7 +668,7 @@ do
       return lit and s:sub(#lit + 1) or nil
     end
     if s:match("^%(") then
-      local rest = parse_union(s:sub(2))
+      local rest = parse_union(s:sub(2), true)
       if not rest then return nil end
       rest = rest:gsub("^%s+", "")
       if rest:sub(1, 1) ~= ")" then return nil end
@@ -673,8 +703,8 @@ do
     return rest
   end
 
-  local function parse_postfix(s)
-    s = parse_atom(s)
+  local function parse_postfix(s, grouped, multi)
+    s = parse_atom(s, grouped, multi)
     if not s then return nil end
     while true do
       if s:match("^%?") then
@@ -688,13 +718,16 @@ do
     return s
   end
 
-  parse_union = function(s)
+  parse_union = function(s, grouped, multi)
     s = s:gsub("^%s+", "")
-    s = parse_postfix(s)
+    s = parse_postfix(s, grouped, multi)
     if not s then return nil end
-    while s:match("^%s*|%s*[^%s]") do
-      s = s:gsub("^%s*|%s*", "")
-      s = parse_postfix(s)
+    while s:match("^%s*|") do
+      -- Depth rule: whitespace around the bar is skipped only inside a
+      -- group. At depth 0 only a flush `|` is stripped, so whitespace on
+      -- either side of it reaches parse_postfix, which refuses it.
+      s = s:gsub(grouped and "^%s*|%s*" or "^|", "")
+      s = parse_postfix(s, grouped, multi)
       if not s then return nil end
     end
     return s
@@ -704,12 +737,49 @@ do
   -- head and ends at a clean boundary: end of line, whitespace (a name or
   -- description follows), or `#` (LuaLS description marker). A comma directly
   -- after the first type (`nil, string, integer`) is NOT a clean boundary:
-  -- multi-value returns must be one `---@return` line per value.
-  local function type_ok(region)
+  -- multi-value returns must be one `---@return` line per value. `multi`
+  -- marks an @overload line, the one place a fun return list keeps its
+  -- commas (they are consumed inside the type, never left at the boundary).
+  local function type_ok(region, multi)
     if region:match("^%.%.%.") then return true end -- bare variadic
-    local rest = parse_union(region)
+    local rest = parse_union(region, false, multi)
     if not rest then return false end
     return rest == "" or rest:match("^[%s#]") ~= nil
+  end
+
+  -- Parser self-check: the classifications the scan below relies on, so a
+  -- grammar regression fails here by fixture instead of silently passing
+  -- (or failing) real annotations. The dangling-bar shapes are the ones a
+  -- whitespace-skipping union loop reads as well-formed two-member unions.
+  -- A third field marks the region as an @overload line's (`multi`).
+  local TYPE_FIXTURES = {
+    { "integer|string", true },
+    { "integer|nil rows", true },
+    { "(integer | string)?", true },
+    { "(true|nil | string)", true },
+    { "table<string, integer|nil>", true },
+    { "fun(fd: integer): integer|nil", true },
+    { "(integer |nil)", true },
+    { "fun(): integer", true },
+    { "integer| cols", false },
+    { "integer |nil rows", false },
+    { "integer|", false },
+    { "fun(fd: integer): integer| nil", false },
+    { "fun() : integer", false },
+    { "nil,|nil string", false },
+    { "fun()?: integer", true },
+    { "fun() ?: integer", false },
+    { "fun(): ...: string", true },
+    { "fun(): ... : string", false },
+    { "fun(): boolean", true },
+    { "fun(): boolean, string", false },
+    { "fun(): zip.Writer?, string?", true, true },
+    { "fun(): zip.Writer?, string?", false },
+  }
+  for _, fx in ipairs(TYPE_FIXTURES) do
+    assert(type_ok(fx[1], fx[3]) == fx[2], "check 9 self-check: `" .. fx[1] ..
+      "` must be " .. (fx[2] and "accepted" or "refused") ..
+      " by the type grammar")
   end
 
   local lineno = 0
@@ -718,9 +788,13 @@ do
     local region = line:match("^%-%-%-@param%s+[%w_%.]+%??%s+(.+)$") or
       line:match("^%-%-%-@return%s+(.+)$") or
       line:match("^%-%-%-@field%s+[%w_%.]+%??%s+(.+)$") or
-      line:match("^%-%-%-@overload%s+(.+)$") or
       line:match("^%s*%-%-%-@type%s+(.+)$")
-    if region and not type_ok(region) then
+    local multi = false
+    if not region then
+      region = line:match("^%-%-%-@overload%s+(.+)$")
+      multi = region ~= nil
+    end
+    if region and not type_ok(region, multi) then
       fail("line " .. lineno .. ": unparseable type expression (one " ..
         "`---@return` line per value; see the grammar in check 9): " .. line)
     end
@@ -749,6 +823,15 @@ end
 --       Teal `number`, and every bit-op call site on it then needs an
 --       `as integer` cast (whilp/cosmopolitan#142). Declaring it here is
 --       what keeps cosmic's generated `integer` honest.
+--   Q6: a block that documents any `---@return` line documents a success
+--       slot -- its FIRST `---@return` is the one downstream generators
+--       (cosmic's gentype) read as the binding's success type, and this
+--       file's dialect spells the failure tail's two slots exactly
+--       `---@return string? error` / `---@return unix.Errno? errno`
+--       (D24/#151), never anything else. A block whose first line is
+--       bare `string?` or `unix.Errno?` has lost its value line and left
+--       only the failure tail -- invisible to every OTHER check here,
+--       since the tail is still syntactically well-formed and non-empty.
 -- Each QALLOW_* is a RATCHET seeded at today's counts: an entry may only be
 -- removed (by improving the annotation), never added. A newly-violating
 -- binding, or a stale entry that no longer violates, fails this test.
@@ -814,6 +897,46 @@ local QALLOW_BARE = set({
 -- empty and must stay that way. Do not seed it -- annotate the constant.
 local QALLOW_CONSTTYPE = set({})
 
+-- Q6: bindings whose declared success value genuinely IS a bare optional
+-- string, with no error/errno slot of its own (a single ---@return line,
+-- or -- StreamReader's read family -- a second, differently-named string?
+-- slot that is its OWN error message, not a stray copy of the failure
+-- tail). None of these can be produced by dropping a value line off a
+-- standard `T|nil value / string? error / unix.Errno? errno` block --
+-- EXCEPT by type token alone: `string?`/`unix.Errno?` is exactly what a
+-- failure tail that lost its value line still reads as, so allowlisting
+-- a NAME here cannot tell "genuinely bare" from "just got mutilated".
+-- Each entry is keyed instead to the exact TEXT of the `---@return` line
+-- its block's real success line was seeded with, and the ratchet below
+-- only exempts a block whose first `---@return` line still reads that
+-- text. A line count is not enough: StreamReader:read and :read_until
+-- both already carry two `string?` lines (their real success line and
+-- their `error` line), so a mutation that swaps the real line's text for
+-- a fabricated one sharing the same `string?` token -- keeping the count
+-- at 2 -- is invisible to a count check but changes the head line's text.
+-- Keying to text also still catches the coarser mutations: dropping the
+-- real line entirely (count 2 -> 1, and the surviving line's text is the
+-- `error` line's, not this one's) or dropping the block's only line
+-- (falls out of `qvio.nosuccess` into the Q2 `noreturn` check instead).
+local QALLOW_NOSUCCESS = {
+  ["cosmo.ParseHost"] =
+    "---@return string? port",
+  ["cosmo.StreamReader:read"] =
+    "---@return string? chunk next chunk of data, or nil on EOF",
+  ["cosmo.StreamReader:read_until"] =
+    "---@return string? data bytes before the delimiter (or the final " ..
+    "remainder), or nil on EOF",
+  ["lsqlite3.Database:db_filename"] =
+    "---@return string? filename associated with database `name` of " ..
+    "connection `db`.",
+  ["lsqlite3.Statement:bind_parameter_name"] =
+    "---@return string? -- the name of the n-th parameter in prepared " ..
+    "statement.",
+  ["lsqlite3.VM:bind_parameter_name"] =
+    "---@return string? parameter_name nil for a positional (`?`) " ..
+    "parameter, which has no name.",
+}
+
 -- Collect module function/method declarations paired with the contiguous run
 -- of `---` annotation lines that immediately precedes each.
 local qdecls = {}
@@ -856,10 +979,97 @@ local function qbare(t)
   return false
 end
 
-local qvio = { param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {} }
+-- The type token of a block's FIRST `---@return` line, or nil when the
+-- block declares none. Only the head token is read (the same word gentype
+-- takes as the slot's type), so a description trailing it doesn't matter.
+local function first_return_type(blocklines)
+  for _, l in ipairs(blocklines) do
+    local t = l:match("^%-%-%-@return%s+(%S+)")
+    if t then return t end
+  end
+  return nil
+end
+
+-- Q6 self-check: the shapes first_return_type must and must not flag,
+-- exercised directly so a regression here fails by fixture instead of
+-- silently passing (or failing) real annotations. Mirrors the localtime
+-- mutation: dropping a block's value line leaves exactly the FAIL shapes.
+local NOSUCCESS_FIXTURES = {
+  -- { blocklines, expected first_return_type, is a lost-success-slot shape }
+  { { "---@return unix.BrokenDownTime|nil", "---@return string? error",
+      "---@return unix.Errno? errno" }, "unix.BrokenDownTime|nil", false },
+  { { "---@return string? error", "---@return unix.Errno? errno" },
+    "string?", true },
+  { { "---@return string? error" }, "string?", true },
+  { { "---@return unix.Errno? errno" }, "unix.Errno?", true },
+  { { "---@return string? filename associated with the connection" },
+    "string?", true }, -- a bare optional-string SUCCESS value is still
+                        -- indistinguishable from the failure tail by type
+                        -- alone; real cases like this ride QALLOW_NOSUCCESS
+  { { "---@return boolean" }, "boolean", false },
+  { { "--- no @return line at all" }, nil, false },
+}
+for _, fx in ipairs(NOSUCCESS_FIXTURES) do
+  local blocklines, want_type, want_flagged = fx[1], fx[2], fx[3]
+  local got_type = first_return_type(blocklines)
+  assert(got_type == want_type, "Q6 self-check: first_return_type mismatch " ..
+    "for " .. table.concat(blocklines, " / "))
+  local flagged = got_type == "string?" or got_type == "unix.Errno?"
+  assert(flagged == want_flagged, "Q6 self-check: flagged mismatch for " ..
+    table.concat(blocklines, " / "))
+end
+
+-- The full text of a block's FIRST `---@return` line -- the shape
+-- QALLOW_NOSUCCESS keys its exemptions to. first_return_type alone cannot
+-- distinguish a genuinely bare success value from a failure tail that
+-- lost its value line (both read as `string?`), and a plain line count
+-- cannot either: it is blind to a same-count substitution that swaps the
+-- real success line's text for a fabricated one sharing its type token.
+-- The exact head-line TEXT pins down which line is actually there, so an
+-- allowlisted NAME is exempt only when its block's first `---@return`
+-- line still reads the text it was seeded with.
+local function first_return_line(blocklines)
+  for _, l in ipairs(blocklines) do
+    if l:match("^%-%-%-@return%f[%s]") then return l end
+  end
+  return nil
+end
+
+-- Shape self-check: exercises all three mutation shapes a real block can
+-- suffer, mirroring StreamReader:read/:read_until.
+local LINE_FIXTURES = {
+  -- { blocklines, expected first_return_line }
+  { { "---@return string? chunk next chunk of data, or nil on EOF",
+      "---@return string? error error message on failure" },
+    "---@return string? chunk next chunk of data, or nil on EOF" },
+  { { "---@return string? error error message on failure" },
+    "---@return string? error error message on failure" }, -- round-1
+    -- mutation: the real value line is gone, only the (renamed) error
+    -- line remains -- text differs from the seeded head line above
+  { { "---@return string? reason secondary detail on failure " ..
+        "(success info lost)",
+      "---@return string? error error message on failure" },
+    "---@return string? reason secondary detail on failure " ..
+      "(success info lost)" }, -- round-2 mutation: the count stays at 2,
+    -- but the real value line's text was swapped for a fabricated line
+    -- sharing its `string?` token -- still a different head line
+  { { "---@return string? port" }, "---@return string? port" },
+  { { "--- no @return line at all" }, nil },
+}
+for _, fx in ipairs(LINE_FIXTURES) do
+  local blocklines, want = fx[1], fx[2]
+  local got = first_return_line(blocklines)
+  assert(got == want, "Q6 shape self-check: first_return_line mismatch for " ..
+    table.concat(blocklines, " / "))
+end
+
+local qvio = {
+  param = {}, noreturn = {}, inline = {}, bare = {}, consttype = {},
+  nosuccess = {}, nosuccess_lines = {},
+}
 for _, d in ipairs(qdecls) do
-  for p in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
-    p = p:gsub("%s", "")
+  for rawp in (d.params .. ","):gmatch("%s*([^,]-)%s*,") do
+    local p = rawp:gsub("%s", "")
     if p ~= "" and p ~= "self" and p ~= "..." then
       if not d.block:find("%-%-%-@param%s+" .. p .. "%f[%W]") then
         qvio.param[d.disp] = true
@@ -868,6 +1078,13 @@ for _, d in ipairs(qdecls) do
   end
   if not (d.block:find("%-%-%-@return") or d.block:find("%-%-%-@overload")) then
     qvio.noreturn[d.disp] = true
+  end
+  do
+    local rt = first_return_type(d.blocklines)
+    if rt == "string?" or rt == "unix.Errno?" then
+      qvio.nosuccess[d.disp] = true
+      qvio.nosuccess_lines[d.disp] = first_return_line(d.blocklines)
+    end
   end
   for _, l in ipairs(d.blocklines) do
     if l:match("%-%-%-@param") or l:match("%-%-%-@return") or
@@ -1245,6 +1462,39 @@ ratchet(qvio.noreturn, QALLOW_NORETURN, "no @return/@overload")
 ratchet(qvio.inline, QALLOW_INLINE, "inline { } table type")
 ratchet(qvio.bare, QALLOW_BARE, "bare any/table type")
 ratchet(qvio.consttype, QALLOW_CONSTTYPE, "constant not declared integer")
+
+-- Q6 is not a plain name ratchet: QALLOW_NOSUCCESS exempts a binding only
+-- when its block's first `---@return` line still reads the exact text it
+-- was seeded with, so a mutation that drops the real success line --
+-- StreamReader:read and :read_until dropping their `chunk`/`data` line,
+-- leaving only a differently-named `string?` line -- or that swaps its
+-- text for a fabricated line sharing the same type token while leaving
+-- the line count unchanged, still reports by name even though the name
+-- stays in the allowlist.
+local function ratchet_nosuccess(viol, lines, allow, label)
+  for _, disp in ipairs(sorted_keys(viol)) do
+    local want_line = allow[disp]
+    if not want_line then
+      fail("annotation quality [" .. label .. "]: " .. disp ..
+        " (fix the annotation, or seed the QALLOW list)")
+    elseif want_line ~= lines[disp] then
+      fail("annotation quality [" .. label .. "]: " .. disp ..
+        " (allowlisted for a specific @return head line, but its block's " ..
+        "first @return line now reads " .. tostring(lines[disp]) .. " -- " ..
+        "the success slot may have been lost or swapped; fix the " ..
+        "annotation or reseed the QALLOW head line)")
+    end
+  end
+  for _, disp in ipairs(sorted_keys(allow)) do
+    if not viol[disp] then
+      fail("stale quality allowlist entry [" .. label ..
+        "] (now clean, remove it): " .. disp)
+    end
+  end
+end
+ratchet_nosuccess(qvio.nosuccess, qvio.nosuccess_lines, QALLOW_NOSUCCESS,
+  "first @return is the failure tail (lost success slot)")
+
 ratchet(arity_vio, ARITY_ALLOW, "annotation declares returns the C never pushes")
 
 assert(#failures == 0,
@@ -1253,7 +1503,8 @@ assert(#failures == 0,
   table.concat(failures, "\n  "))
 
 local qallowed = count(QALLOW_PARAM) + count(QALLOW_NORETURN) +
-  count(QALLOW_INLINE) + count(QALLOW_BARE) + count(QALLOW_CONSTTYPE)
+  count(QALLOW_INLINE) + count(QALLOW_BARE) + count(QALLOW_CONSTTYPE) +
+  count(QALLOW_NOSUCCESS)
 print("definitions coverage: " .. nfns .. " functions, " .. nmethods ..
   " methods, " .. nconsts .. " constants checked across " ..
   #MODULES .. " modules; " .. count(ALLOW) .. " allowlisted")

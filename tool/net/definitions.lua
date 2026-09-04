@@ -1,6 +1,9 @@
 ---@meta
 error("Tried to evaluate definition file.")
 
+-- Annotating a new or changed binding's return shape? AGENTS.md's
+-- Conventions section states the argument-shape-vs-fallible-tuple rule.
+
 --- Lua's builtin string type, extended with the operators this runtime
 --- installs: `s % {...}` formats and `s * n` repeats.
 ---@class string
@@ -530,6 +533,12 @@ lsqlite3 = {
 --- https://www.sqlite.org/c3ref/open.html).
 ---@alias lsqlite3.OpenFlag integer
 
+--- Name of an SQLite ext/misc extension linked into the library: a row of
+--- the registry in `third_party/sqlite3/extensions.c`, whose init is
+--- `sqlite3_<name>_init`. A name here means the extension is available,
+--- not that any connection has it registered.
+---@alias lsqlite3.Extension "decimal"|"fileio"|"ieee"|"regexp"|"series"|"sha"|"shathree"|"sqlar"|"stmtrand"|"uint"|"zipfile"
+
 --- Opens (or creates if it does not exist) an SQLite database with name filename
 --- and returns its handle as userdata (the returned object should be used for all
 --- further method calls in connection with this specific database, see Database
@@ -549,8 +558,8 @@ lsqlite3 = {
 ---@param filename string
 ---@param flags? lsqlite3.OpenFlag defaults to `lsqlite3.OPEN_READWRITE + lsqlite3.OPEN_CREATE`
 ---@return lsqlite3.Database|nil db
----@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
 ---@nodiscard
 function lsqlite3.open(filename, flags) end
 
@@ -558,8 +567,8 @@ function lsqlite3.open(filename, flags) end
 --- of an error, the function returns `nil`, an error code and an error message.
 --- (In-memory databases are volatile as they are never stored on disk.)
 ---@return lsqlite3.Database|nil db
----@return lsqlite3.ResultCode? errorcode
 ---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
 ---@nodiscard
 function lsqlite3.open_memory() end
 
@@ -577,19 +586,32 @@ function lsqlite3.version() end
 ---
 --- - `lsqlite3.CONFIG_SINGLETHREAD`, `lsqlite3.CONFIG_MULTITHREAD`, or
 ---   `lsqlite3.CONFIG_SERIALIZED`: selects the global threading mode.
----   Returns `lsqlite3.OK` on success, or `nil` plus a numerical error
----   code on failure.
+---   Returns `lsqlite3.OK` on success, or `nil` plus an error message and
+---   numerical error code on failure.
 --- - `lsqlite3.CONFIG_LOG`: installs a Lua callback that is invoked as
 ---   `func(udata, errcode, message)` for every SQLite3 log event, or
 ---   removes the current callback when `func` is `nil`. Returns
 ---   `lsqlite3.OK` followed by the previously installed callback and its
 ---   user data.
+--- - Any other value for `option`: returns `nil` plus an error message and
+---   numerical error code.
 ---@param option integer
 ---@param func function? callback for `lsqlite3.CONFIG_LOG`, or `nil` to remove it
 ---@param udata any? user data passed to the log callback
 ---@return integer|nil rc, function? prev_func, any prev_udata
+---@return string? errormsg
 ---@return integer? errorcode
 function lsqlite3.config(option, func, udata) end
+
+--- Lists the SQLite ext/misc extensions linked into this build (the
+--- registry in `third_party/sqlite3/extensions.c`), so a caller can
+--- discover what a fat binary carries at runtime instead of guessing
+--- from a version number. A name here means the extension is
+--- available, not that any connection has it registered -- pass one
+--- of these names to `db:register_extension()` to register it.
+---@return lsqlite3.Extension[] names
+---@nodiscard
+function lsqlite3.extensions() end
 
 --- The context passed to a user-defined SQL function: its aggregate state
 --- and the slot its result is returned through.
@@ -604,6 +626,17 @@ function lsqlite3.Context:get_aggregate_data() end
 
 --- Set the user-definable data field for callback funtions to `udata`.
 function lsqlite3.Context:set_aggregate_data(udata) end
+
+--- The runtime type of argument `n` (1-based, matching the callback's own
+--- `function(ctx, arg1, arg2, ...)` signature): `"integer"`, `"real"`,
+--- `"text"`, `"blob"`, or `"null"` -- the same names SQLite's own
+--- `typeof()` SQL function returns. The argument itself arrives as a
+--- plain Lua value in which a BLOB and TEXT holding identical bytes are
+--- indistinguishable; call this to tell them apart.
+---@param n integer
+---@return string
+---@nodiscard
+function lsqlite3.Context:value_type(n) end
 
 --- Sets the result of a callback function to `res`. The type of the result
 --- depends on the type of `res` and is either a number or a string or `nil`.
@@ -706,6 +739,11 @@ function lsqlite3.Database:commit_hook(func, udata) end
 ---@param final fun(ctx: lsqlite3.Context) a function that is called once after all rows have been processed.
 --- It receives one argument, the function context.
 ---@param userdata? any If provided, userdata can be any Lua value and would be returned by the `context:user_data()` method.
+---@param deterministic? boolean If `true`, the function is registered with `SQLITE_DETERMINISTIC`,
+--- which lets it appear in an index on an expression and in a partial index `WHERE` clause,
+--- and lets SQLite evaluate it once instead of once per row. Default `false` (volatile).
+--- This is a promise SQLite holds you to: a function marked deterministic that returns
+--- different results for the same arguments produces wrong query results, not an error.
 ---
 --- The function context can be used inside the two callback functions to
 --- communicate with SQLite3. Here is a simple example:
@@ -734,7 +772,7 @@ function lsqlite3.Database:commit_hook(func, udata) end
 ---     Sum of col 2:   66
 ---
 ---@return boolean success
-function lsqlite3.Database:create_aggregate(name, nargs, step, final, userdata) end
+function lsqlite3.Database:create_aggregate(name, nargs, step, final, userdata, deterministic) end
 
 --- This creates a collation callback. A collation callback is used to establish
 --- a collation order, mostly for string comparisons and sorting purposes.
@@ -770,6 +808,11 @@ function lsqlite3.Database:create_collation(name, func) end
 --- It should accept a function context (see Methods for callback contexts) plus
 --- the same number of parameters as given in `nargs`.
 ---@param userdata? any If provided, userdata can be any Lua value and would be returned by the `context:user_data()` method.
+---@param deterministic? boolean If `true`, the function is registered with `SQLITE_DETERMINISTIC`,
+--- which lets it appear in an index on an expression and in a partial index `WHERE` clause,
+--- and lets SQLite evaluate it once instead of once per row. Default `false` (volatile).
+--- This is a promise SQLite holds you to: a function marked deterministic that returns
+--- different results for the same arguments produces wrong query results, not an error.
 --- Here is an example:
 ---
 ---     db:exec'CREATE TABLE test(col1,col2,col3)'
@@ -784,7 +827,7 @@ function lsqlite3.Database:create_collation(name, func) end
 ---     end
 ---
 ---@return boolean success
-function lsqlite3.Database:create_function(name, nargs, func, userdata) end
+function lsqlite3.Database:create_function(name, nargs, func, userdata, deterministic) end
 
 ---@return string? filename associated with database `name` of connection `db`.
 ---@nodiscard
@@ -799,6 +842,7 @@ function lsqlite3.Database:db_filename(name) end
 function lsqlite3.Database:deserialize(s) end
 
 ---@return lsqlite3.ResultCode error the numerical result code (or extended result code) for the most recent failed call associated with database db.
+--- See https://lua.sqlite.org/home/doc/tip/doc/lsqlite3.wiki#numerical_error_and_result_codes for details.
 ---@nodiscard
 function lsqlite3.Database:errcode() end
 
@@ -867,7 +911,8 @@ function lsqlite3.Database:nrows(sql) end
 --- See https://lua.sqlite.org/home/doc/tip/doc/lsqlite3.wiki#methods_for_prepared_statements for details.
 ---@param sql string
 ---@return lsqlite3.Statement|nil stmt compiled statement, or nil when compilation fails
----@return string|lsqlite3.ResultCode tail SQL past the first statement on success; the error code on failure (fetch the message with db:errmsg())
+---@return string? tail_or_error SQL past the first statement on success; the error message on failure
+---@return lsqlite3.ResultCode? errorcode present on failure only
 ---@nodiscard
 function lsqlite3.Database:prepare(sql) end
 
@@ -879,6 +924,40 @@ function lsqlite3.Database:prepare(sql) end
 ---@return string? error
 ---@nodiscard
 function lsqlite3.Database:readonly(name) end
+
+--- Registers a linked SQLite ext/misc extension (see `lsqlite3.extensions()`
+--- for the names this build carries) on this connection, by name.
+---
+--- Distinguishes three outcomes instead of collapsing them into a
+--- boolean, because a fat binary's carried extensions are a runtime
+--- property a caller cannot assume from a version number:
+---
+--- - `"registered"`: `name` was in the registry and not yet a module on
+---   this connection; its init ran just now.
+--- - `"present"`: `name` is already a registered module on this
+---   connection -- a compile-time feature such as FTS5, which cannot be
+---   registered and does not need to be, or an extension a prior call
+---   (or the open path's own default registration) already registered.
+---   Nothing was done, and nothing needed to be.
+--- - `nil` plus an error message and `lsqlite3.NOTFOUND`: `name` is
+---   neither present nor in the registry -- this build does not carry
+---   it. Any other error code means the extension was found and its
+---   init genuinely failed.
+---
+--- Presence of a registry row (regexp, series, zipfile) is tracked
+--- directly on the connection, not inferred from `pragma_module_list`
+--- -- that only agrees with a row's registry name for zipfile, since
+--- regexp registers SQL functions rather than a module and series's
+--- module is named `generate_series`. A name outside the registry
+--- (such as `"fts5"`, a compile-time feature with no registry row) is
+--- still checked the way a caller would check it directly: `SELECT
+--- ... FROM pragma_module_list WHERE name = ?`.
+---@param name lsqlite3.Extension
+---@return "registered"|"present"|nil status
+---@return string? errormsg
+---@return lsqlite3.ResultCode? errorcode
+---@nodiscard
+function lsqlite3.Database:register_extension(name) end
 
 --- This function installs a rollback_hook callback handler.
 --- See: `db:commit_hook` and `db:update_hook`
@@ -915,7 +994,8 @@ function lsqlite3.Database:rollback_hook(func, udata) end
 function lsqlite3.Database:rows(sql) end
 
 --- Serialize a database to be restored later with `Database:deserialize`.
----@return string? -- `nil` if the database has no tables
+---@return string|nil data `nil` if the database has no tables
+---@return string? error message on failure
 ---@nodiscard
 function lsqlite3.Database:serialize() end
 
@@ -969,7 +1049,9 @@ function lsqlite3.Database:urows(sql) end
 
 ---@param mode integer?
 ---@param name string?
----@return integer|nil nlog, integer nckpt
+---@return integer|nil nlog
+---@return integer|string nckpt total number of frames in the log file on
+--- success, or the error message on failure
 ---@return lsqlite3.ResultCode? errno
 function lsqlite3.Database:wal_checkpoint(mode, name) end
 
@@ -1095,6 +1177,17 @@ function lsqlite3.Statement:get_types() end
 ---@return string[] # the declared types of all columns in the result set returned by the statement.
 ---@nodiscard
 function lsqlite3.Statement:itypes() end
+
+--- The runtime type of column n's current value in the result row:
+--- `"integer"`, `"real"`, `"text"`, `"blob"`, or `"null"` -- the same
+--- names SQLite's own `typeof()` SQL function returns. Unlike
+--- `get_type()`'s declared schema type, this is what lets a caller
+--- tell a BLOB apart from TEXT holding identical bytes. (The
+--- left-most column is number 0.)
+---@param n integer
+---@return string
+---@nodiscard
+function lsqlite3.Statement:column_type(n) end
 
 ---@return string ... the names of all columns in the result set returned by the statement.
 ---@nodiscard
@@ -1262,6 +1355,16 @@ function lsqlite3.VM:get_types() end
 ---@nodiscard
 function lsqlite3.VM:itypes() end
 
+--- The runtime type of column n's current value in the result row:
+--- `"integer"`, `"real"`, `"text"`, `"blob"`, or `"null"` -- the same
+--- names SQLite's own `typeof()` SQL function returns. Unlike
+--- `get_type()`'s declared schema type, this is what lets a caller
+--- tell a BLOB apart from TEXT holding identical bytes.
+---@param index integer
+---@return string
+---@nodiscard
+function lsqlite3.VM:column_type(index) end
+
 ---@return string ...
 ---@nodiscard
 function lsqlite3.VM:get_unames() end
@@ -1408,15 +1511,31 @@ re = {
 ---@class re.Regex: userdata
 re.Regex = {}
 
+--- A regex match: the whole matched substring plus its parenthesized
+--- capture groups, as returned by `re.Regex:search`, `re.Regex:match`,
+--- and `re.search`. Distinct from `re.Match` (returned by
+--- `re.Regex:find`), which reports offsets instead of the substring
+--- itself.
+---@class re.SearchMatch
+---@field match string the whole matched substring
+---@field captures {string} the parenthesized capture groups, in order
+--- (an empty table when the pattern has no groups)
+
 --- Executes precompiled regular expression.
 ---
---- On a match, returns the whole matched substring plus a table of the
---- parenthesized capture groups (an empty table when the pattern has no groups).
---- A no-match is not an error: it returns a single bare `nil`, so the idiomatic
---- `if match then` works. Only a genuine regex engine failure (e.g. running out
---- of memory) returns `nil, err`. Flags may contain `re.NOTBOL` or `re.NOTEOL`
---- to indicate whether or not text should be considered at the start and/or end
---- of a line.
+--- On a match, returns one `re.SearchMatch` table. A no-match is not
+--- an error: it returns a single bare `nil`, so the idiomatic
+--- `if result then` works. Only a genuine regex engine failure (e.g.
+--- running out of memory) returns `nil, err`. Flags may contain
+--- `re.NOTBOL` or `re.NOTEOL` to indicate whether or not text should
+--- be considered at the start and/or end of a line.
+---
+--- The match and its captures used to be two positional returns
+--- (`match`, `captures`), which put the failure path's error string in
+--- the same slot a match's captures table occupied. Bundling both into
+--- one `re.SearchMatch` table keeps every slot's meaning fixed
+--- regardless of branch: this return is always the value-or-nil, and
+--- the next is always the error string, present on no other path.
 ---
 ---@param str string
 ---@param flags? re.SearchFlag defaults to zero and may have any of:
@@ -1425,13 +1544,10 @@ re.Regex = {}
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return string|nil match the whole matched substring; nil both when
---- nothing matched and when the search failed
----@return {string}|string|nil captures the parenthesized capture groups
---- (in order) on a match, or the error string when it failed. The C
---- pushes at most two values: `(match, captures)`, a bare `nil` for a
---- no-match, or `(nil, err)`. A third slot was annotated here and never
---- returned, so a generated binding declared a value that does not exist.
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
+---@return string? error the engine failure message; absent both on a
+--- match and on a no-match
 ---@nodiscard
 function re.Regex:search(str, flags) end
 
@@ -1447,22 +1563,35 @@ function re.Regex:search(str, flags) end
 --- - `re.NOTEOL`
 ---
 --- This has an O(𝑛) cost.
----@return string|nil match the whole matched substring; nil both when
---- nothing matched and when the search failed
----@return {string}|string|nil captures the parenthesized capture groups
---- (in order) on a match, or the error string when it failed. The C
---- pushes at most two values: `(match, captures)`, a bare `nil` for a
---- no-match, or `(nil, err)`. A third slot was annotated here and never
---- returned, so a generated binding declared a value that does not exist.
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
+---@return string? error the engine failure message; absent both on a
+--- match and on a no-match
 ---@nodiscard
 function re.Regex:match(str, flags) end
 
+--- A match reported by `re.Regex:find`: the absolute 1-based inclusive
+--- start and end offsets into the searched string, plus the table of
+--- parenthesized capture groups. The matched text is
+--- `str:sub(match.start, match.stop)`.
+---
+--- The offsets and the captures table used to be three positional
+--- returns (`start`, `stop`, `captures`), which put the failure path's
+--- error string in the same slot (2) that a completed match's `stop`
+--- occupied. Bundling them into one table — like `unix.capget`'s caps
+--- table — keeps every slot's meaning fixed regardless of branch: the
+--- first return is always the value-or-nil, the second is always the
+--- error string or absent.
+---@class re.Match
+---@field start integer Absolute 1-based offset of the first matched character.
+---@field stop integer Absolute 1-based offset of the last matched character.
+---@field captures {string} Parenthesized capture groups, in order (an
+--- empty table when the pattern has no groups; `""` for a group that
+--- did not participate).
+
 --- Executes precompiled regular expression, reporting where the match
 --- is. Like `re.Regex:search`, but instead of the matched substring it
---- returns the match's absolute 1-based inclusive start and end offsets
---- into `str`, plus the table of parenthesized capture groups (an empty
---- table when the pattern has no groups; `""` for a group that did not
---- participate). The matched text is `str:sub(start, stop)`.
+--- returns a `re.Match` table.
 ---
 --- `init` (1-based, defaults to 1) starts the search at that offset:
 --- the pattern is matched against the tail of `str`, and the returned
@@ -1481,9 +1610,9 @@ function re.Regex:match(str, flags) end
 --- - `re.NOTBOL`
 --- - `re.NOTEOL`
 ---@param init? integer 1-based offset to start searching at (defaults to 1)
----@return integer|nil start absolute 1-based offset of the first matched character
----@return integer|string|nil stop absolute 1-based offset of the last matched character (an error string when start is nil)
----@return {string} captures the parenthesized capture groups, in order
+---@return re.Match|nil match nil both when nothing matched and when the
+--- search failed
+---@return string? error
 ---@nodiscard
 function re.Regex:find(str, flags, init) end
 
@@ -1492,11 +1621,11 @@ function re.Regex:find(str, flags, init) end
 --- This is a shorthand notation roughly equivalent to:
 ---
 ---     local preg = assert(re.compile(regex))
----     local match, captures = preg:search(text)
+---     local result = preg:search(text)
 ---
---- On a match, returns the whole matched substring plus a table of the
---- parenthesized capture groups. A no-match returns a bare `nil`. A bad pattern
---- (compile failure) or a regex engine failure returns `nil, err`.
+--- On a match, returns one `re.SearchMatch` table. A no-match returns a
+--- bare `nil`. A bad pattern (compile failure) or a regex engine
+--- failure returns `nil, err`.
 ---
 ---@param regex string
 ---@param text string
@@ -1512,13 +1641,11 @@ function re.Regex:find(str, flags, init) end
 --- This has exponential complexity. Please use `re.compile()` to compile your regular expressions once from `/.init.lua`. This API exists for convenience. This isn't recommended for prod.
 ---
 --- This uses POSIX extended syntax by default.
----@return string|nil match the whole matched substring; nil both when
---- nothing matched and when the search failed
----@return {string}|string|nil captures the parenthesized capture groups
---- (in order) on a match, or the error string when it failed. The C
---- pushes at most two values: `(match, captures)`, a bare `nil` for a
---- no-match, or `(nil, err)`. A third slot was annotated here and never
---- returned, so a generated binding declared a value that does not exist.
+---@return re.SearchMatch|nil result the match, nil when nothing matched
+--- or the search failed
+---@return string? error the engine failure message (either a bad
+--- pattern at compile time or a genuine engine failure at search
+--- time); absent both on a match and on a no-match
 ---@nodiscard
 function re.search(regex, text, flags) end
 
@@ -1622,11 +1749,16 @@ getopt = {}
 ---     end
 ---     -- Now excludes contains all -e values: {"foo", "bar", "spam"}
 ---
+--- A malformed call -- `args` not a table, `optstring` not a string,
+--- `longopts` not nil/a table, an `args`/`longopts` table over its size
+--- limit, or a malformed `longopts` entry -- raises rather than returning
+--- an error, since none of those is a getopt_long() runtime outcome: no
+--- shape a correct caller passes can reach it.
+---
 ---@param args string[] Command-line arguments (typically `arg`)
 ---@param optstring string Short options string (e.g., "hvo:")
 ---@param longopts? table[] Long option definitions: {{name, has_arg, short}, ...}
----@return getopt.Result|nil result
----@return string? error
+---@return getopt.Result result
 function getopt.parse(args, optstring, longopts) end
 
 --- The path module may be used to manipulate unix paths.
@@ -2064,6 +2196,18 @@ function zip.Appender:close() end
 ---     end
 ---
 cov = {}
+
+--- Arms an instruction budget on the calling thread's collection: the
+--- hook raises `"cosmo.cov: instruction budget exceeded"` once `n` VM
+--- instructions have executed. Re-arms the thread, which restarts Lua's
+--- internal instruction counter, so each call gives a fresh budget
+--- rather than continuing a previous one; the budget is one-shot and
+--- does not fire again once raised. Returns `false`, changing nothing,
+--- when the calling thread's debug hook is not this collector's — the
+--- caller then falls back to its own `debug.sethook` budget instead.
+---@param n integer? VM instructions until the hook raises; nil or 0 clears the budget
+---@return boolean armed `false` when the calling thread's hook is not the collector's
+function cov.budget(n) end
 
 --- Arms line-hit collection on the calling thread. Counting starts (or
 --- resumes) immediately; counts accumulate into process-global state
@@ -2699,8 +2843,9 @@ function cosmo.EscapeUser(str) end
 --- (handshake or certificate verification failed), `"timeout"`,
 --- `"proxy"` (proxy configuration or tunnel failure), `"protocol"`
 --- (malformed request or response), `"too_large"` (response exceeded
---- `maxresponse`), or `"blocked"` (refused by SSRF protection or the
---- HTTPS-to-HTTP downgrade guard).
+--- `maxresponse`; message includes the configured limit, e.g.
+--- `"response too large (max 100 bytes)"`), or `"blocked"` (refused by
+--- SSRF protection or the HTTPS-to-HTTP downgrade guard).
 ---@param url string
 ---@param body? string|cosmo.FetchOptions
 ---@return integer|nil status, table<string,string> headers, string body, string url
@@ -4371,7 +4516,7 @@ unix = {
 
 --- The numeric errno value carried as the third return of every
 --- fallible unix.* call (see LuaUnixSysretErrno in
---- third_party/lua/lunix.c): always one of the exported E* constants
+--- third_party/lua/cosmo/lunix.c): always one of the exported E* constants
 --- (unix.EINTR, unix.ENOENT, ...). An alias rather than a checked
 --- enum: Teal enums are string-only.
 ---@alias unix.Errno integer
@@ -4549,12 +4694,11 @@ function unix.unsetenv(name) end
 
 --- Clears all environment variables.
 ---
---- This wraps the C `clearenv()` function to allow Lua scripts to remove
---- all environment variables at once.
----
----@return true|nil
----@return string? error
----@return unix.Errno? errno
+--- This wraps the C `clearenv()` function to allow Lua scripts to
+--- remove all environment variables at once. Never fails: this
+--- project's `clearenv()` (`libc/intrin/clearenv.c`)
+--- unconditionally sets `environ = 0` and returns success.
+---@return true
 function unix.clearenv() end
 
 --- Gets login name of current user.
@@ -4822,6 +4966,11 @@ function unix.spawnp(prog, argv, envp) end
 ---@return unix.Errno? errno
 function unix.dup(oldfd, newfd, flags, lowest) end
 
+--- A pipe's two file descriptors, as returned by `pipe`.
+---@class unix.Pipe
+---@field reader integer the read end's file descriptor
+---@field writer integer the write end's file descriptor
+
 --- Creates fifo which enables communication between processes.
 ---
 ---@param flags integer? may have any combination (using bitwise OR) of:
@@ -4834,26 +4983,27 @@ function unix.dup(oldfd, newfd, flags, lowest) end
 ---   as they're no larger than `PIPE_BUF` (guaranteed to be 512+ bytes)
 ---   with support limited to Linux, Windows NT, FreeBSD, and NetBSD.
 ---
---- Returns two file descriptors: one for reading and one for writing.
+--- Returns one `unix.Pipe` table with `reader` and `writer` file
+--- descriptor fields.
 ---
 --- Here's an example of how pipe(), fork(), dup(), etc. may be used
 --- to serve an HTTP response containing the output of a subprocess.
 ---
 ---     local unix = require "unix"
 ---     ls = assert(unix.commandv("ls"))
----     reader, writer = assert(unix.pipe())
+---     pipe = assert(unix.pipe())
 ---     if assert(unix.fork()) == 0 then
 ---        unix.close(1)
----        unix.dup(writer)
----        unix.close(writer)
----        unix.close(reader)
+---        unix.dup(pipe.writer)
+---        unix.close(pipe.writer)
+---        unix.close(pipe.reader)
 ---        unix.execve(ls, {ls, "-Shal"})
 ---        unix.exit(127)
 ---     else
----        unix.close(writer)
+---        unix.close(pipe.writer)
 ---        SetHeader('Content-Type', 'text/plain')
 ---        while true do
----           data, err, errno = unix.read(reader)
+---           data, err, errno = unix.read(pipe.reader)
 ---           if data then
 ---              if data ~= "" then
 ---                 Write(data)
@@ -4865,15 +5015,23 @@ function unix.dup(oldfd, newfd, flags, lowest) end
 ---              break
 ---           end
 ---        end
----        assert(unix.close(reader))
+---        assert(unix.close(pipe.reader))
 ---        assert(unix.wait())
 ---     end
 ---
----@return integer|nil reader, integer writer
+---@return unix.Pipe|nil
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard
 function unix.pipe(flags) end
+
+--- A terminated child's pid, wait status, and resource usage, as
+--- returned by `wait`.
+---@class unix.WaitResult
+---@field pid integer Process id of the child that changed state.
+---@field wstatus integer Raw wait status; decode with `unix.WIFEXITED`,
+--- `unix.WEXITSTATUS`, `unix.WIFSIGNALED`, `unix.WTERMSIG`, etc.
+---@field rusage unix.Rusage Resource usage accumulated by the child.
 
 --- Waits for subprocess to terminate.
 ---
@@ -4886,37 +5044,38 @@ function unix.pipe(flags) end
 --- the existence of processes that are already dead (technically
 --- speaking zombies) and if so harvest them immediately.
 ---
---- Returns the process id of the child that terminated. In other
---- cases, the returned `pid` is nil and `errno` is non-nil.
+--- Returns one `unix.WaitResult` table with `pid`, `wstatus`, and
+--- `rusage` fields; on failure the error string and errno are always
+--- in slots 2 and 3, never sharing them with a result field.
 ---
---- The returned `wstatus` contains information about the process
---- exit status. It's a complicated integer and there's functions
---- that can help interpret it. For example:
+--- The returned `wstatus` field contains information about the
+--- process exit status. It's a complicated integer and there's
+--- functions that can help interpret it. For example:
 ---
 ---     -- wait for zombies
 ---     -- traditional technique for SIGCHLD handlers
 ---     while true do
----        pid, status, errno = unix.wait(-1, unix.WNOHANG)
----        if pid then
----           if unix.WIFEXITED(status) then
----              print('child', pid, 'exited with',
----                    unix.WEXITSTATUS(status))
----           elseif unix.WIFSIGNALED(status) then
----              print('child', pid, 'crashed with',
----                    unix.strsignal(unix.WTERMSIG(status)))
+---        local result, err, errno = unix.wait(-1, unix.WNOHANG)
+---        if result then
+---           if unix.WIFEXITED(result.wstatus) then
+---              print('child', result.pid, 'exited with',
+---                    unix.WEXITSTATUS(result.wstatus))
+---           elseif unix.WIFSIGNALED(result.wstatus) then
+---              print('child', result.pid, 'crashed with',
+---                    unix.strsignal(unix.WTERMSIG(result.wstatus)))
 ---           end
 ---        elseif errno == unix.ECHILD then
 ---           Log(kLogDebug, 'no more zombies')
 ---           break
 ---        else
----           Log(kLogWarn, status)
+---           Log(kLogWarn, err)
 ---           break
 ---        end
 ---     end
 ---
 ---@param pid? integer
 ---@param options? integer
----@return integer|nil pid, integer wstatus, unix.Rusage rusage
+---@return unix.WaitResult|nil result
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.wait(pid, options) end
@@ -5010,11 +5169,12 @@ function unix.killpg(pgrp, sig) end
 
 --- Triggers signal in current process.
 ---
---- This is pretty much the same as `kill(getpid(), sig)`.
+--- This is pretty much the same as `kill(getpid(), sig)`. Raises a
+--- bad-argument error if `sig` is not `0` (existence check only,
+--- like `kill(pid, 0)`) or a valid signal number — POSIX's only
+--- documented failure for `raise()`, `EINVAL`.
 ---@param sig integer
----@return integer|nil rc
----@return string? error
----@return unix.Errno? errno
+---@return integer rc
 function unix.raise(sig) end
 
 --- Checks if effective user of current process has permission to access file.
@@ -5091,24 +5251,37 @@ function unix.makedirs(path, mode) end
 ---@return unix.Errno? errno
 function unix.mkdtemp(template) end
 
+--- The path of a file created by `mkstemp`, wrapped in a table.
+---
+--- `path` used to be a second positional return value, a plain string
+--- sharing the same slot (2) that the failure path returns its error
+--- string in -- nothing about the type distinguished a created path
+--- from an error message. Bundling it into a table -- like
+--- `unix.SleepRemainder` -- fixes the slot's meaning across branches:
+--- 2 is a `unix.MkstempPath` on success, the error string on failure.
+---@class unix.MkstempPath
+---@field path string the created file's path
+
 --- Creates a temporary file with a unique name.
 ---
 --- `template` must end with "XXXXXX" which will be replaced with random
 --- characters to create a unique filename.
 ---
---- Returns both the file descriptor and the path of the created file.
---- The file is opened for reading and writing.
+--- Returns the file descriptor and, bundled in a `unix.MkstempPath`
+--- table, the path of the created file. The file is opened for reading
+--- and writing.
 ---
 --- Example:
 ---
----     local fd, path = unix.mkstemp("/tmp/myapp_XXXXXX")
+---     local fd, result = unix.mkstemp("/tmp/myapp_XXXXXX")
 ---     unix.write(fd, "hello")
 ---     unix.close(fd)
----     unix.unlink(path)
+---     unix.unlink(result.path)
 ---
 ---@param template string template path ending in XXXXXX
----@return integer|nil fd, string path
----@return string? error
+---@return integer|nil fd
+---@return unix.MkstempPath|string path the created file's path on success, or
+--- the error string on failure
 ---@return unix.Errno? errno
 function unix.mkstemp(template) end
 
@@ -5152,7 +5325,7 @@ function unix.rmdir(path, dirfd) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(oldpath: string, newpath: string): true
+---@overload fun(oldpath: string, newpath: string): true|nil, string?, unix.Errno?
 function unix.rename(oldpath, newpath, olddirfd, newdirfd) end
 
 ---Creates hard link, so your underlying inode has two names.
@@ -5164,8 +5337,8 @@ function unix.rename(oldpath, newpath, olddirfd, newdirfd) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(existingpath: string, newpath: string, flags?: integer): true
----@overload fun(existingpath: string, newpath: string, flags: integer, olddirfd: integer, newdirfd: integer): true
+---@overload fun(existingpath: string, newpath: string, flags?: integer): true|nil, string?, unix.Errno?
+---@overload fun(existingpath: string, newpath: string, flags: integer, olddirfd: integer, newdirfd: integer): true|nil, string?, unix.Errno?
 function unix.link(existingpath, newpath, flags, olddirfd, newdirfd) end
 
 --- Creates symbolic link.
@@ -5191,13 +5364,19 @@ function unix.symlink(target, linkpath, newdirfd) end
 --- furthermore prefixes `//?/` to WIN32 DOS-style absolute paths,
 --- thereby assisting with simple absolute filename checks in addition
 --- to enabling one to exceed the traditional 260 character limit.
+---
+--- Unlike upstream, this fork's second parameter is not a directory
+--- file descriptor to resolve `path` against -- resolution always uses
+--- `AT_FDCWD`. It is instead an optional buffer size for the link's
+--- content, clamped to `[1, 0x7ffff000]`.
 ---@param path string
----@param dirfd? integer
+---@param bufsiz? integer buffer size for the link content, clamped to
+--- `[1, 0x7ffff000]`
 ---@return string|nil content
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard
-function unix.readlink(path, dirfd) end
+function unix.readlink(path, bufsiz) end
 
 --- Returns absolute path of filename, with `.` and `..` components
 --- removed, and symlinks will be resolved.
@@ -5491,11 +5670,11 @@ function unix.rmrf(path) end
 ---@return string? error
 ---@return unix.Errno? errno
 ---@overload fun(fd: integer, unix.F_GETFD: integer): flags: integer
----@overload fun(fd: integer, unix.F_SETFD: integer, flags: integer): true
+---@overload fun(fd: integer, unix.F_SETFD: integer, flags: integer): true|nil, string?, unix.Errno?
 ---@overload fun(fd: integer, unix.F_GETFL: integer): flags: integer
----@overload fun(fd: integer, unix.F_SETFL: integer, flags: integer): true
----@overload fun(fd: integer, unix.F_SETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true
----@overload fun(fd: integer, unix.F_SETLKW: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true
+---@overload fun(fd: integer, unix.F_SETFL: integer, flags: integer): true|nil, string?, unix.Errno?
+---@overload fun(fd: integer, unix.F_SETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true|nil, string?, unix.Errno?
+---@overload fun(fd: integer, unix.F_SETLKW: integer, type?: integer, start?: integer, len?: integer, whence?: integer): true|nil, string?, unix.Errno?
 ---@overload fun(fd: integer, unix.F_GETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): unix.F_UNLCK: integer
 ---@overload fun(fd: integer, unix.F_GETLK: integer, type?: integer, start?: integer, len?: integer, whence?: integer): type: integer, start: integer, len: integer, whence: integer, pid: integer
 function unix.fcntl(fd, cmd, ...) end
@@ -5509,9 +5688,10 @@ function unix.fcntl(fd, cmd, ...) end
 function unix.getsid(pid) end
 
 --- Gets process group id.
----@return integer|nil pgid
----@return string? error
----@return unix.Errno? errno
+---
+--- This function does not fail: getpgrp(2) takes no argument and POSIX
+--- guarantees it is always successful.
+---@return integer pgid
 ---@nodiscard
 function unix.getpgrp() end
 
@@ -5860,26 +6040,37 @@ function unix.syslog(priority, msg) end
 ---@nodiscard
 function unix.clock_gettime(clock) end
 
+--- Time left in a sleep, in seconds and nanoseconds.
+---@class unix.SleepRemainder
+---@field seconds integer Whole seconds left to sleep.
+---@field nanos integer Nanoseconds left to sleep, past `seconds`.
+
 --- Sleeps with nanosecond precision.
 ---
 --- Returns `EINTR` if a signal was received while waiting. On that
---- failure the kernel's remainder follows the errno as two further
---- values (`eintr_remseconds`, `eintr_remnanos`), so an interrupted
---- sleep can be resumed without re-deriving the remainder from a
---- clock. A sleep that completes returns a zero remainder: POSIX
---- leaves the kernel's buffer unspecified on success, and the sleep
---- is over by definition.
+--- failure a fourth return value carries the kernel's unslept
+--- remainder as a `unix.SleepRemainder` table, so an interrupted sleep
+--- can be resumed without re-deriving it from a clock. A sleep that
+--- completes returns a remainder of zero: POSIX leaves the kernel's
+--- buffer unspecified on success, and the sleep is over by
+--- definition.
+---
+--- The remainder used to be two positional integers (`remseconds`,
+--- `remnanos`) on both the success and the EINTR path, which put the
+--- failure path's error string in the same slot a completed sleep's
+--- `remnanos` occupied. Bundling the remainder into one table — like
+--- `unix.capget`'s caps table — keeps every slot's meaning fixed
+--- regardless of branch: this return is always the value-or-nil, the
+--- next two are always error/errno, and the fourth is the EINTR
+--- remainder, present on no other path.
 ---@param seconds integer
 ---@param nanos integer?
----@return integer|nil remseconds 0 on success, nil when the call failed
----@return integer|string remnanos 0 on success, or the error string when
---- the call failed — failure returns exactly `nil, error, errno`, so the
---- error lands in this slot, not in a slot of its own
+---@return unix.SleepRemainder|nil remaining zero seconds/nanos on a
+--- completed sleep, nil when the call failed
+---@return string? error
 ---@return unix.Errno? errno
----@return integer? eintr_remseconds seconds left of the sleep, present
---- only when the errno is `EINTR`
----@return integer? eintr_remnanos nanoseconds left of the sleep, present
---- only when the errno is `EINTR`
+---@return unix.SleepRemainder? eintr_remaining seconds/nanos left to
+--- sleep, present only when the errno is `EINTR`
 function unix.nanosleep(seconds, nanos) end
 
 --- These functions are used to make programs slower by asking the
@@ -6039,7 +6230,7 @@ function unix.socketpair(family, type, protocol) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(fd: integer, unixpath: string): true
+---@overload fun(fd: integer, unixpath: string): true|nil, string?, unix.Errno?
 function unix.bind(fd, ip, port) end
 
 --- One network interface's IPv4 addressing, as returned in the array
@@ -6302,8 +6493,8 @@ function unix.getsockopt(fd, level, optname) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_LINGER: integer, secs:integer, enabled:boolean): true
----@overload fun(serverfd:integer, unix.SOL_TCP: integer, unix.TCP_SAVE_SYN: integer, enabled:integer): true
+---@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_LINGER: integer, secs:integer, enabled:boolean): true|nil, string?, unix.Errno?
+---@overload fun(serverfd:integer, unix.SOL_TCP: integer, unix.TCP_SAVE_SYN: integer, enabled:integer): true|nil, string?, unix.Errno?
 function unix.setsockopt(fd, level, optname, value) end
 
 --- Checks for events on a set of file descriptors.
@@ -6367,9 +6558,15 @@ function unix.sethostname(name) end
 --- forked child to give that child a controlling terminal.
 ---
 --- Not supported on Windows or bare metal, where it returns `ENOSYS`.
----@return integer|nil mfd, integer sfd, string name
----@return string? error
----@return unix.Errno? errno
+--- Returns exactly 3 values in both branches: success returns `mfd,
+--- sfd, name`; failure returns exactly `nil, error, errno`, so the
+--- error string lands in the slot declared `sfd` and the errno lands
+--- in the slot declared `name`, not in slots of their own.
+---@return integer|nil mfd
+---@return integer|string sfd the subordinate fd on success, or the
+--- error string when the call failed
+---@return string|unix.Errno name the subordinate's path on success, or
+--- the errno when the call failed
 ---@nodiscard
 function unix.openpty() end
 
@@ -6423,7 +6620,7 @@ function unix.accept(serverfd, flags) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(fd:integer, unixpath:string): true
+---@overload fun(fd:integer, unixpath:string): true|nil, string?, unix.Errno?
 function unix.connect(fd, ip, port) end
 
 --- Retrieves the local address of a socket.
@@ -6543,10 +6740,15 @@ function unix.shutdown(fd, how) end
 ---   assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
 ---
 ---@param newmask unix.Sigset
----@return unix.Sigset|nil oldmask
----@return string? error
----@return unix.Errno? errno
+---@return unix.Sigset oldmask
 function unix.sigprocmask(how, newmask) end
+
+--- Previous signal disposition returned by `sigaction`.
+---@class unix.SignalAction
+---@field handler function|integer Previous handler: a Lua function,
+--- `SIG_IGN`, `SIG_DFL`, or a raw function pointer.
+---@field flags integer Previous `sa_flags`.
+---@field mask unix.Sigset Previous signal mask.
 
 ---@param sig integer can be one of:
 ---
@@ -6632,7 +6834,7 @@ function unix.sigprocmask(how, newmask) end
 --- It's a good idea to not do too much work in a signal handler.
 ---
 ---@param mask? unix.Sigset
----@return function|integer|nil oldhandler, integer flags, unix.Sigset mask
+---@return unix.SignalAction|nil previous
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.sigaction(sig, handler, flags, mask) end
@@ -6646,11 +6848,12 @@ function unix.sigaction(sig, handler, flags, mask) end
 ---@return unix.Errno? errno
 function unix.sigsuspend(mask) end
 
---- Returns the set of signals pending delivery to the calling process
---- that are currently blocked.
----@return unix.Sigset|nil mask
----@return string? error
----@return unix.Errno? errno
+--- Returns the set of signals pending delivery to the calling
+--- process that are currently blocked. Never fails on any
+--- platform this project supports: its one documented failure,
+--- EFAULT, needs an invalid pointer this binding never
+--- constructs.
+---@return unix.Sigset mask
 function unix.sigpending() end
 
 --- Causes `SIGALRM` signals to be generated at some point(s) in the
@@ -6673,15 +6876,22 @@ function unix.sigpending() end
 ---     unix.sigaction(unix.SIGALRM, MyOnSigAlrm, unix.SA_RESETHAND)
 ---     unix.setitimer(unix.ITIMER_REAL, 0, 0, 1, 0)
 ---
+--- Previous interval-timer setting returned by `setitimer`.
+---@class unix.Itimerval
+---@field intervalsec integer Whole seconds of the recurring interval.
+---@field intervalns integer Nanoseconds of the recurring interval, past `intervalsec`.
+---@field valuesec integer Whole seconds left until the next tick.
+---@field valuens integer Nanoseconds left until the next tick, past `valuesec`.
+
 ---@param which integer
 ---@param intervalsec integer
 ---@param intervalns integer needs to be on the interval `[0,1000000000)`
 ---@param valuesec integer
 ---@param valuens integer needs to be on the interval `[0,1000000000)`
----@return integer|nil intervalsec, integer intervalns, integer valuesec, integer valuens
+---@return unix.Itimerval|nil previous
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(which: integer): intervalsec: integer, intervalns: integer, valuesec: integer, valuens: integer
+---@overload fun(which: integer): unix.Itimerval
 function unix.setitimer(which, intervalsec, intervalns, valuesec, valuens) end
 
 --- Turns platform-specific `sig` code into its symbolic name.
@@ -6737,9 +6947,14 @@ function unix.strsignal(sig) end
 ---@return unix.Errno? errno
 function unix.setrlimit(resource, soft, hard) end
 
+--- Resource limits returned by `getrlimit`.
+---@class unix.Rlimit
+---@field soft integer Current enforced limit.
+---@field hard integer Ceiling `soft` may be raised to.
+
 --- Returns information about resource limits for current process.
 ---@param resource integer
----@return integer|nil soft, integer hard
+---@return unix.Rlimit|nil
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard
@@ -7076,33 +7291,36 @@ function unix.pledge(promises, execpromises, mode) end
 ---@return true|nil
 ---@return string? error
 ---@return unix.Errno? errno
----@overload fun(path: nil, permissions: nil): true
+---@overload fun(path: nil, permissions: nil): true|nil, string?, unix.Errno?
 function unix.unveil(path, permissions) end
+
+--- Broken-down time returned by `gmtime`/`localtime`.
+---@class unix.BrokenDownTime
+---@field year integer four-digit year
+---@field mon integer 1 ≤ mon ≤ 12
+---@field mday integer 1 ≤ mday ≤ 31
+---@field hour integer 0 ≤ hour ≤ 23
+---@field min integer 0 ≤ min ≤ 59
+---@field sec integer 0 ≤ sec ≤ 60
+---@field gmtoffsec integer ±93600 seconds
+---@field wday integer 0 ≤ wday ≤ 6
+---@field yday integer 0 ≤ yday ≤ 365
+---@field dst integer 1 if daylight savings, 0 if not, -1 if unknown
+---@field zone string time zone abbreviation, e.g. "UTC"
 
 --- Breaks down UNIX timestamp into Zulu Time numbers.
 ---@param unixts integer
----@return integer|nil year nil when the call failed
----@return integer|string mon 1 ≤ mon ≤ 12, or the error string when the
---- call failed — failure returns exactly `nil, error, errno`, so its two
---- values land in the slots mon and mday occupy on success, not in slots
---- of their own past `zone`
----@return integer|unix.Errno mday 1 ≤ mday ≤ 31, or the errno when the
---- call failed
----@return integer hour 0 ≤ hour ≤ 23
----@return integer min 0 ≤ min ≤ 59
----@return integer sec 0 ≤ sec ≤ 60
----@return integer gmtoffsec ±93600 seconds
----@return integer wday 0 ≤ wday ≤ 6
----@return integer yday 0 ≤ yday ≤ 365
----@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
----@return string zone
+---@return unix.BrokenDownTime|nil
+---@return string? error
+---@return unix.Errno? errno
 ---@nodiscard
 function unix.gmtime(unixts) end
 
 --- Breaks down UNIX timestamp into local time numbers, e.g.
 ---
 ---     >: unix.localtime(unix.clock_gettime())
----     2022    4       28      2       14      22      -25200  4       117     1       "PDT"
+---     {year=2022, mon=4, mday=28, hour=2, min=14, sec=22,
+---      gmtoffsec=-25200, wday=4, yday=117, dst=1, zone="PDT"}
 ---
 --- This follows the same API as `gmtime()` which has further details.
 ---
@@ -7131,21 +7349,9 @@ function unix.gmtime(unixts) end
 --- needed, without having to recompile.
 ---
 ---@param unixts integer
----@return integer|nil year nil when the call failed
----@return integer|string mon 1 ≤ mon ≤ 12, or the error string when the
---- call failed — failure returns exactly `nil, error, errno`, so its two
---- values land in the slots mon and mday occupy on success, not in slots
---- of their own past `zone`
----@return integer|unix.Errno mday 1 ≤ mday ≤ 31, or the errno when the
---- call failed
----@return integer hour 0 ≤ hour ≤ 23
----@return integer min 0 ≤ min ≤ 59
----@return integer sec 0 ≤ sec ≤ 60
----@return integer gmtoffsec ±93600 seconds
----@return integer wday 0 ≤ wday ≤ 6
----@return integer yday 0 ≤ yday ≤ 365
----@return integer dst 1 if daylight savings, 0 if not, -1 if unknown
----@return string zone
+---@return unix.BrokenDownTime|nil
+---@return string? error
+---@return unix.Errno? errno
 function unix.localtime(unixts) end
 
 --- Gets information about file or directory.
@@ -7249,26 +7455,25 @@ function unix.opendir(path) end
 ---@nodiscard
 function unix.fdopendir(fd) end
 
---- Returns true if file descriptor is a teletypewriter. Otherwise nil
---- with an Errno object holding one of the following values:
----
---- - `ENOTTY` if `fd` is valid but not a teletypewriter
---- - `EBADF` if `fd` isn't a valid file descriptor.
---- - `EPERM` if pledge() is used without `tty` in lenient mode
----
---- No other error numbers are possible.
----
+--- Returns true if file descriptor is a teletypewriter, false
+--- otherwise — including when `fd` is invalid (`EBADF`) or
+--- pledge()-restricted (`EPERM`). The underlying libc isatty() never
+--- signals failure through its return value (only through `errno`,
+--- which this binding does not currently surface), so there is no nil
+--- case: a bad fd and a valid non-terminal fd are indistinguishable
+--- here.
 ---@param fd integer
----@return true|nil
----@return string? error
----@return unix.Errno? errno
+---@return boolean
 ---@nodiscard
 function unix.isatty(fd) end
 
 ---@param fd integer
----@return integer|nil rows, integer cols cellular dimensions of pseudoteletypewriter display.
----@return string? error
----@return unix.Errno? errno
+---@return integer|nil rows
+---@return integer|string cols cellular dimensions of pseudoteletypewriter
+--- display on success, or the error string when the call failed —
+--- failure returns exactly `nil, error, errno`, so the error lands in
+--- this slot, not one of its own
+---@return unix.Errno? errno the errno on failure; nil on success
 ---@nodiscard
 function unix.tiocgwinsz(fd) end
 
@@ -7421,11 +7626,18 @@ function unix.pivot_root(new_root, put_old) end
 ---@return unix.Errno? errno
 function unix.prctl(option, arg2, arg3, arg4, arg5) end
 
---- Returns the calling thread's (or `pid`'s) capability sets as
---- 64-bit bitmasks. Each bit position N corresponds to `unix.CAP_*`
---- constant N. Linux-only.
+--- Capability sets returned by `capget`, as read by `capset`.
+---@class unix.Caps
+---@field effective integer Bitmask of `1 << unix.CAP_*` bits.
+---@field permitted integer Bitmask of `1 << unix.CAP_*` bits.
+---@field inheritable integer Bitmask of `1 << unix.CAP_*` bits.
+
+--- Returns the calling thread's (or `pid`'s) capability sets as a
+--- table with `effective`, `permitted`, and `inheritable` fields,
+--- each a 64-bit bitmask. Each bit position N in those masks
+--- corresponds to `unix.CAP_*` constant N. Linux-only.
 ---@param pid integer?
----@return integer|nil effective, integer permitted, integer inheritable
+---@return unix.Caps|nil caps
 ---@return string? error
 ---@return unix.Errno? errno
 function unix.capget(pid) end
@@ -7841,7 +8053,12 @@ function unix.Dir:close() end
 --- Note: This function also serves as the `__call` metamethod, so that
 --- `unix.Dir` objects may be used as a for loop iterator.
 ---
----@return string|nil name, integer kind, integer ino, integer off
+---@return string|nil name
+---@return integer|string kind directory entry type on success, or the error
+--- string on failure
+---@return integer|unix.Errno ino inode number on success, or the errno on
+--- failure
+---@return integer off
 ---@nodiscard
 function unix.Dir:read() end
 
@@ -7849,7 +8066,9 @@ function unix.Dir:read() end
 ---@return string? error
 ---@return unix.Errno? errno
 ---@nodiscard
---- Returns `EOPNOTSUPP` if using a `/zip/...` path or if using Windows NT.
+--- Always returns the directory stream's underlying file descriptor,
+--- as a plain integer; there is no `/zip/...` or Windows NT case that
+--- fails.
 function unix.Dir:fd() end
 
 ---@return integer|nil off current arbitrary offset into stream.

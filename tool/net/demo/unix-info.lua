@@ -35,26 +35,26 @@ Write('<dt>unix.getcwd()\r\n')
 Write('<dd>%s\r\n' % {EscapeHtml(assert(unix.getcwd()))})
 
 function PrintResourceLimit(name, id)
-   soft, hard = unix.getrlimit(id)
+   rlim, err = unix.getrlimit(id)
    Write('<dt>getrlimit(%s)\r\n' % {name})
-   if soft then
+   if rlim then
       Write('<dd>')
       Write('soft ')
-      if soft == -1 then
+      if rlim.soft == -1 then
          Write('∞')
       else
-         Write('%d' % {soft})
+         Write('%d' % {rlim.soft})
       end
       Write('<br>\r\n')
       Write('hard ')
-      if hard == -1 then
+      if rlim.hard == -1 then
          Write('∞')
       else
-         Write('%d' % {hard})
+         Write('%d' % {rlim.hard})
       end
       Write('\r\n')
    else
-      Write('<dd>%s\r\n' % {EscapeHtml(tostring(hard))})
+      Write('<dd>%s\r\n' % {EscapeHtml(tostring(err))})
    end
 end
 PrintResourceLimit('RLIMIT_AS', unix.RLIMIT_AS)

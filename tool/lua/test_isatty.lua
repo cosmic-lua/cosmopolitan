@@ -20,10 +20,12 @@ if result then
   print("stdout is a tty (this should trigger warning in buggy version)")
 end
 
--- Test 3: isatty on an invalid/closed fd might return false or error depending on the fd number
--- For a high fd number that doesn't exist, it may return false (not a tty)
--- Let's just verify it doesn't crash and returns a boolean or nil
+-- Test 3: isatty on an invalid fd returns false, never a failure tuple:
+-- libc isatty() collapses EBADF/EPERM/ENOTTY to 0, so the binding has
+-- exactly one return shape (bool) and a bad fd is indistinguishable from
+-- a valid non-terminal fd.
 local result, err = unix.isatty(999999)
-assert(type(result) == "boolean" or result == nil, "isatty should return boolean or nil")
+assert(result == false, "isatty on a bad fd should return false, got: " .. tostring(result))
+assert(err == nil, "isatty should never return an error, got: " .. tostring(err))
 
 print("all isatty tests passed")

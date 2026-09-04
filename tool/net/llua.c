@@ -193,7 +193,7 @@ static struct DecodeLua ScanShortString(struct Ctx *c, const char *p) {
   luaL_buffinit(c->L, &b);
   while (q < e && *q != quote) {
     unsigned char ch = (unsigned char)*q;
-    if (ch == '\n') {
+    if (ch == '\n' || ch == '\r') {
       c->lexfail = 1;
       return Fail(c, p, kErrString);
     }

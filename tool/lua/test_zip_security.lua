@@ -319,6 +319,7 @@ assert(err:match("not a zip"), "zip.open() error should indicate invalid zip")
 -- Cleanup
 --------------------------------------------------------------------------------
 
-os.execute("rm -rf " .. tmpdir)
+assert(unix.rmrf(tmpdir))
+assert(not unix.stat(tmpdir), "tmpdir should not exist after cleanup")
 
 print("PASS")

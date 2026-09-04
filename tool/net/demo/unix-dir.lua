@@ -74,10 +74,10 @@ for name, kind, ino, off in assert(unix.opendir(dir)) do
       Write('<td class=r>%#x\r\n' % {st:flags()})
 
       function WriteTime(unixsec,nanos)
-         year,mon,mday,hour,min,sec,gmtoffsec = unix.localtime(unixsec)
+         local bdt = unix.localtime(unixsec)
          Write('<td class=r>%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.9d%+.2d%.2d\r\n' % {
-                  year, mon, mday, hour, min, sec, nanos,
-                  gmtoffsec / (60 * 60), math.abs(gmtoffsec) % 60})
+                  bdt.year, bdt.mon, bdt.mday, bdt.hour, bdt.min, bdt.sec, nanos,
+                  bdt.gmtoffsec / (60 * 60), math.abs(bdt.gmtoffsec) % 60})
       end
 
       WriteTime(st:birthtim())

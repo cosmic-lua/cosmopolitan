@@ -693,7 +693,8 @@ int LuaFetch(lua_State *L) {
         close(sock);
         free(inbuf.p);
         DestroyHttpMessage(&msg);
-        return LuaFetchError(L, "too_large", "response too large (max %I bytes)",
+        return LuaFetchError(L, "too_large",
+                             "response too large (max " LUA_INTEGER_FMT " bytes)",
                              (LUAI_UACINT)maxresponse);
       }
       if (!(newp = realloc(inbuf.p, inbuf.c))) {

@@ -32,7 +32,7 @@
 #include "libc/sysv/consts/auxv.h"
 #include "libc/thread/thread.h"
 #include "third_party/double-conversion/wrapper.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/ltests.h"
 #include "third_party/lua/lua.h"

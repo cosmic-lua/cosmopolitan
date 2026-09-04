@@ -32,9 +32,9 @@ THIRD_PARTY_LUA_A =						\
 	o/$(MODE)/third_party/lua/lua.a
 
 THIRD_PARTY_LUA_A_HDRS =					\
-	third_party/lua/cosmo.h					\
+	third_party/lua/cosmo/cosmo.h				\
 	third_party/lua/lapi.h					\
-	third_party/lua/lcosmo.h				\
+	third_party/lua/cosmo/lcosmo.h				\
 	third_party/lua/lauxlib.h				\
 	third_party/lua/lcode.h					\
 	third_party/lua/lctype.h				\
@@ -49,8 +49,8 @@ THIRD_PARTY_LUA_A_HDRS =					\
 	third_party/lua/lopcodes.h				\
 	third_party/lua/lparser.h				\
 	third_party/lua/lprefix.h				\
-	third_party/lua/lrepl.h					\
-	third_party/lua/lreplmod.h				\
+	third_party/lua/cosmo/lrepl.h				\
+	third_party/lua/cosmo/lreplmod.h			\
 	third_party/lua/lstate.h				\
 	third_party/lua/lstring.h				\
 	third_party/lua/ltable.h				\
@@ -62,8 +62,8 @@ THIRD_PARTY_LUA_A_HDRS =					\
 	third_party/lua/lundump.h				\
 	third_party/lua/lvm.h					\
 	third_party/lua/lzio.h					\
-	third_party/lua/tms.h					\
-	third_party/lua/visitor.h
+	third_party/lua/cosmo/tms.h				\
+	third_party/lua/cosmo/visitor.h
 
 THIRD_PARTY_LUA_A_INCS =					\
 	third_party/lua/ljumptab.inc				\
@@ -84,17 +84,17 @@ THIRD_PARTY_LUA_A_SRCS =					\
 	third_party/lua/linit.c					\
 	third_party/lua/liolib.c				\
 	third_party/lua/llex.c					\
-	third_party/lua/llock.c					\
+	third_party/lua/cosmo/llock.c				\
 	third_party/lua/lmathlib.c				\
 	third_party/lua/lmem.c					\
-	third_party/lua/lnotice.c				\
+	third_party/lua/cosmo/lnotice.c				\
 	third_party/lua/loadlib.c				\
 	third_party/lua/lobject.c				\
 	third_party/lua/lopcodes.c				\
 	third_party/lua/loslib.c				\
 	third_party/lua/lparser.c				\
-	third_party/lua/lrepl.c					\
-	third_party/lua/lreplmod.c				\
+	third_party/lua/cosmo/lrepl.c				\
+	third_party/lua/cosmo/lreplmod.c			\
 	third_party/lua/lstate.c				\
 	third_party/lua/lstring.c				\
 	third_party/lua/lstrlib.c				\
@@ -102,23 +102,23 @@ THIRD_PARTY_LUA_A_SRCS =					\
 	third_party/lua/ltablib.c				\
 	third_party/lua/ltests.c				\
 	third_party/lua/ltm.c					\
-	third_party/lua/luacallwithtrace.c			\
-	third_party/lua/luaencodejsondata.c			\
-	third_party/lua/luaencodeluadata.c			\
-	third_party/lua/luaencodeurl.c				\
-	third_party/lua/luaformatstack.c			\
-	third_party/lua/luaparseurl.c				\
-	third_party/lua/luaprintstack.c				\
-	third_party/lua/luapushheader.c				\
-	third_party/lua/luapushheaders.c			\
-	third_party/lua/luapushlatin1.c				\
-	third_party/lua/luapushurlparams.c			\
+	third_party/lua/cosmo/luacallwithtrace.c		\
+	third_party/lua/cosmo/luaencodejsondata.c		\
+	third_party/lua/cosmo/luaencodeluadata.c		\
+	third_party/lua/cosmo/luaencodeurl.c			\
+	third_party/lua/cosmo/luaformatstack.c			\
+	third_party/lua/cosmo/luaparseurl.c			\
+	third_party/lua/cosmo/luaprintstack.c			\
+	third_party/lua/cosmo/luapushheader.c			\
+	third_party/lua/cosmo/luapushheaders.c			\
+	third_party/lua/cosmo/luapushlatin1.c			\
+	third_party/lua/cosmo/luapushurlparams.c		\
 	third_party/lua/lundump.c				\
 	third_party/lua/lutf8lib.c				\
 	third_party/lua/lvm.c					\
 	third_party/lua/lzio.c					\
-	third_party/lua/serialize.c				\
-	third_party/lua/visitor.c
+	third_party/lua/cosmo/serialize.c			\
+	third_party/lua/cosmo/visitor.c
 
 THIRD_PARTY_LUA_A_OBJS =					\
 	$(THIRD_PARTY_LUA_A_SRCS:%.c=o/$(MODE)/%.o)
@@ -151,6 +151,7 @@ THIRD_PARTY_LUA_A_DEPS :=					\
 
 $(THIRD_PARTY_LUA_A):						\
 		third_party/lua/				\
+		third_party/lua/cosmo/				\
 		$(THIRD_PARTY_LUA_A).pkg			\
 		$(THIRD_PARTY_LUA_A_OBJS)
 
@@ -186,10 +187,10 @@ THIRD_PARTY_LUA_UNIX_A =					\
 	o/$(MODE)/third_party/lua/lunix.a
 
 THIRD_PARTY_LUA_UNIX_HDRS =					\
-	third_party/lua/lunix.h
+	third_party/lua/cosmo/lunix.h
 
 THIRD_PARTY_LUA_UNIX_SRCS =					\
-	third_party/lua/lunix.c
+	third_party/lua/cosmo/lunix.c
 
 THIRD_PARTY_LUA_UNIX_OBJS =					\
 	$(THIRD_PARTY_LUA_UNIX_SRCS:%.c=o/$(MODE)/%.o)
@@ -219,12 +220,21 @@ THIRD_PARTY_LUA_UNIX_DEPS :=					\
 
 $(THIRD_PARTY_LUA_A):						\
 		third_party/lua/				\
+		third_party/lua/cosmo/				\
 		$(THIRD_PARTY_LUA_UNIX_A).pkg			\
 		$(THIRD_PARTY_LUA_UNIX_OBJS)
 
 $(THIRD_PARTY_LUA_UNIX_A).pkg:					\
 		$(THIRD_PARTY_LUA_UNIX_OBJS)			\
 		$(foreach x,$(THIRD_PARTY_LUA_UNIX_DIRECTDEPS),$($(x)_A).pkg)
+
+# lunix.o is a binding object; see the MODE=cov block in
+# tool/lua/BUILD.mk.
+ifeq ($(MODE),cov)
+$(THIRD_PARTY_LUA_UNIX_OBJS): private				\
+		CFLAGS +=					\
+			$(COVERAGE_CFLAGS)
+endif
 
 ################################################################################
 # lua
@@ -249,13 +259,13 @@ THIRD_PARTY_LUA_LUA_DEPS :=					\
 	$(call uniq,$(foreach x,$(THIRD_PARTY_LUA_LUA_DIRECTDEPS),$($(x))))
 
 o/$(MODE)/third_party/lua/lua.pkg:				\
-		o/$(MODE)/third_party/lua/lua.main.o		\
+		o/$(MODE)/third_party/lua/cosmo/lua.main.o	\
 		$(foreach x,$(THIRD_PARTY_LUA_LUA_DIRECTDEPS),$($(x)_A).pkg)
 
 o/$(MODE)/third_party/lua/lua.dbg:				\
 		$(THIRD_PARTY_LUA_LUA_DEPS)			\
 		o/$(MODE)/third_party/lua/lua.pkg		\
-		o/$(MODE)/third_party/lua/lua.main.o		\
+		o/$(MODE)/third_party/lua/cosmo/lua.main.o	\
 		$(CRT)						\
 		$(APE_NO_MODIFY_SELF)
 	@$(APELINK)
@@ -279,13 +289,13 @@ THIRD_PARTY_LUA_LUAC_DEPS :=					\
 	$(call uniq,$(foreach x,$(THIRD_PARTY_LUA_LUAC_DIRECTDEPS),$($(x))))
 
 o/$(MODE)/third_party/lua/luac.pkg:				\
-		o/$(MODE)/third_party/lua/luac.main.o		\
+		o/$(MODE)/third_party/lua/cosmo/luac.main.o	\
 		$(foreach x,$(THIRD_PARTY_LUA_LUAC_DIRECTDEPS),$($(x)_A).pkg)
 
 o/$(MODE)/third_party/lua/luac.dbg:				\
 		$(THIRD_PARTY_LUA_LUAC_DEPS)			\
 		o/$(MODE)/third_party/lua/luac.pkg		\
-		o/$(MODE)/third_party/lua/luac.main.o		\
+		o/$(MODE)/third_party/lua/cosmo/luac.main.o	\
 		$(CRT)						\
 		$(APE_NO_MODIFY_SELF)
 	@$(APELINK)
@@ -294,8 +304,8 @@ o/$(MODE)/third_party/lua/luac.dbg:				\
 
 THIRD_PARTY_LUA_SRCS =						\
 	$(foreach x,$(THIRD_PARTY_LUA_ARTIFACTS),$($(x)_SRCS))	\
-	third_party/lua/lua.main.c				\
-	third_party/lua/luac.main.c
+	third_party/lua/cosmo/lua.main.c			\
+	third_party/lua/cosmo/luac.main.c
 
 THIRD_PARTY_LUA_LIBS = $(foreach x,$(THIRD_PARTY_LUA_ARTIFACTS),$($(x)))
 THIRD_PARTY_LUA_HDRS = $(foreach x,$(THIRD_PARTY_LUA_ARTIFACTS),$($(x)_HDRS))

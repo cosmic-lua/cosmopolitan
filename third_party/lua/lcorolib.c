@@ -29,6 +29,7 @@
 #define LUA_LIB
 
 #include "third_party/lua/lauxlib.h"
+#include "third_party/lua/llimits.h"
 #include "third_party/lua/lprefix.h"
 #include "third_party/lua/lua.h"
 #include "third_party/lua/lualib.h"
@@ -170,8 +171,13 @@ static int luaB_costatus (lua_State *L) {
 }
 
 
+static lua_State *getoptco (lua_State *L) {
+  return (lua_isnone(L, 1) ? L : getco(L));
+}
+
+
 static int luaB_yieldable (lua_State *L) {
-  lua_State *co = lua_isnone(L, 1) ? L : getco(L);
+  lua_State *co = getoptco(L);
   lua_pushboolean(L, lua_isyieldable(co));
   return 1;
 }
@@ -185,7 +191,7 @@ static int luaB_corunning (lua_State *L) {
 
 
 static int luaB_close (lua_State *L) {
-  lua_State *co = getco(L);
+  lua_State *co = getoptco(L);
   int status = auxstatus(L, co);
   switch (status) {
     case COS_DEAD: case COS_YIELD: {
@@ -200,8 +206,17 @@ static int luaB_close (lua_State *L) {
         return 2;
       }
     }
-    default:  /* normal or running coroutine */
+    case COS_NORM:
       return luaL_error(L, "cannot close a %s coroutine", statname[status]);
+    case COS_RUN:
+      lua_geti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD);  /* get main */
+      if (lua_tothread(L, -1) == co)
+        return luaL_error(L, "cannot close main thread");
+      lua_closethread(co, L);  /* close itself */
+      /* previous call does not return *//* FALLTHROUGH */
+    default:
+      lua_assert(0);
+      return 0;
   }
 }
 

@@ -38,7 +38,8 @@ end
 -- Fork-uniqueness tripwire: 1000 UUIDs split across parent and child must all
 -- be distinct. A seed drawn only from rdtsc+pid would collide here.
 local N = 500
-local r, w = assert(unix.pipe())
+local pipe = assert(unix.pipe())
+local r, w = pipe.reader, pipe.writer
 local pid = assert(unix.fork())
 if pid == 0 then
   unix.close(r)
@@ -78,9 +79,11 @@ else
     set[u] = true
     total = total + 1
   end
-  local wpid, wstatus = assert(unix.wait(pid))
-  assert(wpid == pid, "wait should reap our child")
-  assert(unix.WIFEXITED(wstatus) and unix.WEXITSTATUS(wstatus) == 0,
+  -- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+  -- rusage=}), not positional values -- slot 2 always means error.
+  local result = assert(unix.wait(pid))
+  assert(result.pid == pid, "wait should reap our child")
+  assert(unix.WIFEXITED(result.wstatus) and unix.WEXITSTATUS(result.wstatus) == 0,
     "child should exit 0")
   assert(total == 2 * N,
     "all " .. (2 * N) .. " uuids across parent/child must be distinct, got " ..

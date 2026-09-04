@@ -1806,12 +1806,6 @@ FUNCTIONS
           reset at the end of the http request, so it can be used to disable
           access log and message logging.
 
-  VisualizeControlCodes(str) → str
-          Replaces C0 control codes and trojan source characters with
-          descriptive UNICODE pictorial representation. This function
-          also canonicalizes overlong encodings. C1 control codes are
-          replaced with a JavaScript-like escape sequence.
-
   Underlong(str) → str
           Canonicalizes overlong encodings.
 
@@ -2875,7 +2869,7 @@ UNIX MODULE
     those numbers.
 
   unix.pipe([flags:int])
-      ├─→ reader:int, writer:int
+      ├─→ unix.Pipe
       └─→ nil, error:str, errno:int
 
     Creates fifo which enables communication between processes.
@@ -2890,26 +2884,26 @@ UNIX MODULE
       as they're no larger than `PIPE_BUF` (guaranteed to be 512+ bytes)
       with support limited to Linux, Windows NT, FreeBSD, and NetBSD.
 
-    Returns two file descriptors: one for reading and one for writing.
+    Returns one `unix.Pipe` table with `reader` and `writer` fields.
 
     Here's an example of how pipe(), fork(), dup(), etc. may be used
     to serve an HTTP response containing the output of a subprocess.
 
         local unix = require "unix"
         ls = assert(unix.commandv("ls"))
-        reader, writer = assert(unix.pipe())
+        pipe = assert(unix.pipe())
         if assert(unix.fork()) == 0 then
            unix.close(1)
-           unix.dup(writer)
-           unix.close(writer)
-           unix.close(reader)
+           unix.dup(pipe.writer)
+           unix.close(pipe.writer)
+           unix.close(pipe.reader)
            unix.execve(ls, {ls, "-Shal"})
            unix.exit(127)
         else
-           unix.close(writer)
+           unix.close(pipe.writer)
            SetHeader('Content-Type', 'text/plain')
            while true do
-              data, err, errno = unix.read(reader)
+              data, err, errno = unix.read(pipe.reader)
               if data then
                  if data ~= "" then
                     Write(data)
@@ -2921,12 +2915,12 @@ UNIX MODULE
                  break
               end
            end
-           assert(unix.close(reader))
+           assert(unix.close(pipe.reader))
            assert(unix.wait())
         end
 
   unix.wait([pid:int[, options:int]])
-      ├─→ pid:int, wstatus:int, unix.Rusage
+      ├─→ unix.WaitResult
       └─→ nil, error:str, errno:int
 
     Waits for subprocess to terminate.
@@ -2940,30 +2934,31 @@ UNIX MODULE
     the existence of processes that are already dead (technically
     speaking zombies) and if so harvest them immediately.
 
-    Returns the process id of the child that terminated. In other
-    cases, the returned `pid` is nil and `errno` is non-nil.
+    Returns one `unix.WaitResult` table with `pid`, `wstatus`, and
+    `rusage` fields; on failure the error string and errno are always
+    in slots 2 and 3, never sharing them with a result field.
 
-    The returned `wstatus` contains information about the process
-    exit status. It's a complicated integer and there's functions
-    that can help interpret it. For example:
+    The returned `wstatus` field contains information about the
+    process exit status. It's a complicated integer and there's
+    functions that can help interpret it. For example:
 
         -- wait for zombies
         -- traditional technique for SIGCHLD handlers
         while true do
-           pid, status, errno = unix.wait(-1, unix.WNOHANG)
-           if pid then
-              if unix.WIFEXITED(status) then
-                 print('child', pid, 'exited with',
-                       unix.WEXITSTATUS(status))
-              elseif unix.WIFSIGNALED(status) then
-                 print('child', pid, 'crashed with',
-                       unix.strsignal(unix.WTERMSIG(status)))
+           local result, err, errno = unix.wait(-1, unix.WNOHANG)
+           if result then
+              if unix.WIFEXITED(result.wstatus) then
+                 print('child', result.pid, 'exited with',
+                       unix.WEXITSTATUS(result.wstatus))
+              elseif unix.WIFSIGNALED(result.wstatus) then
+                 print('child', result.pid, 'crashed with',
+                       unix.strsignal(unix.WTERMSIG(result.wstatus)))
               end
            elseif errno == unix.ECHILD then
               Log(kLogDebug, 'no more zombies')
               break
            else
-              Log(kLogWarn, status)
+              Log(kLogWarn, err)
               break
            end
         end
@@ -3033,12 +3028,14 @@ UNIX MODULE
     treated like `SIGKILL`.
 
   unix.raise(sig:int)
-      ├─→ rc:int
-      └─→ nil, error:str, errno:int
+      └─→ rc:int
 
     Triggers signal in current process.
 
-    This is pretty much the same as `kill(getpid(), sig)`.
+    This is pretty much the same as `kill(getpid(), sig)`. Raises a
+    bad-argument error if `sig` is not `0` (existence check only, like
+    `kill(pid, 0)`) or a valid signal number, which is the only failure
+    POSIX documents for raise(); there is no failure tuple.
 
   unix.access(path:str, how:int[, flags:int[, dirfd:int]])
       ├─→ true
@@ -3406,10 +3403,12 @@ UNIX MODULE
     Gets session id.
 
   unix.getpgrp()
-      ├─→ pgid:int
-      └─→ nil, error:str, errno:int
+      └─→ pgid:int
 
     Gets process group id.
+
+    This function does not fail: getpgrp(2) takes no argument and POSIX
+    guarantees it is always successful.
 
   unix.setpgrp()
       ├─→ pgid:int
@@ -3588,8 +3587,7 @@ UNIX MODULE
     WIN32 it uses the ReportEvent() facility.
 
   unix.clock_gettime([clock:int])
-      ├─→ seconds:int, nanos:int
-      └─→ nil, error:str, errno:int
+      └─→ seconds:int, nanos:int
 
     Returns nanosecond precision timestamp from system, e.g.
 
@@ -3668,21 +3666,38 @@ UNIX MODULE
       was actively scheduled. This is similar to getrusage() and clock().
       Cosmopoiltan guarantees this clock will never raise `EINVAL`.
 
-    Returns `EINVAL` if clock isn't supported on platform.
-
-    This function only fails if `clock` is invalid.
+    An invalid clock id, or one this platform cannot serve (the `_COARSE`
+    clocks on extremely old Linux distros), raises a bad-argument error
+    rather than returning `EINVAL`; wrap the call in `pcall` to
+    feature-probe a nonstandard clock. The per-clock guarantees above
+    name the clocks that can never fail.
 
     This function goes fastest on Linux and Windows.
 
   unix.nanosleep(seconds:int[, nanos:int])
-      ├─→ remseconds:int, remnanos:int
-      └─→ nil, error:str, errno:int
+      ├─→ remaining:unix.SleepRemainder
+      └─→ nil, error:str, errno:int[, remaining:unix.SleepRemainder]
 
     Sleeps with nanosecond precision.
 
-    Returns `EINTR` if a signal was received while waiting.
+    The remainder is a single `unix.SleepRemainder` table with the
+    following fields:
+
+    - `seconds`  whole seconds left to sleep
+    - `nanos`    nanoseconds left to sleep, past `seconds`
+
+    A sleep that completes returns a remainder of zero. Returns `EINTR`
+    if a signal was received while waiting; on that failure a fourth
+    return value carries the kernel's unslept remainder, so an
+    interrupted sleep can be resumed without re-deriving it from a
+    clock. The error always occupies slot 2; no field of the remainder
+    ever shares a slot with it.
 
   unix.sync()
+
+    Asks the operating system to flush every filesystem's cached writes
+    to the physical medium. Returns nothing: sync(2) cannot fail.
+
   unix.fsync(fd:int)
       ├─→ true
       └─→ nil, error:str, errno:int
@@ -3814,7 +3829,7 @@ UNIX MODULE
     calling bind() at all, since the above behavior is the default.
 
   unix.siocgifconf()
-      ├─→ {{name:str,ip:uint32,netmask:uint32}, ...}
+      ├─→ unix.IfAddr[]
       └─→ nil, error:str, errno:int
 
     Returns list of network adapter addresses.
@@ -4102,13 +4117,14 @@ UNIX MODULE
     environment variables.
 
   unix.clearenv()
-      ├─→ true
-      └─→ nil, error:str, errno:int
+      └─→ true
 
     Clears all environment variables.
 
     This wraps the C `clearenv()` function to allow Lua scripts to remove
-    all environment variables at once.
+    all environment variables at once. It never fails: this project's
+    `clearenv()` unconditionally empties the environment and returns
+    success, so there is no error branch to check.
 
   unix.getlogin()
       ├─→ str
@@ -4135,8 +4151,7 @@ UNIX MODULE
     should log rather than assert failures reported by shutdown().
 
   unix.sigprocmask(how:int, newmask:unix.Sigset)
-      ├─→ oldmask:unix.Sigset
-      └─→ nil, error:str, errno:int
+      └─→ oldmask:unix.Sigset
 
     Manipulates bitset of signals blocked by process.
 
@@ -4146,21 +4161,33 @@ UNIX MODULE
     - `SIG_UNBLOCK`: removes bits in `mask` from set of blocked signals
     - `SIG_SETMASK`: replaces process signal mask with `mask`
 
-    `mask` is a unix.Sigset() object (see section below).
+    `mask` is a unix.sigset() object (see section below).
 
     For example, to temporarily block `SIGTERM` and `SIGINT` so critical
     work won't be interrupted, sigprocmask() can be used as follows:
 
-        newmask = unix.Sigset(unix.SIGTERM)
+        newmask = unix.sigset(unix.SIGTERM)
         oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, newmask))
         -- do something...
         assert(unix.sigprocmask(unix.SIG_SETMASK, oldmask))
 
   unix.sigaction(sig:int[, handler:func|int[, flags:int[, mask:unix.Sigset]]])
-      ├─→ oldhandler:func|int, flags:int, mask:unix.Sigset
+      ├─→ previous:unix.SignalAction
       └─→ nil, error:str, errno:int
 
     Changes action taken upon receipt of a specific signal.
+
+    On success this returns a single `unix.SignalAction` table holding
+    the previous disposition, with the following fields:
+
+    - `handler`  previous handler: a Lua function, `unix.SIG_IGN`,
+                 `unix.SIG_DFL`, or a raw function pointer
+    - `flags`    previous `sa_flags`
+    - `mask`     previous signal mask, a `unix.Sigset`
+
+    On failure it returns `nil`, an error string, and the errno. The
+    error always occupies slot 2; no field of the table ever shares a
+    slot with it.
 
     `sig` can be one of:
 
@@ -4221,7 +4248,7 @@ UNIX MODULE
           gotsigusr1 = true
         end
         gotsigusr1 = false
-        oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.Sigset(unix.SIGUSR1)))
+        oldmask = assert(unix.sigprocmask(unix.SIG_BLOCK, unix.sigset(unix.SIGUSR1)))
         assert(unix.sigaction(unix.SIGUSR1, OnSigUsr1))
         assert(unix.raise(unix.SIGUSR1))
         assert(not gotsigusr1)
@@ -4234,10 +4261,13 @@ UNIX MODULE
     It's a good idea to not do too much work in a signal handler.
 
   unix.sigpending()
-      ├─→ mask:unix.Sigset
-      └─→ nil, error:str, errno:int
+      └─→ mask:unix.Sigset
 
-    Returns the set of signals that are pending for delivery.
+    Returns the set of signals pending delivery to the calling process
+    that are currently blocked. It never fails on any platform this
+    project supports: its one documented failure, `EFAULT`, needs an
+    invalid pointer this binding never constructs, so there is no error
+    branch to check.
 
   unix.sigsuspend([mask:unix.Sigset])
       └─→ nil, error:str, errno:int
@@ -4248,11 +4278,15 @@ UNIX MODULE
     system call. `mask` specifies which signals should be blocked.
 
   unix.setitimer(which[, intervalsec, intns, valuesec, valuens])
-      ├─→ intervalsec:int, intervalns:int, valuesec:int, valuens:int
+      ├─→ unix.Itimerval
       └─→ nil, error:str, errno:int
 
     Causes `SIGALRM` signals to be generated at some point(s) in the
     future. The `which` parameter should be `ITIMER_REAL`.
+
+    Returns one `unix.Itimerval` table with `intervalsec`, `intervalns`,
+    `valuesec`, and `valuens` fields, describing the timer's previous
+    setting.
 
     Here's an example of how to create a 400 ms interval timer:
 
@@ -4324,10 +4358,11 @@ UNIX MODULE
     `hard` defaults to whatever was specified in `soft`.
 
   unix.getrlimit(resource:int)
-      ├─→ soft:int, hard:int
+      ├─→ unix.Rlimit
       └─→ nil, error:str, errno:int
 
-    Returns information about resource limits for current process.
+    Returns one `unix.Rlimit` table with `soft` and `hard` fields,
+    describing resource limits for current process.
 
   unix.getrusage([who:int])
       ├─→ unix.Rusage
@@ -4622,31 +4657,43 @@ UNIX MODULE
         the pledge promise "cpath".
 
   unix.gmtime(unixts:int)
-      ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
+      ├─→ bdt:unix.BrokenDownTime
       └─→ nil, error:str, errno:int
 
     Breaks down UNIX timestamp into Zulu Time numbers.
 
-    - `mon`     1 ≤ mon  ≤ 12
-    - `mday`    1 ≤ mday ≤ 31
-    - `hour`    0 ≤ hour ≤ 23
-    - `min`     0 ≤ min  ≤ 59
-    - `sec`     0 ≤ sec  ≤ 60
-    - `gmtoff`  ±93600 seconds
-    - `wday`    0 ≤ wday ≤ 6
-    - `yday`    0 ≤ yday ≤ 365
-    - `dst`     1 if daylight savings, 0 if not, -1 if not unknown
+    On success this returns a single `unix.BrokenDownTime` table with
+    the following fields:
+
+    - `year`       four-digit year
+    - `mon`        1 ≤ mon  ≤ 12
+    - `mday`       1 ≤ mday ≤ 31
+    - `hour`       0 ≤ hour ≤ 23
+    - `min`        0 ≤ min  ≤ 59
+    - `sec`        0 ≤ sec  ≤ 60
+    - `gmtoffsec`  ±93600 seconds
+    - `wday`       0 ≤ wday ≤ 6
+    - `yday`       0 ≤ yday ≤ 365
+    - `dst`        1 if daylight savings, 0 if not, -1 if unknown
+    - `zone`       time zone abbreviation, e.g. "UTC"
+
+    On failure, e.g. `EOVERFLOW` for a timestamp the calendar cannot
+    represent, it returns `nil`, an error string, and the errno. The
+    error always occupies slot 2; no field of the table ever shares a
+    slot with it.
 
   unix.localtime(unixts:int)
-      ├─→ year,mon,mday,hour,min,sec,gmtoffsec,wday,yday,dst:int,zone:str
+      ├─→ bdt:unix.BrokenDownTime
       └─→ nil, error:str, errno:int
 
     Breaks down UNIX timestamp into local time numbers, e.g.
 
         >: unix.localtime(unix.clock_gettime())
-        2022    4       28      2       14      22      -25200  4       117     1       "PDT"
+        {year=2022, mon=4, mday=28, hour=2, min=14, sec=22,
+         gmtoffsec=-25200, wday=4, yday=117, dst=1, zone="PDT"}
 
-    This follows the same API as gmtime() which has further details.
+    This follows the same API as gmtime() which has further details,
+    including the table's fields and the failure tuple.
 
     Your redbean ships with a subset of the time zone database.
 
@@ -4742,19 +4789,21 @@ UNIX MODULE
     close it automatically when garbage collected.
 
   unix.isatty(fd:int)
-      ├─→ true
-      └─→ nil, error:str, errno:int
+      └─→ bool
 
-    Returns true if file descriptor is a teletypewriter. Otherwise nil
-    with an Errno object holding one of the following values:
+    Returns true if file descriptor is a teletypewriter, false
+    otherwise, including when:
 
-    - `ENOTTY` if `fd` is valid but not a teletypewriter
-    - `EBADF` if `fd` isn't a valid file descriptor.
-    - `EPERM` if pledge() is used without `tty` in lenient mode
+    - `fd` is valid but not a teletypewriter (`ENOTTY`)
+    - `fd` isn't a valid file descriptor (`EBADF`)
+    - pledge() is used without `tty` in lenient mode (`EPERM`)
 
-    No other error numbers are possible.
+    The underlying isatty() never signals failure through its return
+    value, only through `errno`, which this binding does not surface,
+    so there is no nil case: a bad fd and a valid non-terminal fd are
+    indistinguishable here.
 
-  unix.tcgetwinsize(fd:int)
+  unix.tiocgwinsz(fd:int)
       ├─→ rows:int, cols:int
       └─→ nil, error:str, errno:int
 
@@ -5039,7 +5088,8 @@ UNIX MODULE
 
   unix.Dir:read()
       ├─→ name:str, kind:int, ino:int, off:int
-      └─→ nil
+      ├─→ nil
+      └─→ nil, error:str, errno:int
 
     Reads entry from directory stream.
 
@@ -5298,10 +5348,13 @@ UNIX MODULE
 
         st = assert(unix.stat('/etc/passwd'))
         unixts, nanos = st:birthtim()
-        year,mon,mday,hour,min,sec,gmtoffsec = unix.localtime(unixts)
-        Write('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.9d%+.2d%.2d % {
-                 year, mon, mday, hour, min, sec, nanos,
-                 gmtoffsec / (60 * 60), math.abs(gmtoffsec) % 60})
+        t = assert(unix.localtime(unixts))
+        sign = t.gmtoffsec < 0 and '-' or '+'
+        hh = math.abs(t.gmtoffsec) // 3600
+        mm = math.abs(t.gmtoffsec) // 60 % 60
+        Write('%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.9d%s%.2d%.2d' % {
+                 t.year, t.mon, t.mday, t.hour, t.min, t.sec, nanos,
+                 sign, hh, mm})
 
   unix.Stat:mtim()
       └─→ unixts:int, nanos:int
@@ -5500,10 +5553,11 @@ UNIX MODULE
   contain 128 entries. See `unix.NSIG` to find out how many signals
   your operating system actually supports.
 
-  unix.Sigset(sig:int, ...)
+  unix.sigset(sig:int, ...)
       └─→ unix.Sigset
 
-    Constructs new signal bitset object.
+    Constructs new signal bitset object. The constructor is
+    `unix.sigset` (lowercase); `unix.Sigset` names the class it builds.
 
   unix.Sigset:add(sig:int)
 

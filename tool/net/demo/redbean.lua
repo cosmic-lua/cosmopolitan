@@ -46,11 +46,11 @@ local function main()
       Write('<dl>\r\n')
       for i = 1,#params do
          Write('<dt>')
-         Write(EscapeHtml(VisualizeControlCodes(params[i][1])))
+         Write(EscapeHtml(params[i][1]))
          Write('\r\n')
          if params[i][2] then
             Write('<dd>')
-            Write(EscapeHtml(VisualizeControlCodes(params[i][2])))
+            Write(EscapeHtml(params[i][2]))
             Write('\r\n')
          end
       end
@@ -59,7 +59,7 @@ local function main()
       Write('<a href="')
       Write(EscapeHtml(EscapePath(GetPath()) .. '?magic'))
       Write('">')
-      Write(EscapeHtml(VisualizeControlCodes(GetPath())))
+      Write(EscapeHtml(GetPath()))
       Write('?magic</a>\r\n')
    else
       Write('<p>\r\n')
@@ -76,7 +76,7 @@ local function main()
       Write('<ul>\r\n')
       for i = 1,#arg do
          Write('<li>')
-         Write(EscapeHtml(VisualizeControlCodes(arg[i])))
+         Write(EscapeHtml(arg[i]))
          Write('\r\n')
       end
       Write('</ul>\r\n')
@@ -127,7 +127,7 @@ local function main()
    if GetUser() then
       Write('<dt>GetUser()\r\n')
       Write('<dd>')
-      Write(EscapeHtml(VisualizeControlCodes(GetUser())))
+      Write(EscapeHtml(GetUser()))
       Write('\r\n')
    end
    if GetScheme() then
@@ -139,12 +139,12 @@ local function main()
    if GetPass() then
       Write('<dt>GetPass()\r\n')
       Write('<dd>')
-      Write(EscapeHtml(VisualizeControlCodes(GetPass())))
+      Write(EscapeHtml(GetPass()))
       Write('\r\n')
    end
    Write('<dt>GetHost() <small>(from HTTP Request-URI or Host header or X-Forwarded-Host header or Berkeley Sockets)</small>\r\n')
    Write('<dd>')
-   Write(EscapeHtml(VisualizeControlCodes(GetHost())))
+   Write(EscapeHtml(GetHost()))
    Write('\r\n')
    Write('<dt>GetPort() <small>(from HTTP Request-URI or Host header or X-Forwarded-Host header or Berkeley Sockets)</small>\r\n')
    Write('<dd>')
@@ -152,16 +152,16 @@ local function main()
    Write('\r\n')
    Write('<dt>GetPath() <small>(from HTTP Request-URI)</small>\r\n')
    Write('<dd>')
-   Write(EscapeHtml(VisualizeControlCodes(GetPath())))
+   Write(EscapeHtml(GetPath()))
    Write('\r\n')
    Write('<dt>GetEffectivePath() <small>(actual path used internally to load the lua asset: routed depending on host, request path, and rewrites)</small>\r\n')
    Write('<dd>')
-   Write(EscapeHtml(VisualizeControlCodes(GetEffectivePath())))
+   Write(EscapeHtml(GetEffectivePath()))
    Write('\r\n')
    if GetFragment() then
       Write('<dt>GetFragment()\r\n')
       Write('<dd>')
-      Write(EscapeHtml(VisualizeControlCodes(GetFragment())))
+      Write(EscapeHtml(GetFragment()))
       Write('\r\n')
    end
    Write('<dt>GetRemoteAddr() <small>(from Berkeley Sockets or X-Forwarded-For header)</small>\r\n')
@@ -212,27 +212,27 @@ local function main()
       if url.user then
          Write('<dt>user\r\n')
          Write('<dd>\r\n')
-         Write(EscapeHtml(VisualizeControlCodes(url.user)))
+         Write(EscapeHtml(url.user))
       end
       if url.pass then
          Write('<dt>pass\r\n')
          Write('<dd>\r\n')
-         Write(EscapeHtml(VisualizeControlCodes(url.pass)))
+         Write(EscapeHtml(url.pass))
       end
       if url.host then
          Write('<dt>host\r\n')
          Write('<dd>\r\n')
-         Write(EscapeHtml(VisualizeControlCodes(url.host)))
+         Write(EscapeHtml(url.host))
       end
       if url.port then
          Write('<dt>port\r\n')
          Write('<dd>\r\n')
-         Write(EscapeHtml(VisualizeControlCodes(url.port)))
+         Write(EscapeHtml(url.port))
       end
       if url.path then
          Write('<dt>path\r\n')
          Write('<dd>\r\n')
-         Write(EscapeHtml(VisualizeControlCodes(url.path)))
+         Write(EscapeHtml(url.path))
       end
       if url.params then
          Write('<dt>params\r\n')
@@ -240,11 +240,11 @@ local function main()
          Write('<dl>\r\n')
          for i = 1,#url.params do
             Write('<dt>')
-            Write(EscapeHtml(VisualizeControlCodes(url.params[i][1])))
+            Write(EscapeHtml(url.params[i][1]))
             Write('\r\n')
             if url.params[i][2] then
                Write('<dd>')
-               Write(EscapeHtml(VisualizeControlCodes(url.params[i][2])))
+               Write(EscapeHtml(url.params[i][2]))
                Write('\r\n')
             end
          end
@@ -253,7 +253,7 @@ local function main()
       if url.fragment then
          Write('<dt>fragment\r\n')
          Write('<dd>\r\n')
-         Write(EscapeHtml(VisualizeControlCodes(url.fragment)))
+         Write(EscapeHtml(url.fragment))
       end
       Write('</dl>\r\n')
    end
@@ -261,36 +261,36 @@ local function main()
    Write('<h3>posix extended regular expressions</h3>\r\n')
    s = 'my ' .. FormatIp(GetRemoteAddr()) .. ' ip'
    -- traditional regular expressions
-   m,a,b,c,d = re.search([[\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)]], s, re.BASIC)
+   local r = re.search([[\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)]], s, re.BASIC)
    -- easy api (~10x slower because compile is O(2ⁿ) and search is O(n))
-   m,a,b,c,d = re.search([[([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})]], s)
+   r = re.search([[([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})]], s)
    -- proper api (especially if you put the re.compile() line in /.init.lua)
    pat = re.compile([[([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})]])
-   m,a,b,c,d = pat:search(s)  -- m and rest are nil if match not found
+   r = pat:search(s)  -- r is nil if match not found
    Write('<pre>\r\n')
    Write([[pat = re.compile('([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})')]])
-   Write('\r\nm,a,b,c,d = pat:search(%q)\r\n' % {s})
+   Write('\r\nr = pat:search(%q)\r\n' % {s})
    Write('</pre>\r\n')
    Write('<dl>\r\n')
-   Write('<dt>m\r\n')
+   Write('<dt>match\r\n')
    Write('<dd>')
-   Write("%q" % {m})
+   Write("%q" % {r.match})
    Write('\r\n')
-   Write('<dt>a\r\n')
+   Write('<dt>captures[1]\r\n')
    Write('<dd>')
-   Write("%q" % {a})
+   Write("%q" % {r.captures[1]})
    Write('\r\n')
-   Write('<dt>b\r\n')
+   Write('<dt>captures[2]\r\n')
    Write('<dd>')
-   Write("%q" % {b})
+   Write("%q" % {r.captures[2]})
    Write('\r\n')
-   Write('<dt>c\r\n')
+   Write('<dt>captures[3]\r\n')
    Write('<dd>')
-   Write("%q" % {c})
+   Write("%q" % {r.captures[3]})
    Write('\r\n')
-   Write('<dt>d\r\n')
+   Write('<dt>captures[4]\r\n')
    Write('<dd>')
-   Write("%q" % {d})
+   Write("%q" % {r.captures[4]})
    Write('\r\n')
    Write('</dl>\r\n')
 
@@ -309,7 +309,7 @@ local function main()
          Write('<a href="')
          Write(EscapeHtml(EscapePath(paths[i])))
          Write('">')
-         Write(EscapeHtml(VisualizeControlCodes(paths[i])))
+         Write(EscapeHtml(paths[i]))
          Write('</a>')
          if IsHiddenPath(paths[i]) then
             Write(' <small>[HIDDEN]</small>')
@@ -335,7 +335,7 @@ local function main()
          Write('<br>\r\n')
          if GetAssetComment(paths[i]) then
             Write('Comment: ')
-            Write(EscapeHtml(VisualizeControlCodes(GetAssetComment(paths[i]))))
+            Write(EscapeHtml(GetAssetComment(paths[i])))
             Write('<br>\r\n')
          end
          Write('\r\n')

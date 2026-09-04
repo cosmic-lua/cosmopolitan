@@ -347,6 +347,10 @@ local function test_kind_too_large()
   check("oversized response fails", status == nil)
   check("kind is too_large, got " .. tostring(kind) ..
         " (" .. tostring(err) .. ")", kind == "too_large")
+  -- regression: the configured byte limit must render in the message, not
+  -- the literal "%I" left by an unrecognized format conversion
+  check("error names the configured limit, got: " .. tostring(err),
+        err:match("max 100 bytes") ~= nil)
 end
 
 local function test_kind_protocol()

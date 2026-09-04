@@ -73,8 +73,7 @@ end
 function OnHttpRequest()
     UpdateHitCounter()
     if GetHeader('User-Agent') then
-        Log(kLogInfo, "client reports %s" % {
-                VisualizeControlCodes(GetHeader('User-Agent'))})
+        Log(kLogInfo, "client reports %s" % {GetHeader('User-Agent')})
     end
     if HasParam('magic') then
         Write('<p>\r\n')

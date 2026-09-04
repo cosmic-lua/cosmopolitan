@@ -240,12 +240,25 @@ local function test_a_short_string_never_spans_a_line()
   -- A raw newline still ends a short string...
   local got = cosmo.DecodeLua("return {a = \"x\ny\"}")
   assert(got == nil, "a raw newline inside a short string must be refused")
+  -- ...and so does a lone carriage return: `load`'s lexer ends a short
+  -- string at either line terminator (\n or \r), so a bare \r copied
+  -- into the string body would be a false accept load never allows.
+  local cr = cosmo.DecodeLua("return {a = \"x\ry\"}")
+  assert(cr == nil, "a raw carriage return inside a short string must be refused")
+  -- A CRLF pair is refused too: the \r is copied, then the \n ends the
+  -- string, so `load` never runs and DecodeLua must not either.
+  local crlf = cosmo.DecodeLua("return {a = \"x\r\ny\"}")
+  assert(crlf == nil, "a raw CRLF inside a short string must be refused")
   -- ...except behind `\z`, which skips the whitespace that follows it,
   -- newlines included — that is what the escape is for, and load
   -- agrees: load("return {a = \"x\\z\ny\"}")().a == "xy".
   local spanned = cosmo.DecodeLua("return {a = \"x\\z\n   y\"}")
   assert(spanned and spanned.a == "xy",
     "\\z must skip a newline and the indent after it")
+  -- \z must still skip a CRLF the same way, not just a bare \n.
+  local spanned_crlf = cosmo.DecodeLua("return {a = \"x\\z\r\n   y\"}")
+  assert(spanned_crlf and spanned_crlf.a == "xy",
+    "\\z must skip a CRLF and the indent after it")
 end
 
 local function test_rejects_what_it_must_not_run()

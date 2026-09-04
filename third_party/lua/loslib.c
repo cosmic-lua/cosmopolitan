@@ -38,6 +38,7 @@
 #include "libc/temp.h"
 #include "libc/time.h"
 #include "third_party/lua/lauxlib.h"
+#include "third_party/lua/llimits.h"
 #include "third_party/lua/lprefix.h"
 #include "third_party/lua/lua.h"
 #include "third_party/lua/lualib.h"
@@ -55,7 +56,7 @@ __static_yoink("lua_notice");
 #if defined(LUA_USE_WINDOWS)
 #define LUA_STRFTIMEOPTIONS  "aAbBcdHIjmMpSUwWxXyYzZ%" \
     "||" "#c#x#d#H#I#j#m#M#S#U#w#W#y#Y"  /* two-char options */
-#elif defined(LUA_USE_C89)  /* ANSI C 89 (only 1-char options) */
+#elif defined(LUA_USE_C89)  /* C89 (only 1-char options) */
 #define LUA_STRFTIMEOPTIONS  "aAbBcdHIjmMpSUwWxXyYZ%"
 #else  /* C99 specification */
 #define LUA_STRFTIMEOPTIONS  "aAbBcCdDeFgGhHIjmMnprRStTuUVwWxXyYzZ%" \
@@ -173,6 +174,7 @@ static int os_execute (lua_State *L) {
 
 static int os_remove (lua_State *L) {
   const char *filename = luaL_checkstring(L, 1);
+  errno = 0;
   return luaL_fileresult(L, remove(filename) == 0, filename);
 }
 
@@ -180,6 +182,7 @@ static int os_remove (lua_State *L) {
 static int os_rename (lua_State *L) {
   const char *fromname = luaL_checkstring(L, 1);
   const char *toname = luaL_checkstring(L, 2);
+  errno = 0;
   return luaL_fileresult(L, rename(fromname, toname) == 0, NULL);
 }
 
@@ -288,9 +291,9 @@ static int getfield (lua_State *L, const char *key, int d, int delta) {
 
 
 static const char *checkoption (lua_State *L, const char *conv,
-                                ptrdiff_t convlen, char *buff) {
+                                size_t convlen, char *buff) {
   const char *option = LUA_STRFTIMEOPTIONS;
-  int oplen = 1;  /* length of options being checked */
+  unsigned oplen = 1;  /* length of options being checked */
   for (; *option != '\0' && oplen <= convlen; option += oplen) {
     if (*option == '|')  /* next block? */
       oplen++;  /* will check options with next length (+1) */
@@ -348,7 +351,8 @@ static int os_date (lua_State *L) {
         size_t reslen;
         char *buff = luaL_prepbuffsize(&b, SIZETIMEFMT);
         s++;  /* skip '%' */
-        s = checkoption(L, s, se - s, cc + 1);  /* copy specifier to 'cc' */
+        /* copy specifier to 'cc' */
+        s = checkoption(L, s, ct_diff2sz(se - s), cc + 1);
         reslen = strftime(buff, SIZETIMEFMT, cc, stm);
         luaL_addsize(&b, reslen);
       }

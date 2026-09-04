@@ -36,9 +36,10 @@ assert(unix.S_ISDIR(stat:mode()), "mkdtemp result should be a directory")
 unix.rmdir(tmpdir)
 
 -- test unix.mkstemp
-local fd, tmpfile = unix.mkstemp((os.getenv("TMPDIR") or "/tmp") .. "/test_XXXXXX")
+local fd, result = unix.mkstemp((os.getenv("TMPDIR") or "/tmp") .. "/test_XXXXXX")
 assert(fd, "mkstemp should return a file descriptor")
-assert(tmpfile, "mkstemp should return a path")
+assert(result and result.path, "mkstemp should return a table with a path field")
+local tmpfile = result.path
 assert(not tmpfile:match("XXXXXX"), "mkstemp should replace XXXXXX")
 assert(type(fd) == "number" and fd >= 0, "mkstemp fd should be a non-negative integer")
 unix.write(fd, "test")
@@ -60,6 +61,18 @@ local sfd = assert(unix.socket())
 local ok, err = unix.setsockopt(sfd, unix.SOL_SOCKET, unix.SO_NOSIGPIPE, true)
 assert(ok or err, "setsockopt(SO_NOSIGPIPE) should return a status")
 unix.close(sfd)
+
+-- getsockopt(SOL_SOCKET, SO_LINGER) must return BOTH values of its
+-- documented two-value overload (seconds:int, enabled:bool), in that
+-- order. The C binding once pushed both values but returned only 1,
+-- silently dropping seconds and shifting enabled into its place.
+local lfd = assert(unix.socket(unix.AF_INET, unix.SOCK_STREAM))
+assert(unix.setsockopt(lfd, unix.SOL_SOCKET, unix.SO_LINGER, 5, true))
+local seconds, enabled, extra = unix.getsockopt(lfd, unix.SOL_SOCKET, unix.SO_LINGER)
+assert(seconds == 5, "getsockopt(SO_LINGER) seconds should be 5, got: " .. tostring(seconds))
+assert(enabled == true, "getsockopt(SO_LINGER) enabled should be true, got: " .. tostring(enabled))
+assert(extra == nil, "getsockopt(SO_LINGER) should return exactly 2 values")
+unix.close(lfd)
 
 -- randomness surface: keep exactly GetRandomBytes and Rand64. The rdrand/
 -- rdseed/lemur64 fictions (arc4random64 aliases that never touched RDRAND, a
@@ -88,7 +101,9 @@ local rb_ok, rb_err = pcall(cosmo.GetRandomBytes, 0)
 assert(not rb_ok, "GetRandomBytes(0) should be rejected")
 
 -- lsqlite3: the exec/execute, errcode/error_code, errmsg/error_message dual
--- aliases were collapsed to one name each; session/changeset/rebaser is gone.
+-- aliases were collapsed to one name each; session/changeset/rebaser was
+-- never wired to a real build (SQLITE_ENABLE_SESSION was never defined for
+-- lsqlite3.o) and its ~600 lines of #ifdef'd bindings were removed outright.
 local db = assert(lsqlite3.open_memory())
 assert(type(db.exec) == "function", "db:exec should exist")
 assert(db.execute == nil, "db:execute alias should be removed")

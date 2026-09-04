@@ -58,11 +58,17 @@ static regex_t *LuaReCompileImpl(lua_State *L, const char *p, int f) {
   }
 }
 
-// On a match, returns the whole matched substring plus a table of the
-// parenthesized capture groups (empty when the pattern has no groups).
-// A no-match is not an error: it returns a single bare nil so the
-// idiomatic `if match` works and `select("#", ...) == 1`. A genuine
-// regexec() failure (e.g. REG_ESPACE) returns nil, err:string.
+// On a match, returns one table with the whole matched substring
+// (field "match") and the parenthesized capture groups (field
+// "captures", empty when the pattern has no groups). A no-match is
+// not an error: it returns a single bare nil so the idiomatic
+// `if result` works and `select("#", ...) == 1`. A genuine regexec()
+// failure (e.g. REG_ESPACE) returns nil, err:string. The match and
+// its captures used to be two positional returns (match, captures),
+// which put the failure path's error string in the same slot a
+// match's captures table occupied; bundling both into one table
+// keeps slot 1 always the value-or-nil and slot 2 always the error
+// string, present on no other path.
 static int LuaReSearchImpl(lua_State *L, regex_t *r, const char *s, int f) {
   int rc, i, n;
   regmatch_t *m;
@@ -73,7 +79,9 @@ static int LuaReSearchImpl(lua_State *L, regex_t *r, const char *s, int f) {
   m->rm_eo = 0;
   rc = regexec(r, s, n, m, f >> 8);
   if (rc == REG_OK) {
+    lua_createtable(L, 0, 2);
     lua_pushlstring(L, s + m[0].rm_so, m[0].rm_eo - m[0].rm_so);
+    lua_setfield(L, -2, "match");
     lua_createtable(L, n - 1, 0);
     for (i = 1; i < n; ++i) {
       if (m[i].rm_so >= 0) {
@@ -83,7 +91,8 @@ static int LuaReSearchImpl(lua_State *L, regex_t *r, const char *s, int f) {
       }
       lua_rawseti(L, -2, i);
     }
-    return 2;
+    lua_setfield(L, -2, "captures");
+    return 1;
   } else if (rc == REG_NOMATCH) {
     lua_pushnil(L);
     return 1;
@@ -94,11 +103,15 @@ static int LuaReSearchImpl(lua_State *L, regex_t *r, const char *s, int f) {
 
 // Like LuaReSearchImpl, but reports WHERE the match is: absolute
 // 1-based inclusive start and end offsets into the original subject,
-// then the capture table. The search runs on the tail s + off (off is
-// 0-based, already validated <= subject length), which is why the
-// offsets regexec() reports are rebased by off before being pushed.
-// No-match and error conventions are LuaReSearchImpl's: a bare nil for
-// no match, nil + err:string for an engine failure.
+// plus the capture table, bundled into one re.Match table so the
+// second return slot is never anything but "error string or absent"
+// (the unix.nanosleep-class fix: a completed match used to leave its
+// stop offset in the same slot a failure's error string occupied).
+// The search runs on the tail s + off (off is 0-based, already
+// validated <= subject length), which is why the offsets regexec()
+// reports are rebased by off before being pushed. No-match and error
+// conventions are LuaReSearchImpl's: a bare nil for no match, nil +
+// err:string for an engine failure.
 static int LuaReFindImpl(lua_State *L, regex_t *r, const char *s, size_t off,
                          int f) {
   int rc, i, n;
@@ -110,8 +123,11 @@ static int LuaReFindImpl(lua_State *L, regex_t *r, const char *s, size_t off,
   m->rm_eo = 0;
   rc = regexec(r, s + off, n, m, f >> 8);
   if (rc == REG_OK) {
+    lua_createtable(L, 0, 3);
     lua_pushinteger(L, off + m[0].rm_so + 1);
+    lua_setfield(L, -2, "start");
     lua_pushinteger(L, off + m[0].rm_eo);
+    lua_setfield(L, -2, "stop");
     lua_createtable(L, n - 1, 0);
     for (i = 1; i < n; ++i) {
       if (m[i].rm_so >= 0) {
@@ -121,7 +137,8 @@ static int LuaReFindImpl(lua_State *L, regex_t *r, const char *s, size_t off,
       }
       lua_rawseti(L, -2, i);
     }
-    return 3;
+    lua_setfield(L, -2, "captures");
+    return 1;
   } else if (rc == REG_NOMATCH) {
     lua_pushnil(L);
     return 1;

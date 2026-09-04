@@ -41,19 +41,19 @@ if true_path then
   assert(type(pid) == "number", "pid should be a number")
   assert(pid > 0, "pid should be positive")
   -- Wait for child to complete
-  local wpid, wstatus = unix.wait(pid)
-  assert(wpid == pid, "wait should return the spawned pid")
-  assert(unix.WIFEXITED(wstatus), "child should exit normally")
-  assert(unix.WEXITSTATUS(wstatus) == 0, "child should exit with 0")
+  local result = unix.wait(pid)
+  assert(result.pid == pid, "wait should return the spawned pid")
+  assert(unix.WIFEXITED(result.wstatus), "child should exit normally")
+  assert(unix.WEXITSTATUS(result.wstatus) == 0, "child should exit with 0")
 end
 
 -- Test spawnp (uses PATH search)
 local pid, err = unix.spawnp("true", {"true"})
 if pid then
   assert(type(pid) == "number", "pid should be a number")
-  local wpid, wstatus = unix.wait(pid)
-  assert(wpid == pid, "wait should return the spawned pid")
-  assert(unix.WIFEXITED(wstatus), "child should exit normally")
+  local result = unix.wait(pid)
+  assert(result.pid == pid, "wait should return the spawned pid")
+  assert(unix.WIFEXITED(result.wstatus), "child should exit normally")
 end
 
 -- Test spawn with arguments
@@ -61,9 +61,9 @@ local echo_path = unix.commandv("echo")
 if echo_path then
   local pid, err = unix.spawn(echo_path, {echo_path, "hello", "world"})
   assert(pid ~= nil, "spawn with args should return pid: " .. tostring(err))
-  local wpid, wstatus = unix.wait(pid)
-  assert(unix.WIFEXITED(wstatus), "echo should exit normally")
-  assert(unix.WEXITSTATUS(wstatus) == 0, "echo should exit with 0")
+  local result = unix.wait(pid)
+  assert(unix.WIFEXITED(result.wstatus), "echo should exit normally")
+  assert(unix.WEXITSTATUS(result.wstatus) == 0, "echo should exit with 0")
 end
 
 -- Test spawn with custom environment
@@ -71,8 +71,8 @@ local env_path = unix.commandv("env")
 if env_path then
   local pid, err = unix.spawn(env_path, {env_path}, {"TEST_VAR=hello"})
   assert(pid ~= nil, "spawn with env should return pid: " .. tostring(err))
-  local wpid, wstatus = unix.wait(pid)
-  assert(unix.WIFEXITED(wstatus), "env should exit normally")
+  local result = unix.wait(pid)
+  assert(unix.WIFEXITED(result.wstatus), "env should exit normally")
 end
 
 -- Test killpg with invalid pgrp (should fail with proper error)
@@ -92,5 +92,25 @@ assert(pid == nil, "spawnp of nonexistent command should fail")
 local ok, err = unix.execvp("nonexistent_command_12345")
 assert(ok == nil, "execvp of nonexistent command should fail")
 assert(err ~= nil, "execvp failure should return error")
+
+-- Test spawn with an argv element that can't convert to a string. This
+-- used to free uninitialized heap memory (ConvertLuaArrayToStringList
+-- freeing an argv/envp array before NUL-terminating it) and segfault;
+-- it should now return the ordinary fallible tuple instead.
+local pid, err = unix.spawn("/bin/true", {{}})
+assert(pid == nil, "spawn with a table argv element should fail, not crash")
+assert(err ~= nil, "spawn with a bad argv element should return an error")
+
+-- Same bad-element case in envp (argv converts fine, then envp fails,
+-- exercising the cleanup path that frees the already-converted argv),
+-- and on a non-spawn call site (execve) that shares the same
+-- underlying conversion helper.
+local pid, err = unix.spawn("/bin/true", {"/bin/true"}, {{}})
+assert(pid == nil, "spawn with a table envp element should fail, not crash")
+assert(err ~= nil, "spawn with a bad envp element should return an error")
+
+local ok, err = unix.execve("/bin/true", {{}})
+assert(ok == nil, "execve with a table argv element should fail, not crash")
+assert(err ~= nil, "execve with a bad argv element should return an error")
 
 print("all unix proc tests passed")

@@ -59,7 +59,7 @@ local function main()
       assert(unix.close(fd))
       WriteForm(GetParam('host'), GetParam('user'))
       Write('<pre>\r\n')
-      Write(EscapeHtml(VisualizeControlCodes(response)))
+      Write(EscapeHtml(response))
       Write('</pre>\r\n')
    else
       ServeError(405)

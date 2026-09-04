@@ -102,11 +102,87 @@ end
 -- An uninterrupted nanosleep reports a zero remainder rather than
 -- whatever the kernel left in its buffer (POSIX leaves it unspecified
 -- on success), so a caller can trust the value without a clock read.
+-- The remainder comes back as one table, not two positional integers,
+-- so nothing here can be confused with the failure path's error/errno.
 do
-  local s, ns = unix.nanosleep(0, 1000000)
-  assert(s == 0 and ns == 0,
-    "a completed sleep has no remainder, got " .. tostring(s) .. "," ..
-    tostring(ns))
+  local remaining = unix.nanosleep(0, 1000000)
+  assert(type(remaining) == "table",
+    "a completed sleep returns a remainder table, got " .. type(remaining))
+  assert(remaining.seconds == 0 and remaining.nanos == 0,
+    "a completed sleep has no remainder, got " .. tostring(remaining.seconds) ..
+    "," .. tostring(remaining.nanos))
 end
+
+-- An EINTR-interrupted nanosleep must return a tuple where no slot
+-- serves two purposes across the success and failure branches: slot 1
+-- is nil (never the remainder table success uses), slots 2/3 are
+-- always error/errno, and slot 4 -- present only here -- carries the
+-- kernel's leftover time as its own table.
+do
+  local pid = unix.fork()
+  if pid == 0 then
+    unix.sigaction(unix.SIGALRM, function() end)
+    -- one-shot alarm ~50ms out, well inside the 5s sleep below
+    assert(unix.setitimer(unix.ITIMER_REAL, 0, 0, 0, 50e6))
+    local remaining, err, eno, eintr_remaining = unix.nanosleep(5, 0)
+    assert(remaining == nil,
+      "an interrupted sleep must not return a remainder in slot 1")
+    assert(type(err) == "string", "slot 2 must be the error string")
+    assert(eno == unix.EINTR, "slot 3 must be EINTR, got " .. tostring(eno))
+    assert(type(eintr_remaining) == "table",
+      "slot 4 must be the EINTR remainder table, got " .. type(eintr_remaining))
+    assert(type(eintr_remaining.seconds) == "number" and
+      type(eintr_remaining.nanos) == "number",
+      "the EINTR remainder table must carry numeric seconds/nanos")
+    assert(eintr_remaining.seconds >= 0 and eintr_remaining.seconds <= 5,
+      "the remaining seconds must be within the requested sleep")
+    unix.sigaction(unix.SIGALRM, unix.SIG_DFL)
+    unix.exit(0)
+  else
+    -- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+    -- rusage=}), not positional values -- slot 2 always means error.
+    local result = unix.wait(pid)
+    assert(unix.WIFEXITED(result.wstatus) and unix.WEXITSTATUS(result.wstatus) == 0,
+      "the EINTR nanosleep child must exit cleanly")
+  end
+end
+
+-- sigpending takes no argument and has no reachable failure on any
+-- platform this project supports (EFAULT needs a pointer this
+-- binding never constructs); it must always return a plain Sigset.
+assert(unix.sigpending() ~= nil, "sigpending must always succeed")
+
+-- raise()'s only documented failure is an invalid signal number
+-- (EINVAL); sig == 0 is a legitimate existence-check call (like
+-- kill(pid, 0)) and must not raise.
+assert(not pcall(unix.raise, 999),
+  "raise of an invalid signal number must raise")
+assert(unix.raise(0) == 0, "raise(0) is a valid existence check")
+
+-- sigprocmask's only reachable failure is an invalid `how`;
+-- EFAULT needs a pointer this binding never constructs from Lua.
+assert(not pcall(unix.sigprocmask, 999, unix.sigset()),
+  "sigprocmask of an invalid how must raise")
+
+-- setitimer now bundles its previous-value success fields into one
+-- table (tool/net/definitions.lua); pin both branches.
+local prev = assert(unix.setitimer(unix.ITIMER_REAL, 0, 0, 0, 0))
+assert(type(prev) == "table" and type(prev.intervalsec) == "number",
+  "a successful setitimer must return one table")
+local bad, err, eno = unix.setitimer(999)
+assert(bad == nil, "setitimer(999) must report nil")
+assert(type(err) == "string", "the error must be a string, not a table field")
+assert(eno == unix.EINVAL, "errno must be EINVAL, not a table field")
+
+-- sigaction now bundles its previous-disposition success values
+-- into one table (tool/net/definitions.lua); pin both branches.
+local ok_action = assert(unix.sigaction(unix.SIGUSR1))
+assert(type(ok_action) == "table" and type(ok_action.flags) == "number"
+  and ok_action.mask ~= nil,
+  "a successful sigaction query must return one table")
+local bad_action, err, eno = unix.sigaction(unix.SIGKILL, unix.SIG_IGN)
+assert(bad_action == nil, "sigaction on SIGKILL must report nil")
+assert(type(err) == "string", "the error must be a string, not a table field")
+assert(eno == unix.EINVAL, "errno must be EINVAL, not a table field")
 
 print("PASS")

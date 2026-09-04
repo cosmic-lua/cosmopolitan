@@ -142,10 +142,12 @@ if pid == 0 then
 end
 
 unix.close(rs)
-local _, wstatus = assert(unix.wait(pid))
-assert(unix.WIFEXITED(wstatus), "landlock child should exit normally")
-assert(unix.WEXITSTATUS(wstatus) == 0,
-       "landlock child failed with status " .. unix.WEXITSTATUS(wstatus))
+-- wait's success value is one unix.WaitResult table ({pid=, wstatus=,
+-- rusage=}), not positional values -- slots 2/3 always mean error/errno.
+local result = assert(unix.wait(pid))
+assert(unix.WIFEXITED(result.wstatus), "landlock child should exit normally")
+assert(unix.WEXITSTATUS(result.wstatus) == 0,
+       "landlock child failed with status " .. unix.WEXITSTATUS(result.wstatus))
 
 print("test_landlock_abi: PASS (constants, fs-only create, scoped create, " ..
       "undefined scope rejected, signal scope enforced" ..

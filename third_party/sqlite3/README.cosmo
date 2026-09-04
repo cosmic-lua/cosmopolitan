@@ -29,6 +29,25 @@ VENDORING
     feature define set. extensions.h is a handcrafted declaration for
     the zipfile extension consumed by tool/net/lsqlite3.c.
 
+EXTRACTED UNITS
+
+    extensions.c's kSqliteExtensions registry names every ext/misc
+    extension linked into libsqlite3.a. Most are vendored not from the
+    sqlite source tree but by extracting shell.c's own inlined copy:
+    update.sh's extract_shell_unit() takes the bytes between shell.c's
+    "Begin ext/misc/<name>.c" / "End ext/misc/<name>.c" markers, rewrites
+    the commented-out `/* #include "sqlite3ext.h" */` to the repo path,
+    and restores any commented-out typedef (the shell inliner comments
+    out redeclarations that would collide with its own, e.g. series.c's
+    `u8`). update.sh re-extracts every registry name found in
+    extensions.c on each version bump -- a new batch needs no script
+    edit -- except names listed in its SRC_TREE_UNITS, which are vendored
+    straight from the sqlite source tree instead (today: zipfile, from
+    sqlite-src's ext/misc/zipfile.c). tool/lua/test_sqlite_extensions.lua
+    applies this same rule as an agreement ratchet, so a version bump
+    that moves shell.c without re-extracting fails there instead of
+    silently shipping a stale unit.
+
 LOCAL CHANGES
 
     mechanical (update.sh):

@@ -116,20 +116,22 @@ struct sdb {
 
     int rollback_hook_cb; /* rollback_hook callback */
     int rollback_hook_udata;
+
+    /* one bit per kSqliteExtensions row (bit index == its position in
+       that array), set once its init has run on this connection --
+       by db_register_extension() or, for zipfile, by the open path's
+       own default registration. Tracked directly instead of inferred
+       from pragma_module_list, because that only works when a row's
+       registry name matches the SQL-visible name its init installs,
+       which is true for zipfile but not regexp (registers functions,
+       no module at all) or series (module is "generate_series"). */
+    unsigned int registered_extensions;
 };
 
 static const char *const sqlite_meta      = ":sqlite3";
 static const char *const sqlite_vm_meta   = ":sqlite3:vm";
 static const char *const sqlite_ctx_meta  = ":sqlite3:ctx";
 static int sqlite_ctx_meta_ref;
-#ifdef SQLITE_ENABLE_SESSION
-static const char *const sqlite_ses_meta  = ":sqlite3:ses";
-static const char *const sqlite_reb_meta  = ":sqlite3:reb";
-static const char *const sqlite_itr_meta  = ":sqlite3:itr";
-static int sqlite_ses_meta_ref;
-static int sqlite_reb_meta_ref;
-static int sqlite_itr_meta_ref;
-#endif
 /* global config configuration */
 static int log_cb = LUA_NOREF; /* log callback */
 static int log_udata;
@@ -139,6 +141,37 @@ static int log_udata;
 ** Database Virtual Machine Operations
 ** =======================================================
 */
+
+/*
+** Maps a SQLite runtime type constant (SQLITE_INTEGER, _FLOAT, _TEXT,
+** _BLOB, _NULL) to the same lowercase name SQLite's own typeof() SQL
+** function returns for that value, and pushes it onto the Lua stack.
+** This is the runtime type -- what the value actually is right now --
+** distinct from the declared schema type get_type()/get_named_types()
+** report, which SQLite's dynamic typing can disagree with.
+*/
+static void push_sqlite_typename(lua_State *L, int type) {
+    switch (type) {
+        case SQLITE_INTEGER:
+            lua_pushliteral(L, "integer");
+            break;
+        case SQLITE_FLOAT:
+            lua_pushliteral(L, "real");
+            break;
+        case SQLITE_TEXT:
+            lua_pushliteral(L, "text");
+            break;
+        case SQLITE_BLOB:
+            lua_pushliteral(L, "blob");
+            break;
+        case SQLITE_NULL:
+            lua_pushliteral(L, "null");
+            break;
+        default:
+            lua_pushliteral(L, "unknown");
+            break;
+    }
+}
 
 static void vm_push_column(lua_State *L, sqlite3_stmt *vm, int idx) {
     switch (sqlite3_column_type(vm, idx)) {
@@ -344,6 +377,19 @@ static int dbvm_get_type(lua_State *L) {
     int index = luaL_checknumber(L, 2);
     dbvm_check_index(L, svm, index);
     lua_pushstring(L, sqlite3_column_decltype(svm->vm, index));
+    return 1;
+}
+
+/* the runtime type of column n's current value (SQLITE_INTEGER, _FLOAT,
+** _TEXT, _BLOB or _NULL) -- unlike get_type()'s declared schema type,
+** this is what lets a caller tell a BLOB apart from TEXT that happens
+** to hold the same bytes. */
+static int dbvm_column_type(lua_State *L) {
+    sdb_vm *svm = lsqlite_checkvm(L, 1);
+    int index = luaL_checkint(L, 2);
+    dbvm_check_contents(L, svm);
+    dbvm_check_index(L, svm, index);
+    push_sqlite_typename(L, sqlite3_column_type(svm->vm, index));
     return 1;
 }
 
@@ -598,6 +644,7 @@ static sdb *newdb (lua_State *L) {
     db->L = L;
     db->db = NULL;  /* database handle is currently `closed' */
     db->func = NULL;
+    db->registered_extensions = 0;
 
     db->busy_cb =
     db->busy_udata =
@@ -710,6 +757,11 @@ static sdb *lsqlite_checkdb(lua_State *L, int index) {
 typedef struct {
     sqlite3_context *ctx;
     int ud;
+    /* the raw argument values for the call in progress, so value_type()
+    ** can report an argument's runtime type; valid only for the
+    ** duration of that call, like ctx above. */
+    sqlite3_value **argv;
+    int argc;
 } lcontext;
 
 static lcontext *lsqlite_make_context(lua_State *L) {
@@ -718,6 +770,8 @@ static lcontext *lsqlite_make_context(lua_State *L) {
     lua_setmetatable(L, -2);
     ctx->ctx = NULL;
     ctx->ud = LUA_NOREF;
+    ctx->argv = NULL;
+    ctx->argc = 0;
     return ctx;
 }
 
@@ -772,6 +826,20 @@ static int lcontext_set_aggregate_context(lua_State *L) {
     luaL_unref(L, LUA_REGISTRYINDEX, ctx->ud);
     ctx->ud = luaL_ref(L, LUA_REGISTRYINDEX);
     return 0;
+}
+
+/* the runtime type of argument n (1-based, matching the function's own
+** call signature `function(ctx, arg1, arg2, ...)`) -- the value itself
+** already arrived as a plain Lua value indistinguishable between BLOB
+** and TEXT, so a UDF that needs to tell them apart calls this. */
+static int lcontext_value_type(lua_State *L) {
+    lcontext *ctx = lsqlite_checkcontext(L, 1);
+    int n = luaL_checkint(L, 2);
+    if (n < 1 || n > ctx->argc) {
+        luaL_error(L, "argument index (%d) out of range [1..%d]", n, ctx->argc);
+    }
+    push_sqlite_typename(L, sqlite3_value_type(ctx->argv[n - 1]));
+    return 1;
 }
 
 #if 0
@@ -934,11 +1002,137 @@ static int db_wal_checkpoint(lua_State *L) {
     const char *db_name = luaL_optstring(L, 3, NULL);
     int nLog, nCkpt;
     if (sqlite3_wal_checkpoint_v2(db->db, db_name, eMode, &nLog, &nCkpt) != SQLITE_OK) {
-        return pusherr(L, sqlite3_errcode(db->db));
+        lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
+        lua_pushinteger(L, sqlite3_errcode(db->db));
+        return 3;
     }
     lua_pushinteger(L, nLog);
     lua_pushinteger(L, nCkpt);
     return 2;
+}
+
+/*
+** Finds `name`'s row in the linked extension registry
+** (third_party/sqlite3/extensions.c) and returns its position, or -1
+** if `name` names no linked extension. The position doubles as the
+** bit index into sdb.registered_extensions, so it must fit; the
+** registry is a handful of rows today; -1 is also what a registry
+** grown past 32 rows falls back to for the overflowing rows, which
+** simply stops tracking presence for them (see the caller).
+*/
+static int extension_registry_index(const char *name) {
+    const struct SqliteExtension *ext;
+    int i;
+
+    for (ext = kSqliteExtensions, i = 0; ext->name; ext++, i++) {
+        if (strcmp(ext->name, name) == 0) {
+            if (i >= (int)(sizeof(unsigned int) * 8)) return -1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+** Registers a linked SQLite ext/misc extension (a row of the registry
+** in third_party/sqlite3/extensions.c) on this connection, by name.
+**
+** A fat binary may or may not carry a given extension, so this is a
+** runtime question a caller must be able to ask and get a real answer
+** to -- not a boolean, which would collapse three different outcomes
+** into one bit:
+**
+**   "registered"        name was in the registry and not yet a module
+**                       on this connection; its init ran just now.
+**   "present"           name is already a registered module on this
+**                       connection -- a compile-time feature such as
+**                       FTS5 that cannot be registered and does not
+**                       need to be, or an extension a prior call (or
+**                       the open path's own zipfile registration)
+**                       already registered. Nothing was done.
+**   nil, errmsg, code   name is neither present nor in the registry
+**                       (code is SQLITE_NOTFOUND), or its init failed
+**                       (code is that failure's sqlite result code).
+**
+** A registry row's presence is tracked directly on the connection
+** (sdb.registered_extensions), set here and by the open path's own
+** default zipfile registration -- NOT inferred from
+** `pragma_module_list`, because that only agrees with a row's
+** registry name for zipfile: regexp registers SQL functions, not a
+** module at all, and series's module is named "generate_series", so
+** neither ever appears in pragma_module_list under its registry name.
+** A name that is not in the registry (e.g. "fts5", a compile-time
+** feature with no registry row) still falls back to
+** `pragma_module_list`, which is how such names are actually exposed.
+**
+** Params: db, name
+*/
+static int db_register_extension(lua_State *L) {
+    sdb *db = lsqlite_checkdb(L, 1);
+    const char *name = luaL_checkstring(L, 2);
+    sqlite3_stmt *stmt;
+    int rc;
+    int present = 0;
+    int idx = extension_registry_index(name);
+    const struct SqliteExtension *ext;
+
+    if (idx >= 0) {
+        if (db->registered_extensions & (1u << idx)) {
+            lua_pushstring(L, "present");
+            return 1;
+        }
+
+        for (ext = kSqliteExtensions; ext->name; ext++) {
+            if (strcmp(ext->name, name) == 0) {
+                char *errmsg = 0;
+                rc = ext->init(db->db, &errmsg, 0);
+                if (rc != SQLITE_OK) {
+                    lua_pushnil(L);
+                    lua_pushstring(L, errmsg ? errmsg : sqlite3_errstr(rc));
+                    lua_pushinteger(L, rc);
+                    if (errmsg) sqlite3_free(errmsg);
+                    return 3;
+                }
+                if (errmsg) sqlite3_free(errmsg);
+                db->registered_extensions |= (1u << idx);
+                lua_pushstring(L, "registered");
+                return 1;
+            }
+        }
+    }
+
+    /* Not a tracked registry row (or the registry outgrew the bitmask):
+       fall back to the pragma, which is how a compile-time module such
+       as FTS5 is actually exposed. */
+    rc = sqlite3_prepare_v2(db->db,
+        "SELECT 1 FROM pragma_module_list WHERE name = ?1", -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
+        lua_pushinteger(L, rc);
+        return 3;
+    }
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) present = 1;
+    sqlite3_finalize(stmt);
+    if (!present && rc != SQLITE_DONE) {
+        lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
+        lua_pushinteger(L, rc);
+        return 3;
+    }
+
+    if (present) {
+        lua_pushstring(L, "present");
+        return 1;
+    }
+
+    lua_pushnil(L);
+    lua_pushfstring(L, "extension '%s' is not available in this build", name);
+    lua_pushinteger(L, SQLITE_NOTFOUND);
+    return 3;
 }
 
 /*
@@ -1025,6 +1219,8 @@ static void db_sql_normal_function(sqlite3_context *context, int argc, sqlite3_v
 
     /* set context */
     ctx->ctx = context;
+    ctx->argv = argv;
+    ctx->argc = argc;
 
     if (lua_pcall(L, argc + 1, 0, 0)) {
         const char *errmsg = lua_tostring(L, -1);
@@ -1034,6 +1230,8 @@ static void db_sql_normal_function(sqlite3_context *context, int argc, sqlite3_v
 
     /* invalidate context */
     ctx->ctx = NULL;
+    ctx->argv = NULL;
+    ctx->argc = 0;
 
     if (!func->aggregate) {
         luaL_unref(L, LUA_REGISTRYINDEX, ctx->ud);
@@ -1088,8 +1286,18 @@ static void db_sql_finalize_function(sqlite3_context *context) {
 
 /*
 ** Register a normal function
-** Params: db, function name, number arguments, [ callback | step, finalize], user data
+** Params: db, function name, number arguments, [ callback | step, finalize],
+**         user data, deterministic
 ** Returns: true on success
+**
+** `deterministic` is an optional boolean, default false. When true the
+** function is registered with SQLITE_DETERMINISTIC, which lets it appear
+** in an index on an expression, in a partial index WHERE clause, and be
+** factored out of a loop instead of re-evaluated per row. It is a promise
+** the caller makes and SQLite holds it to: a function marked deterministic
+** that returns different values for the same arguments yields wrong query
+** results, not an error. Anything other than nil/none/boolean is an
+** argument error.
 **
 ** Normal function:
 ** Params: context, params
@@ -1102,6 +1310,7 @@ static int db_register_function(lua_State *L, int aggregate) {
     sdb *db = lsqlite_checkdb(L, 1);
     const char *name;
     int args;
+    int flags;
     int result;
     sdb_func *func;
 
@@ -1113,6 +1322,13 @@ static int db_register_function(lua_State *L, int aggregate) {
     luaL_checktype(L, 4, LUA_TFUNCTION);
     if (aggregate) luaL_checktype(L, 5, LUA_TFUNCTION);
 
+    /* optional deterministic flag sits after the user data slot */
+    flags = SQLITE_UTF8;
+    if (!lua_isnoneornil(L, 6 + aggregate)) {
+        luaL_checktype(L, 6 + aggregate, LUA_TBOOLEAN);
+        if (lua_toboolean(L, 6 + aggregate)) flags |= SQLITE_DETERMINISTIC;
+    }
+
     /* maybe an alternative way to allocate memory should be used/avoided */
     func = (sdb_func*)malloc(sizeof(sdb_func));
     if (func == NULL) {
@@ -1120,7 +1336,7 @@ static int db_register_function(lua_State *L, int aggregate) {
     }
 
     result = sqlite3_create_function(
-        db->db, name, args, SQLITE_UTF8, func,
+        db->db, name, args, flags, func,
         aggregate ? NULL : db_sql_normal_function,
         aggregate ? db_sql_normal_function : NULL,
         aggregate ? db_sql_finalize_function : NULL
@@ -1605,10 +1821,11 @@ static int db_prepare(lua_State *L) {
 
     if (sqlite3_prepare_v2(db->db, sql, sql_len, &svm->vm, &sqltail) != SQLITE_OK) {
         lua_pushnil(L);
+        lua_pushstring(L, sqlite3_errmsg(db->db));
         lua_pushinteger(L, sqlite3_errcode(db->db));
         if (cleanupvm(L, svm) == 1)
             lua_pop(L, 1); /* this should not happen since sqlite3_prepare_v2 will not set ->vm on error */
-        return 2;
+        return 3;
     }
 
     /* vm already in the stack */
@@ -1779,7 +1996,7 @@ static int db_serialize(lua_State *L) {
         return pusherrstr(L, "failed to serialize");
 
     lua_pushlstring(L, buffer, size);
-    free(buffer);
+    sqlite3_free(buffer);
     return 1;
 }
 
@@ -1795,600 +2012,6 @@ static int db_deserialize(lua_State *L) {
     sqlite3_deserialize(db->db, "main", (void *)sqlbuf, size, size,
         SQLITE_DESERIALIZE_FREEONCLOSE + SQLITE_DESERIALIZE_RESIZEABLE);
     return 0;
-}
-
-#endif
-
-#ifdef SQLITE_ENABLE_SESSION
-
-/*
-** =======================================================
-** Iterator functions (for session support)
-** =======================================================
-*/
-
-typedef struct {
-    sqlite3_changeset_iter *itr;
-    bool collectable;
-} liter;
-
-static liter *lsqlite_makeiter(lua_State *L, sqlite3_changeset_iter *piter, bool collectable) {
-    liter *litr = (liter*)lua_newuserdata(L, sizeof(liter));
-    lua_rawgeti(L, LUA_REGISTRYINDEX, sqlite_itr_meta_ref);
-    lua_setmetatable(L, -2);
-    litr->itr = piter;
-    litr->collectable = collectable;
-    return litr;
-}
-
-static liter *lsqlite_getiter(lua_State *L, int index) {
-    return (liter *)luaL_checkudata(L, index, sqlite_itr_meta);
-}
-
-static liter *lsqlite_checkiter(lua_State *L, int index) {
-    liter *litr = lsqlite_getiter(L, index);
-    if (litr->itr == NULL) luaL_argerror(L, index, "invalid sqlite iterator");
-    return litr;
-}
-
-static int liter_finalize(lua_State *L) {
-    liter *litr = lsqlite_getiter(L, 1);
-    int rc;
-    if (litr->itr) {
-        if (!litr->collectable) {
-            return pusherr(L, SQLITE_CORRUPT);
-        }
-        if ((rc = sqlite3changeset_finalize(litr->itr)) != SQLITE_OK) {
-            return pusherr(L, rc);
-        }
-        litr->itr = NULL;
-    }
-    lua_pushboolean(L, 1);
-    return 1;
-}
-
-static int liter_gc(lua_State *L) {
-    return liter_finalize(L);
-}
-
-static int liter_tostring(lua_State *L) {
-    char buff[33];
-    liter *litr = lsqlite_getiter(L, 1);
-    if (litr->itr == NULL)
-        strcpy(buff, "closed");
-    else
-        sprintf(buff, "%p", litr->itr);
-    lua_pushfstring(L, "sqlite iterator (%s)", buff);
-    return 1;
-}
-
-static int liter_table(
-        lua_State *L,
-        int (*iter_func)(sqlite3_changeset_iter *pIter, int val, sqlite3_value **ppValue)
-) {
-    const char *zTab;
-    int n, rc, nCol, Op, bIndirect;
-    sqlite3_value *pVal;
-    liter *litr = lsqlite_checkiter(L, 1);
-    sqlite3changeset_op(litr->itr, &zTab, &nCol, &Op, &bIndirect);
-    lua_createtable(L, nCol, 0);
-    for (n = 0; n < nCol; n++) {
-        if ((rc = (*iter_func)(litr->itr, n, &pVal)) != LUA_OK) {
-            return pusherr(L, rc);
-        }
-        if (pVal) {
-            db_push_value(L, pVal);
-        } else {
-            // push `false` to indicate that the value wasn't changed
-            // and not included in the record and to keep table valid
-            lua_pushboolean(L, 0);
-        }
-        lua_rawseti(L, -2, n+1);
-    }
-    return 1;
-}
-
-static int liter_new(lua_State *L) {
-    return liter_table(L, sqlite3changeset_new);
-}
-
-static int liter_old(lua_State *L) {
-    return liter_table(L, sqlite3changeset_old);
-}
-
-static int liter_conflict(lua_State *L) {
-    return liter_table(L, sqlite3changeset_conflict);
-}
-
-static int liter_op(lua_State *L) {
-    const char *zTab;
-    int rc, nCol, Op, bIndirect;
-    liter *litr = lsqlite_checkiter(L, 1);
-
-    if ((rc = sqlite3changeset_op(litr->itr, &zTab, &nCol, &Op, &bIndirect)) != LUA_OK) {
-        return pusherr(L, rc);
-    }
-    lua_pushstring(L, zTab);
-    lua_pushinteger(L, Op);
-    lua_pushboolean(L, bIndirect);
-    return 3;
-}
-
-static int liter_fk_conflicts(lua_State *L) {
-    int rc, nOut;
-    liter *litr = lsqlite_checkiter(L, 1);
-    if ((rc = sqlite3changeset_fk_conflicts(litr->itr, &nOut)) != LUA_OK) {
-        return pusherr(L, rc);
-    }
-    lua_pushinteger(L, nOut);
-    return 1;
-}
-
-static int liter_next(lua_State *L) {
-    liter *litr = lsqlite_checkiter(L, 1);
-    if (!litr->collectable) {
-        return pusherr(L, SQLITE_CORRUPT);
-    }
-    lua_pushinteger(L, sqlite3changeset_next(litr->itr));
-    return 1;
-}
-
-static int liter_pk(lua_State *L) {
-    int n, rc, nCol;
-    unsigned char *abPK;
-    liter *litr = lsqlite_checkiter(L, 1);
-    if ((rc = sqlite3changeset_pk(litr->itr, &abPK, &nCol)) != LUA_OK) {
-        return pusherr(L, rc);
-    }
-    lua_createtable(L, nCol, 0);
-    for (n = 0; n < nCol; n++) {
-        lua_pushboolean(L, abPK[n]);
-        lua_rawseti(L, -2, n+1);
-    }
-    return 1;
-}
-
-/*
-** =======================================================
-** Rebaser functions (for session support)
-** =======================================================
-*/
-
-typedef struct {
-    sqlite3_rebaser *reb;
-} lrebaser;
-
-static lrebaser *lsqlite_makerebaser(lua_State *L, sqlite3_rebaser *reb) {
-    lrebaser *lreb = (lrebaser*)lua_newuserdata(L, sizeof(lrebaser));
-    lua_rawgeti(L, LUA_REGISTRYINDEX, sqlite_reb_meta_ref);
-    lua_setmetatable(L, -2);
-    lreb->reb = reb;
-    return lreb;
-}
-
-static lrebaser *lsqlite_getrebaser(lua_State *L, int index) {
-    return (lrebaser *)luaL_checkudata(L, index, sqlite_reb_meta);
-}
-
-static lrebaser *lsqlite_checkrebaser(lua_State *L, int index) {
-    lrebaser *lreb = lsqlite_getrebaser(L, index);
-    if (lreb->reb == NULL) luaL_argerror(L, index, "invalid sqlite rebaser");
-    return lreb;
-}
-
-static int lrebaser_delete(lua_State *L) {
-    lrebaser *lreb = lsqlite_getrebaser(L, 1);
-    if (lreb->reb != NULL) {
-      sqlite3rebaser_delete(lreb->reb);
-      lreb->reb = NULL;
-    }
-    return 0;
-}
-
-static int lrebaser_gc(lua_State *L) {
-    return lrebaser_delete(L);
-}
-
-static int lrebaser_tostring(lua_State *L) {
-    char buff[32];
-    lrebaser *lreb = lsqlite_getrebaser(L, 1);
-    if (lreb->reb == NULL)
-        strcpy(buff, "closed");
-    else
-        sprintf(buff, "%p", lreb->reb);
-    lua_pushfstring(L, "sqlite rebaser (%s)", buff);
-    return 1;
-}
-
-static int lrebaser_rebase(lua_State *L) {
-    lrebaser *lreb = lsqlite_checkrebaser(L, 1);
-    const char *cset = luaL_checkstring(L, 2);
-    int nset = lua_rawlen(L, 2);
-    int rc;
-    int size;
-    void *buf;
-
-    if ((rc = sqlite3rebaser_rebase(lreb->reb, nset, cset, &size, &buf)) != SQLITE_OK) {
-        return pusherr(L, rc);
-    }
-    lua_pushlstring(L, buf, size);
-    sqlite3_free(buf);
-    return 1;
-}
-
-static int db_create_rebaser(lua_State *L) {
-    sqlite3_rebaser *reb;
-    int rc;
-
-    if ((rc = sqlite3rebaser_create(&reb)) != SQLITE_OK) {
-        return pusherr(L, rc);
-    }
-    (void)lsqlite_makerebaser(L, reb);
-    return 1;
-}
-
-/* session/changeset callbacks */
-
-static int changeset_conflict_cb = LUA_NOREF;
-static int changeset_filter_cb = LUA_NOREF;
-static int changeset_cb_udata = LUA_NOREF;
-static int session_filter_cb = LUA_NOREF;
-static int session_cb_udata = LUA_NOREF;
-
-static int db_changeset_conflict_callback(
-        void *user,               /* Copy of sixth arg to _apply_v2() */
-        int eConflict,            /* DATA, MISSING, CONFLICT, CONSTRAINT */
-        sqlite3_changeset_iter *p /* Handle describing change and conflict */
-) {
-    // return default code if no callback is provided
-    if (changeset_conflict_cb == LUA_NOREF) return SQLITE_CHANGESET_OMIT;
-    sdb *db = (sdb*)user;
-    lua_State *L = db->L;
-    int top = lua_gettop(L);
-    int result, isint;
-    const char *zTab;
-    int nCol, Op, bIndirect;
-
-    if (sqlite3changeset_op(p, &zTab, &nCol, &Op, &bIndirect) != LUA_OK) {
-        lua_pushliteral(L, "invalid return from changeset iterator");
-        return lua_error(L);
-    }
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, changeset_conflict_cb); /* get callback */
-    lua_rawgeti(L, LUA_REGISTRYINDEX, changeset_cb_udata); /* get callback user data */
-    lua_pushinteger(L, eConflict);
-    (void)lsqlite_makeiter(L, p, 0);
-    lua_pushstring(L, zTab);
-    lua_pushinteger(L, Op);
-    lua_pushboolean(L, bIndirect);
-
-    if (lua_pcall(L, 6, 1, 0) != LUA_OK) return lua_error(L);
-
-    result = lua_tointegerx(L, -1, &isint); /* use result if there was no error */
-    if (!isint) {
-        lua_pushliteral(L, "non-integer returned from conflict callback");
-        return lua_error(L);
-    }
-
-    lua_settop(L, top);
-    return result;
-}
-
-static int db_filter_callback(
-        void *user,       /* Context */
-        const char *zTab, /* Table name */
-        int filter_cb,
-        int filter_udata
-) {
-    // allow the table if no filter callback is provided
-    if (filter_cb == LUA_NOREF || filter_cb == LUA_REFNIL) return 1;
-    sdb *db = (sdb*)user;
-    lua_State *L = db->L;
-    int top = lua_gettop(L);
-    int result, isint;
-
-    lua_rawgeti(L, LUA_REGISTRYINDEX, filter_cb); /* get callback */
-    lua_pushstring(L, zTab);
-    lua_rawgeti(L, LUA_REGISTRYINDEX, filter_udata); /* get callback user data */
-
-    if (lua_pcall(L, 2, 1, 0) != LUA_OK) return lua_error(L);
-
-    // allow 0/1 and false/true to be returned
-    // returning 0/false skips the table
-    result = lua_tointegerx(L, -1, &isint); /* use result if there was no error */
-    if (!isint && !lua_isboolean(L, -1)) {
-        lua_pushliteral(L, "non-integer and non-boolean returned from filter callback");
-        return lua_error(L);
-    }
-    if (!isint) result = lua_toboolean(L, -1);
-
-    lua_settop(L, top);
-    return result;
-}
-
-static int db_changeset_filter_callback(
-        void *user,      /* Copy of sixth arg to _apply_v2() */
-        const char *zTab /* Table name */
-) {
-    return db_filter_callback(user, zTab, changeset_filter_cb, changeset_cb_udata);
-}
-
-static int db_session_filter_callback(
-        void *user,      /* Copy of third arg to session_attach() */
-        const char *zTab /* Table name */
-) {
-    return db_filter_callback(user, zTab, session_filter_cb, session_cb_udata);
-}
-
-/*
-** =======================================================
-** Session functions
-** =======================================================
-*/
-
-typedef struct {
-    sqlite3_session *ses;
-    sdb *db; // keep track of the DB this session is for
-} lsession;
-
-static lsession *lsqlite_makesession(lua_State *L, sqlite3_session *ses, sdb *db) {
-    lsession *lses = (lsession*)lua_newuserdata(L, sizeof(lsession));
-    lua_rawgeti(L, LUA_REGISTRYINDEX, sqlite_ses_meta_ref);
-    lua_setmetatable(L, -2);
-    lses->ses = ses;
-    lses->db = db;
-    return lses;
-}
-
-static lsession *lsqlite_getsession(lua_State *L, int index) {
-    return (lsession *)luaL_checkudata(L, index, sqlite_ses_meta);
-}
-
-static lsession *lsqlite_checksession(lua_State *L, int index) {
-    lsession *lses = lsqlite_getsession(L, index);
-    if (lses->ses == NULL) luaL_argerror(L, index, "invalid sqlite session");
-    return lses;
-}
-
-static int lsession_attach(lua_State *L) {
-    lsession *lses = lsqlite_checksession(L, 1);
-    int rc;
-    // allow either a table or a callback function to filter tables
-    const char *zTab = lua_type(L, 2) == LUA_TFUNCTION
-        ? NULL
-        : luaL_optstring(L, 2, NULL);
-    if ((rc = sqlite3session_attach(lses->ses, zTab)) != SQLITE_OK) {
-        return pusherr(L, rc);
-    }
-    // allow to pass a filter callback,
-    // but only one shared for all sessions where this callback is used
-    if (lua_type(L, 2) == LUA_TFUNCTION) {
-        // TBD: does this *also* need to be done in cleanupvm?
-        luaL_unref(L, LUA_REGISTRYINDEX, session_filter_cb);
-        luaL_unref(L, LUA_REGISTRYINDEX, session_cb_udata);
-        lua_settop(L, 3);  // add udata even if it's not provided
-        session_cb_udata = luaL_ref(L, LUA_REGISTRYINDEX);
-        session_filter_cb = luaL_ref(L, LUA_REGISTRYINDEX);
-        sqlite3session_table_filter(lses->ses,
-            db_session_filter_callback, lses->db);
-    }
-    lua_pushboolean(L, 1);
-    return 1;
-}
-
-static int lsession_isempty(lua_State *L) {
-    lsession *lses = lsqlite_checksession(L, 1);
-    lua_pushboolean(L, sqlite3session_isempty(lses->ses));
-    return 1;
-}
-
-static int lsession_diff(lua_State *L) {
-    lsession *lses = lsqlite_checksession(L, 1);
-    const char *zFromDb = luaL_checkstring(L, 2);
-    const char *zTbl = luaL_checkstring(L, 3);
-    int rc = sqlite3session_diff(lses->ses, zFromDb, zTbl, NULL);
-    if (rc != SQLITE_OK) return pusherr(L, rc);
-    lua_pushboolean(L, 1);
-    return 1;
-}
-
-static int lsession_bool(
-        lua_State *L,
-        int (*session_func)(sqlite3_session *ses, int val)
-) {
-    lsession *lses = lsqlite_checksession(L, 1);
-    int val = lua_isboolean(L, 2)
-        ? lua_toboolean(L, 2)
-        : luaL_optinteger(L, 2, -1);
-    lua_pushboolean(L, (*session_func)(lses->ses, val));
-    return 1;
-}
-
-static int lsession_indirect(lua_State *L) {
-    return lsession_bool(L, sqlite3session_indirect);
-}
-
-static int lsession_enable(lua_State *L) {
-    return lsession_bool(L, sqlite3session_enable);
-}
-
-static int lsession_getset(
-        lua_State *L,
-        int (*session_setfunc)(sqlite3_session *ses, int *size, void **buf)
-) {
-    lsession *lses = lsqlite_checksession(L, 1);
-    int rc;
-    int size;
-    void *buf;
-
-    if ((rc = (*session_setfunc)(lses->ses, &size, &buf)) != SQLITE_OK) {
-        return pusherr(L, rc);
-    }
-    lua_pushlstring(L, buf, size);
-    sqlite3_free(buf);
-    return 1;
-}
-
-static int lsession_changeset(lua_State *L) {
-    return lsession_getset(L, sqlite3session_changeset);
-}
-
-static int lsession_patchset(lua_State *L) {
-    return lsession_getset(L, sqlite3session_patchset);
-}
-
-static int lsession_delete(lua_State *L) {
-    lsession *lses = lsqlite_getsession(L, 1);
-    if (lses->ses != NULL) {
-      sqlite3session_delete(lses->ses);
-      lses->ses = NULL;
-    }
-    return 0;
-}
-
-static int lsession_tostring(lua_State *L) {
-    char buff[32];
-    lsession *lses = lsqlite_getsession(L, 1);
-    if (lses->ses == NULL)
-        strcpy(buff, "closed");
-    else
-        sprintf(buff, "%p", lses->ses);
-    lua_pushfstring(L, "sqlite session (%s)", buff);
-    return 1;
-}
-
-static int db_create_session(lua_State *L) {
-    sdb *db = lsqlite_checkdb(L, 1);
-    const char *zDb = luaL_optstring(L, 2, "main");
-    sqlite3_session *ses;
-
-    if (sqlite3session_create(db->db, zDb, &ses) != SQLITE_OK) {
-        return pusherr(L, sqlite3_errcode(db->db));
-    }
-    (void)lsqlite_makesession(L, ses, db);
-    return 1;
-}
-
-static int db_iterate_changeset(lua_State *L) {
-    sqlite3_changeset_iter *p;
-    lsqlite_checkdb(L, 1);
-    const char *cset = luaL_checkstring(L, 2);
-    int nset = lua_rawlen(L, 2);
-    int flags = luaL_optinteger(L, 3, 0);
-    int rc;
-
-    if ((rc = sqlite3changeset_start_v2(&p, nset, (void *)cset, flags)) != SQLITE_OK) {
-        return pusherr(L, rc);
-    }
-    (void)lsqlite_makeiter(L, p, 1);
-    return 1;
-}
-
-static int db_invert_changeset(lua_State *L) {
-    lsqlite_checkdb(L, 1);
-    const char *cset = luaL_checkstring(L, 2);
-    int nset = lua_rawlen(L, 2);
-    int rc;
-    int size;
-    void *buf;
-
-    if ((rc = sqlite3changeset_invert(nset, cset, &size, &buf)) != SQLITE_OK) {
-        return pusherr(L, rc);
-    }
-    lua_pushlstring(L, buf, size);
-    sqlite3_free(buf);
-    return 1;
-}
-
-static int db_concat_changeset(lua_State *L) {
-    lsqlite_checkdb(L, 1);
-    int size, nset;
-    void *buf, *cset;
-    sqlite3_changegroup *pGrp;
-
-    luaL_checktype(L, 2, LUA_TTABLE);
-    int n = luaL_len(L, 2);
-    int rc = sqlite3changegroup_new(&pGrp);
-    for (int i = 1; rc == SQLITE_OK && i <= n; i++) {
-        lua_rawgeti(L, 2, i);
-        cset = (void *)lua_tostring(L, -1);
-        nset = lua_rawlen(L, -1);
-        rc = sqlite3changegroup_add(pGrp, nset, cset);
-        lua_pop(L, 1);  // pop the string
-    }
-    if (rc == SQLITE_OK) rc = sqlite3changegroup_output(pGrp, &size, &buf);
-    sqlite3changegroup_delete(pGrp);
-
-    if (rc != SQLITE_OK) return pusherr(L, rc);
-    lua_pushlstring(L, buf, size);
-    sqlite3_free(buf);
-    return 1;
-}
-
-static int db_apply_changeset(lua_State *L) {
-    sdb *db = lsqlite_checkdb(L, 1);
-    void *cset = (void *)luaL_checkstring(L, 2);
-    int nset = lua_rawlen(L, 2);
-    int top = lua_gettop(L);
-    int rc;
-    int flags = 0;
-    void *pRebase;
-    int nRebase;
-    lrebaser *lreb = NULL;
-
-    // parameters: db, changeset[[, filter cb], conflict cb[, udata[, rebaser[, flags]]]]
-
-    // TBD: does this *also* need to be done in cleanupvm?
-    if (changeset_cb_udata != LUA_NOREF) {
-        luaL_unref(L, LUA_REGISTRYINDEX, changeset_conflict_cb);
-        luaL_unref(L, LUA_REGISTRYINDEX, changeset_filter_cb);
-        luaL_unref(L, LUA_REGISTRYINDEX, changeset_cb_udata);
-
-        changeset_conflict_cb =
-        changeset_filter_cb =
-        changeset_cb_udata = LUA_NOREF;
-    }
-
-    // check for conflict/filter callback type if provided
-    if (top >= 3) {
-        luaL_checktype(L, 3, LUA_TFUNCTION);
-        // if no filter callback, insert a dummy one to simplify stack handling
-        if (lua_type(L, 4) != LUA_TFUNCTION) {
-            lua_pushnil(L);
-            lua_insert(L, 3);
-            top = lua_gettop(L);
-        }
-    }
-    if (top >= 6) lreb = lsqlite_checkrebaser(L, 6);
-    if (top >= 7) flags = luaL_checkinteger(L, 7);
-    if (top >= 4) {  // two callback are guaranteed to be on the stack in this case
-        // shorten stack or extend to set udata to `nil` if not provided
-        lua_settop(L, 5);
-        changeset_cb_udata = luaL_ref(L, LUA_REGISTRYINDEX);
-        changeset_conflict_cb = luaL_ref(L, LUA_REGISTRYINDEX);
-        changeset_filter_cb = luaL_ref(L, LUA_REGISTRYINDEX);
-    }
-
-    rc = sqlite3changeset_apply_v2(db->db, nset, cset,
-                                   db_changeset_filter_callback,
-                                   db_changeset_conflict_callback,
-                                   db, // context
-                                   lreb ? &pRebase : 0,
-                                   lreb ? &nRebase : 0,
-                                   flags);
-
-    if (rc != SQLITE_OK) return pusherr(L, sqlite3_errcode(db->db));
-
-    if (lreb) { // if rebaser is present
-        rc = sqlite3rebaser_configure(lreb->reb, nRebase, pRebase);
-        if (rc == SQLITE_OK) lua_pushstring(L, pRebase);
-        sqlite3_free(pRebase);
-        if (rc == SQLITE_OK) return 1;
-        return pusherr(L, rc);
-    }
-
-    lua_pushboolean(L, 1);
-    return 1;
 }
 
 #endif
@@ -2410,14 +2033,17 @@ static int lsqlite_do_open(lua_State *L, const char *filename, int flags) {
 
     if (sqlite3_open_v2(filename, &db->db, flags, 0) == SQLITE_OK) {
         /* database handle already in the stack - return it */
-        sqlite3_zipfile_init(db->db, 0, 0);
+        if (sqlite3_zipfile_init(db->db, 0, 0) == SQLITE_OK) {
+            int idx = extension_registry_index("zipfile");
+            if (idx >= 0) db->registered_extensions |= (1u << idx);
+        }
         return 1;
     }
 
     /* failed to open database */
     lua_pushnil(L);                             /* push nil */
-    lua_pushinteger(L, sqlite3_errcode(db->db));
     lua_pushstring(L, sqlite3_errmsg(db->db));  /* push error message */
+    lua_pushinteger(L, sqlite3_errcode(db->db));
 
     /* clean things up */
     cleanupdb(L, db);
@@ -2495,7 +2121,13 @@ static int lsqlite_config(lua_State *L) {
             }
             return 3;  // return OK and previous callback and userdata
     }
-    return pusherr(L, rc);
+    // unlike pusherr(), config's failure carries a human-readable message in
+    // slot 2 (this repo's own convention), with the raw sqlite3 code kept as
+    // an optional slot 3 for callers that want to branch on it
+    lua_pushnil(L);
+    lua_pushstring(L, sqlite3_errstr(rc));
+    lua_pushinteger(L, rc);
+    return 3;
 }
 
 static int lsqlite_newindex(lua_State *L) {
@@ -2508,6 +2140,25 @@ static int lsqlite_newindex(lua_State *L) {
 */
 static int lsqlite_lversion(lua_State *L) {
     lua_pushstring(L, LSQLITE_VERSION);
+    return 1;
+}
+
+/*
+** Returns the linked SQLite ext/misc extension registry (the registry
+** in third_party/sqlite3/extensions.c) as an array of names, so a
+** caller can discover what this build carries -- and so pass a name
+** `db:register_extension` will recognize -- rather than guessing from
+** a version number.
+*/
+static int lsqlite_extensions(lua_State *L) {
+    const struct SqliteExtension *ext;
+    int i = 0;
+
+    lua_newtable(L);
+    for (ext = kSqliteExtensions; ext->name; ext++) {
+        lua_pushstring(L, ext->name);
+        lua_rawseti(L, -2, ++i);
+    }
     return 1;
 }
 
@@ -2597,21 +2248,6 @@ static const struct {
     SC(CHECKPOINT_RESTART)
     SC(CHECKPOINT_TRUNCATE)
 
-#ifdef SQLITE_ENABLE_SESSION
-    /* session constants */
-    SC(CHANGESETSTART_INVERT)
-    SC(CHANGESETAPPLY_NOSAVEPOINT)
-    SC(CHANGESETAPPLY_INVERT)
-    SC(CHANGESET_DATA)
-    SC(CHANGESET_NOTFOUND)
-    SC(CHANGESET_CONFLICT)
-    SC(CHANGESET_CONSTRAINT)
-    SC(CHANGESET_FOREIGN_KEY)
-    SC(CHANGESET_OMIT)
-    SC(CHANGESET_REPLACE)
-    SC(CHANGESET_ABORT)
-#endif
-
     /* terminator */
     { NULL, 0 }
 };
@@ -2629,6 +2265,7 @@ static const luaL_Reg dblib[] = {
     {"interrupt",           db_interrupt            },
     {"db_filename",         db_db_filename          },
     {"wal_checkpoint",      db_wal_checkpoint       },
+    {"register_extension",  db_register_extension   },
 
     {"create_function",     db_create_function      },
     {"create_aggregate",    db_create_aggregate     },
@@ -2649,15 +2286,6 @@ static const luaL_Reg dblib[] = {
     {"exec",                db_exec                 },
     {"close",               db_close                },
     {"close_vm",            db_close_vm             },
-
-#ifdef SQLITE_ENABLE_SESSION
-    {"create_session",      db_create_session       },
-    {"create_rebaser",      db_create_rebaser       },
-    {"apply_changeset",     db_apply_changeset      },
-    {"invert_changeset",    db_invert_changeset     },
-    {"concat_changeset",    db_concat_changeset     },
-    {"iterate_changeset",   db_iterate_changeset    },
-#endif
 
 #ifdef SQLITE_ENABLE_DESERIALIZE
     {"serialize",           db_serialize            },
@@ -2693,6 +2321,7 @@ static const luaL_Reg vmlib[] = {
     {"get_names",           dbvm_get_names          },
     {"get_type",            dbvm_get_type           },
     {"get_types",           dbvm_get_types          },
+    {"column_type",         dbvm_column_type        },
     {"get_uvalues",         dbvm_get_uvalues        },
     {"get_unames",          dbvm_get_unames         },
     {"get_utypes",          dbvm_get_utypes         },
@@ -2725,6 +2354,8 @@ static const luaL_Reg ctxlib[] = {
     {"get_aggregate_data",      lcontext_get_aggregate_context  },
     {"set_aggregate_data",      lcontext_set_aggregate_context  },
 
+    {"value_type",              lcontext_value_type             },
+
     {"result",                  lcontext_result                 },
     {"result_null",             lcontext_result_null            },
     {"result_number",           lcontext_result_double          },
@@ -2738,54 +2369,13 @@ static const luaL_Reg ctxlib[] = {
     {NULL, NULL}
 };
 
-#ifdef SQLITE_ENABLE_SESSION
-
-static const luaL_Reg seslib[] = {
-    {"attach",          lsession_attach         },
-    {"changeset",       lsession_changeset      },
-    {"patchset",        lsession_patchset       },
-    {"isempty",         lsession_isempty        },
-    {"indirect",        lsession_indirect       },
-    {"enable",          lsession_enable         },
-    {"diff",            lsession_diff           },
-    {"delete",          lsession_delete         },
-
-    {"__tostring",      lsession_tostring       },
-    {NULL, NULL}
-};
-
-static const luaL_Reg reblib[] = {
-    {"rebase",          lrebaser_rebase         },
-    {"delete",          lrebaser_delete         },
-
-    {"__tostring",      lrebaser_tostring       },
-    {"__gc",            lrebaser_gc             },
-    {NULL, NULL}
-};
-
-static const luaL_Reg itrlib[] = {
-    {"op",              liter_op                },
-    {"pk",              liter_pk                },
-    {"new",             liter_new               },
-    {"old",             liter_old               },
-    {"next",            liter_next              },
-    {"conflict",        liter_conflict          },
-    {"finalize",        liter_finalize          },
-    {"fk_conflicts",    liter_fk_conflicts      },
-
-    {"__tostring",      liter_tostring          },
-    {"__gc",            liter_gc                },
-    {NULL, NULL}
-};
-
-#endif
-
 static const luaL_Reg sqlitelib[] = {
     {"lversion",        lsqlite_lversion        },
     {"version",         lsqlite_version         },
     {"open",            lsqlite_open            },
     {"open_memory",     lsqlite_open_memory     },
     {"config",          lsqlite_config          },
+    {"extensions",      lsqlite_extensions      },
 
     {"__newindex",      lsqlite_newindex        },
     {NULL, NULL}
@@ -2814,21 +2404,6 @@ LUALIB_API int luaopen_lsqlite3(lua_State *L) {
 
     luaL_getmetatable(L, sqlite_ctx_meta);
     sqlite_ctx_meta_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-
-#ifdef SQLITE_ENABLE_SESSION
-    create_meta(L, sqlite_ses_meta, seslib);
-    create_meta(L, sqlite_reb_meta, reblib);
-    create_meta(L, sqlite_itr_meta, itrlib);
-
-    luaL_getmetatable(L, sqlite_ses_meta);
-    sqlite_ses_meta_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-
-    luaL_getmetatable(L, sqlite_reb_meta);
-    sqlite_reb_meta_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-
-    luaL_getmetatable(L, sqlite_itr_meta);
-    sqlite_itr_meta_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-#endif
 
     /* register (local) sqlite metatable */
     luaL_register(L, "sqlite3", sqlitelib);

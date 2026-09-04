@@ -17,10 +17,10 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                               │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "third_party/lua/lauxlib.h"
-#include "third_party/lua/lcosmo.h"
-#include "third_party/lua/lreplmod.h"
-#include "third_party/lua/lunix.h"
-#include "third_party/lua/cosmo.h"
+#include "third_party/lua/cosmo/lcosmo.h"
+#include "third_party/lua/cosmo/lreplmod.h"
+#include "third_party/lua/cosmo/lunix.h"
+#include "third_party/lua/cosmo/cosmo.h"
 #include "tool/net/lfuncs.h"
 #include "tool/net/lpath.h"
 #include "tool/net/ljson.h"
