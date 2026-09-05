@@ -6493,6 +6493,8 @@ function unix.getsockopt(fd, level, optname) end
 ---@return unix.Errno? errno
 ---@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_LINGER: integer, secs:integer, enabled:boolean): true|nil, string?, unix.Errno?
 ---@overload fun(serverfd:integer, unix.SOL_TCP: integer, unix.TCP_SAVE_SYN: integer, enabled:integer): true|nil, string?, unix.Errno?
+---@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_RCVTIMEO: integer, secs:integer, nanos?:integer): true|nil, string?, unix.Errno?
+---@overload fun(fd:integer, unix.SOL_SOCKET: integer, unix.SO_SNDTIMEO: integer, secs:integer, nanos?:integer): true|nil, string?, unix.Errno?
 function unix.setsockopt(fd, level, optname, value) end
 
 --- Checks for events on a set of file descriptors.
