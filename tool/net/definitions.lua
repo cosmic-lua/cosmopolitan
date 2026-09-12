@@ -2180,6 +2180,142 @@ function zip.Appender:remove(name) end
 ---@return string? error Error message on failure
 function zip.Appender:close() end
 
+--- ### HTTP
+---
+--- The http module is net/http's wire grammar without a serving loop:
+--- an incremental HTTP/1.1 head parser, a chunked-transfer decoder, and
+--- the file-extension to content-type table. Nothing here touches a
+--- socket or TLS -- a Lua server owns the accept loop and the reads,
+--- and this module owns the grammar. This module is available as
+--- `require("cosmo.http")`.
+---
+--- Example - reading one request off a connection:
+---
+---     local http = require("cosmo.http")
+---     local parser = http.parser("request")
+---     local buf, n = "", 0
+---     repeat
+---       buf = buf .. assert(unix.read(fd))
+---       n = assert(parser:parse(buf))
+---     until n > 0
+---     local msg = parser:message(buf)
+---     print(msg.method, msg.uri, msg.headers.Host)
+---     local body = buf:sub(n + 1)
+---
+--- Example - decoding a chunked body:
+---
+---     local unchunker = http.unchunker()
+---     while not unchunker:is_done() do
+---       assert(unchunker:feed(assert(unix.read(fd))))
+---     end
+---     print(unchunker:body())
+---
+http = {}
+
+--- Which grammar a parser reads: a request line (`method uri version`)
+--- or a response status line (`version status message`).
+---@alias http.ParserKind "request"|"response"
+
+--- One HTTP/1.1 message head, materialized by `http.Parser:message`.
+--- Header values are copies of the slices the parser cut out of the
+--- caller's buffer.
+---@class http.Message
+---@field method string Request method, uppercased; empty for a response
+---@field uri string Request target as it appeared on the wire, still percent-encoded; empty for a response
+---@field version integer Protocol version as a two-digit integer: 9, 10 or 11
+---@field status integer? Response status code; absent on a request
+---@field message string? Response reason phrase; absent on a request
+---@field headers table<string, string|string[]> Header values by canonical name (`Host`, `User-Agent`); a name seen more than once holds an array of its values in arrival order
+
+--- An incremental HTTP/1.1 message head parser over one
+--- `struct HttpMessage`. State persists across `parse` calls, so a
+--- fragmented head is resumed rather than rescanned.
+---@class http.Parser: userdata
+
+--- A chunked-transfer decoder over one `struct HttpUnchunker`. It owns
+--- a copy of every byte fed to it, because the decoder rewrites the
+--- body in place and indexes that buffer across calls.
+---@class http.Unchunker: userdata
+
+--- Creates a message head parser.
+---
+--- The kind fixes which grammar the first line is read with and cannot
+--- change afterwards; `reset` reuses the parser for another message of
+--- the same kind. An unknown kind is an argument error.
+---@param kind http.ParserKind `"request"` or `"response"`
+---@return http.Parser parser A parser with no bytes consumed yet
+---@nodiscard
+function http.parser(kind) end
+
+--- Parses as much of a message head as `buf` holds.
+---
+--- `buf` is every byte received so far, from the head's first byte:
+--- the parser keeps its own cursor into it, so appending what was just
+--- read and calling again rescans nothing. A completed head returns its
+--- length in bytes, which is also where the message body begins.
+---
+--- A head longer than `SHRT_MAX` (32767) bytes is refused rather than
+--- silently truncated, which is what the underlying parser would do.
+---@param buf string Every byte of the message received so far
+---@return integer|nil n Head length in bytes once complete, `0` while more bytes are needed
+---@return string? error `"bad message"` for a malformed head, `"message too large"` past `SHRT_MAX`
+function http.Parser:parse(buf) end
+
+--- Materializes the head a completed `parse` cut out of `buf`.
+---
+--- Header values are offsets into `buf`, so this must be passed the same
+--- buffer `parse` read; a shorter one is an argument error, as is calling
+--- this before a `parse` has completed a head.
+---@param buf string The buffer the completed `parse` read
+---@return http.Message message The parsed method, target, version, status and headers
+---@nodiscard
+function http.Parser:message(buf) end
+
+--- Clears the parser for another message of the same kind, keeping the
+--- extended-header storage it already allocated. This is what makes a
+--- keep-alive connection or a pipelined buffer reusable.
+---@return http.Parser self The same parser, ready for another head
+function http.Parser:reset() end
+
+--- Creates a chunked-transfer decoder.
+---@return http.Unchunker unchunker A decoder with no bytes fed yet
+---@nodiscard
+function http.unchunker() end
+
+--- Feeds body bytes to the decoder.
+---
+--- Unlike `http.Parser:parse`, each call takes only the NEW bytes: the
+--- decoder keeps every byte it has been fed. Once the terminating chunk
+--- is seen, the return value is how many of those raw bytes the body
+--- occupied -- anything after it belongs to the next message and is the
+--- caller's to keep. Feeding a decoder that already finished is an
+--- argument error.
+---@param buf string The body bytes just received
+---@return integer|nil consumed Raw bytes the decoded body occupied once the terminating chunk was seen, `0` while more bytes are needed
+---@return string? error `"bad chunk"` for a malformed chunk header, size or terminator
+function http.Unchunker:feed(buf) end
+
+--- The payload decoded so far, which is the whole body once `is_done`
+--- returns true.
+---@return string body Decoded body bytes
+---@nodiscard
+function http.Unchunker:body() end
+
+--- Whether the terminating chunk has been seen, i.e. whether `body` is
+--- the complete payload.
+---@return boolean done `true` once the body is complete
+---@nodiscard
+function http.Unchunker:is_done() end
+
+--- Looks up the content type registered for a path's file extension.
+---
+--- Nil for an unknown or absent extension, so the caller picks its own
+--- default rather than inheriting one.
+---@param path string A path or file name, e.g. `"/img/logo.png"`
+---@return string|nil mime Content type such as `"text/html"`, or nil when the extension is unknown
+---@nodiscard
+function http.find_content_type(path) end
+
 --- ### COVERAGE
 ---
 --- The cov module is a line-hit coverage collector: a C line hook that

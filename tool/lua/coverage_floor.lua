@@ -10,6 +10,7 @@ return {
   ["tool/net/lfetch.c"] = { defined = 13, covered = 13 },
   ["tool/net/lfuncs.c"] = { defined = 66, covered = 64 },
   ["tool/net/lgetopt.c"] = { defined = 3, covered = 3 },
+  ["tool/net/lhttp.c"] = { defined = 15, covered = 15 },
   ["tool/net/ljson.c"] = { defined = 3, covered = 2 },
   ["tool/net/llua.c"] = { defined = 11, covered = 11 },
   ["tool/net/lpath.c"] = { defined = 9, covered = 9 },

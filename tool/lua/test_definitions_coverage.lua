@@ -17,6 +17,7 @@
 --   * lsqlite3   tool/net/lsqlite3.c          sqlitelib[] + constants + methods
 --   * getopt     tool/net/lgetopt.c           kLuaGetopt[]
 --   * zip        tool/net/lzip.c              kLuaZip[] + Reader/Writer/Appender
+--   * http       tool/net/lhttp.c             kLuaHttp[] + Parser/Unchunker
 --   * cov        tool/net/lcov.c              kLuaCov[]
 --   * repl       third_party/lua/cosmo/lreplmod.c   kReplFuncs[]
 --
@@ -201,6 +202,7 @@ local C_argon2 = slurp("tool/net/largon2.c")
 local C_sqlite = slurp("tool/net/lsqlite3.c")
 local C_getopt = slurp("tool/net/lgetopt.c")
 local C_zip = slurp("tool/net/lzip.c")
+local C_http = slurp("tool/net/lhttp.c")
 local C_cov = slurp("tool/net/lcov.c")
 local C_repl = slurp("third_party/lua/cosmo/lreplmod.c")
 local C_cosmo = slurp("tool/lua/lcosmo.c")
@@ -313,6 +315,15 @@ local MODULES = {
       { class = "Reader", reg = reg_table(C_zip, "kLuaZipReaderMethods") },
       { class = "Writer", reg = reg_table(C_zip, "kLuaZipWriterMethods") },
       { class = "Appender", reg = reg_table(C_zip, "kLuaZipAppenderMethods") },
+    },
+  },
+  {
+    name = "http",
+    fns = reg_table(C_http, "kLuaHttp"),
+    methods = {
+      { class = "Parser", reg = reg_table(C_http, "kLuaHttpParserMethods") },
+      { class = "Unchunker",
+        reg = reg_table(C_http, "kLuaHttpUnchunkerMethods") },
     },
   },
   {
@@ -461,7 +472,8 @@ end
 -- purged from definitions.lua; there is no whitelist for them, so a stray
 -- `---@class maxmind.Db` reappearing now fails this lint.
 local KNOWN_MODULES = set({
-  "cosmo", "unix", "path", "re", "argon2", "lsqlite3", "getopt", "zip", "repl",
+  "cosmo", "unix", "path", "re", "argon2", "lsqlite3", "getopt", "zip", "http",
+  "repl",
 })
 -- Global helper classes that intentionally have no module prefix.
 -- `string` extends the builtin string type.
@@ -481,7 +493,8 @@ do
         else
           fail("line " .. lineno .. ": ---@class " .. cls ..
             " has unknown module prefix `" .. mod ..
-            "` (known: cosmo unix path re argon2 lsqlite3 getopt zip repl)")
+            "` (known: cosmo unix path re argon2 lsqlite3 getopt zip " ..
+            "http repl)")
         end
       elseif not cls:find("%.") then
         if not ALLOW_UNQUALIFIED_CLASSES[cls] then
@@ -1210,8 +1223,8 @@ end
 local C_BODIES = {}
 do
   local sources = {
-    C_unix, C_path, C_re, C_argon2, C_sqlite, C_getopt, C_zip, C_cov,
-    C_repl, C_cosmo, C_funcs, C_redbean,
+    C_unix, C_path, C_re, C_argon2, C_sqlite, C_getopt, C_zip, C_http,
+    C_cov, C_repl, C_cosmo, C_funcs, C_redbean,
   }
   for _, C in ipairs(sources) do
     C = strip_c_literals(C)
@@ -1241,8 +1254,8 @@ end
 local MACRO_RETURNS = {}
 do
   local sources = {
-    C_unix, C_path, C_re, C_argon2, C_sqlite, C_getopt, C_zip, C_cov,
-    C_repl, C_cosmo, C_funcs, C_redbean,
+    C_unix, C_path, C_re, C_argon2, C_sqlite, C_getopt, C_zip, C_http,
+    C_cov, C_repl, C_cosmo, C_funcs, C_redbean,
   }
   for _, C in ipairs(sources) do
     for name, tail in C:gmatch("#define%s+([A-Z_][A-Z_0-9]*)%s*%(([^\n]-)\n") do
@@ -1384,6 +1397,9 @@ do
   add("zip.Reader:", C_zip, "kLuaZipReaderMethods")
   add("zip.Writer:", C_zip, "kLuaZipWriterMethods")
   add("zip.Appender:", C_zip, "kLuaZipAppenderMethods")
+  add("http.", C_http, "kLuaHttp")
+  add("http.Parser:", C_http, "kLuaHttpParserMethods")
+  add("http.Unchunker:", C_http, "kLuaHttpUnchunkerMethods")
   add("cov.", C_cov, "kLuaCov")
   add("repl.", C_repl, "kReplFuncs")
 
