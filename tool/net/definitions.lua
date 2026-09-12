@@ -2976,8 +2976,20 @@ function cosmo.EscapeUser(str) end
 ---
 --- Environment variables:
 ---
---- - `http_proxy` / `HTTP_PROXY`: default proxy URL when `proxy` option
----   is not specified. Supports same format as the option.
+--- - `https_proxy` / `HTTPS_PROXY`: default proxy URL for `https://`
+---   requests when the `proxy` option is not specified. Supports the
+---   same format as the option; the lowercase spelling wins when both
+---   are set.
+--- - `http_proxy` / `HTTP_PROXY`: the same, for `http://` requests. An
+---   `https://` request never reads these, and an `http://` request
+---   never reads `https_proxy`/`HTTPS_PROXY`.
+--- - `no_proxy` / `NO_PROXY`: comma-separated list of hosts exempted
+---   from the environment proxy, so a request to a listed host is sent
+---   directly. An entry matches a host equal to it or ending in
+---   `"." .. entry`, case insensitively; leading dots and surrounding
+---   whitespace are ignored, and a lone `*` exempts every host. This
+---   applies only to the environment proxy: an explicit `proxy` option
+---   is used regardless.
 --- - `SSL_CERT_FILE`: path to CA certificate bundle file for TLS verification.
 ---   Overrides default system CA locations.
 --- - `SSL_NO_SYSTEM_CERTS`: if set, skip loading system CA certificates.

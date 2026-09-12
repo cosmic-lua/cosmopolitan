@@ -9,6 +9,39 @@
 #define kaKEEP  2
 #define kaCLOSE 3
 
+// Returns true if HOST is exempted from the environment proxy by the
+// no_proxy / NO_PROXY list.  The list is comma separated; an entry
+// matches a host equal to it, or a host ending in "." + entry, case
+// insensitively.  Leading dots and surrounding whitespace in an entry
+// are ignored, and a lone "*" matches every host.
+static bool IsNoProxyHost(const char *host, size_t hostlen) {
+  const char *list, *p, *end;
+  if (!host || !hostlen)
+    return false;
+  if (!(list = getenv("no_proxy")) && !(list = getenv("NO_PROXY")))
+    return false;
+  for (p = list; *p; p = *end ? end + 1 : end) {
+    size_t n;
+    for (end = p; *end && *end != ','; ++end) {
+    }
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '.'))
+      ++p;
+    n = end - p;
+    while (n && (p[n - 1] == ' ' || p[n - 1] == '\t' || p[n - 1] == '.'))
+      --n;
+    if (!n)
+      continue;
+    if (n == 1 && *p == '*')
+      return true;
+    if (hostlen == n && !memcasecmp(host, p, n))
+      return true;
+    if (hostlen > n && host[hostlen - n - 1] == '.' &&
+        !memcasecmp(host + hostlen - n, p, n))
+      return true;
+  }
+  return false;
+}
+
 // Failed fetches return nil, error message, and a machine-readable kind
 // so callers can tell retryable failures from permanent ones:
 // "dns" | "connect" | "tls" | "timeout" | "proxy" | "protocol" |
@@ -286,10 +319,22 @@ int LuaFetch(lua_State *L) {
    * Check environment variables if no explicit proxy option given.
    */
   if (!proxyarg) {
-    // Check http_proxy and HTTP_PROXY environment variables
-    proxyarg = getenv("http_proxy");
-    if (!proxyarg)
-      proxyarg = getenv("HTTP_PROXY");
+    // The proxy is resolved by scheme, as curl, wget, and other clients
+    // do: an https:// request reads https_proxy then HTTPS_PROXY, an
+    // http:// request reads http_proxy then HTTP_PROXY.  no_proxy /
+    // NO_PROXY exempts a host from the environment proxy; the explicit
+    // proxy option is never affected by either.
+    if (usingssl) {
+      proxyarg = getenv("https_proxy");
+      if (!proxyarg)
+        proxyarg = getenv("HTTPS_PROXY");
+    } else {
+      proxyarg = getenv("http_proxy");
+      if (!proxyarg)
+        proxyarg = getenv("HTTP_PROXY");
+    }
+    if (proxyarg && IsNoProxyHost(url.host.p, url.host.n))
+      proxyarg = 0;
     if (proxyarg)
       proxyarglen = strlen(proxyarg);
   }

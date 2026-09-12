@@ -10,10 +10,13 @@
 local cosmo = require("cosmo")
 local unix = require("cosmo.unix")
 
--- fetch consults http_proxy/HTTP_PROXY; drop them so loopback requests
--- are direct and the SSRF guard is actually exercised
+-- fetch consults http_proxy/HTTP_PROXY for http:// and https_proxy/
+-- HTTPS_PROXY for https://; drop them all so loopback requests are
+-- direct and the SSRF guard is actually exercised
 unix.unsetenv("http_proxy")
 unix.unsetenv("HTTP_PROXY")
+unix.unsetenv("https_proxy")
+unix.unsetenv("HTTPS_PROXY")
 
 local function check(desc, cond)
   if not cond then

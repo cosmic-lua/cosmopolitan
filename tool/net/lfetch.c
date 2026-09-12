@@ -882,9 +882,22 @@ int LuaFetchStream(lua_State *L) {
 
   // ---- Parse proxy ----
   if (!proxyarg) {
-    proxyarg = getenv("http_proxy");
-    if (!proxyarg)
-      proxyarg = getenv("HTTP_PROXY");
+    // The proxy is resolved by scheme, as curl, wget, and other clients
+    // do: an https:// request reads https_proxy then HTTPS_PROXY, an
+    // http:// request reads http_proxy then HTTP_PROXY.  no_proxy /
+    // NO_PROXY exempts a host from the environment proxy; the explicit
+    // proxy option is never affected by either.
+    if (usingssl) {
+      proxyarg = getenv("https_proxy");
+      if (!proxyarg)
+        proxyarg = getenv("HTTPS_PROXY");
+    } else {
+      proxyarg = getenv("http_proxy");
+      if (!proxyarg)
+        proxyarg = getenv("HTTP_PROXY");
+    }
+    if (proxyarg && IsNoProxyHost(url.host.p, url.host.n))
+      proxyarg = 0;
     if (proxyarg)
       proxyarglen = strlen(proxyarg);
   }
