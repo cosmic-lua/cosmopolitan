@@ -2256,6 +2256,11 @@ function http.parser(kind) end
 ---
 --- A head longer than `SHRT_MAX` (32767) bytes is refused rather than
 --- silently truncated, which is what the underlying parser would do.
+---
+--- One parser reads one head: calling this again after a head completed
+--- is an argument error, because the header offsets `message` returns
+--- are only bounded by the head length that parse reported. Call `reset`
+--- for the next message on the connection.
 ---@param buf string Every byte of the message received so far
 ---@return integer|nil n Head length in bytes once complete, `0` while more bytes are needed
 ---@return string? error `"bad message"` for a malformed head, `"message too large"` past `SHRT_MAX`

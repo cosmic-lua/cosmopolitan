@@ -54,6 +54,8 @@ struct LuaHttpParser {
   int kind;        // kHttpRequest or kHttpResponse
   int complete;    // a parse() has returned the head's length
   size_t headlen;  // that length, the bound every slice lies within
+                   // -- which holds only because `complete` closes the
+                   // parser to further parse() calls until reset()
 };
 
 struct LuaHttpUnchunker {
@@ -107,6 +109,22 @@ static int LuaHttpParserParse(lua_State *L) {
   const char *buf;
   struct LuaHttpParser *p = GetParser(L);
   buf = luaL_checklstring(L, 2, &n);
+  // One parser reads one head: a completed parse fixes `headlen`, which
+  // `message` trusts as the bound every slice lies within, and reset()
+  // is how the next message on the connection starts.
+  //
+  // ParseHttpMessage does not stop at a head it has already finished. A
+  // head terminated by bare LF-LF returns out of kHttpStateLf1 while
+  // still IN that state, so a further parse() on a longer buffer resumes
+  // header scanning and writes slices at offsets PAST `headlen`, all
+  // while returning 0. message() then passes its n >= headlen guard and
+  // reads those offsets past the end of the string it was handed. A
+  // further parse() that comes back -1 is the same hazard with a stale
+  // `headlen` left behind. Refusing the call is what makes `headlen` a
+  // real bound rather than a hopeful one.
+  if (p->complete)
+    return luaL_error(
+        L, "parse already completed a message head; call reset() first");
   // ParseHttpMessage clamps n and c to SHRT_MAX and parses the prefix,
   // which would silently report a head that is not there. Refuse it.
   if (n > SHRT_MAX) {
@@ -137,8 +155,9 @@ static int LuaHttpParserParse(lua_State *L) {
 
 // Adds one header to the table at `tidx`, which must be an absolute
 // index. A name seen once holds its value as a string; a name seen
-// again is promoted to an array of every value in arrival order, the
-// shape cosmo.Fetch's response headers already have.
+// again is promoted to an array of every value in arrival order.
+// Repetition alone decides the shape here, unlike cosmo.Fetch, which
+// arrays a kHttpRepeatable name on its first occurrence too.
 static void PushHeader(lua_State *L, int tidx, const char *k, size_t kn,
                        const char *v, size_t vn) {
   lua_pushlstring(L, k, kn);

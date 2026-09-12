@@ -160,6 +160,51 @@ assert(tostring(err):find("shorter than the parsed head", 1, true),
   "unexpected error: " .. tostring(err))
 
 --------------------------------------------------------------------------------
+-- One parser reads one head: parse() after completion is refused
+--------------------------------------------------------------------------------
+
+-- A head terminated by bare LF-LF leaves the underlying parser in the
+-- same state it returned out of, so resuming it on a longer buffer
+-- scanned on past the completed head and recorded header slices at
+-- offsets beyond the head length message() bounds its reads by. Those
+-- offsets index past the end of the buffer message() is handed, handing
+-- back arbitrary heap bytes as a header name. Refusing the second
+-- parse() is what keeps that length a real bound.
+local reparse = http.parser("request")
+local lfhead = "GET / HTTP/1.1\nHost: a\n\n"
+local lfn = assert(reparse:parse(lfhead))
+assert(lfn == #lfhead, "a bare-LF head should parse: " .. tostring(lfn))
+ok, err = pcall(reparse.parse, reparse,
+  lfhead .. string.rep("Q", 300) .. ": v\n")
+assert(not ok, "parse() after a completed head should raise")
+assert(tostring(err):find("already completed a message head", 1, true),
+  "unexpected error: " .. tostring(err))
+
+-- The parser still describes the head that completed, read in bounds.
+local lfmsg = reparse:message(lfhead)
+assert(lfmsg.method == "GET" and lfmsg.uri == "/",
+  "bare-LF head: " .. tostring(lfmsg.method) .. " " .. tostring(lfmsg.uri))
+assert(lfmsg.headers.Host == "a", "Host: " .. tostring(lfmsg.headers.Host))
+for k, v in pairs(lfmsg.headers) do
+  assert(k == "Host", "stray header name, " .. #k .. " bytes: " .. k)
+  assert(v == "a", "stray header value: " .. tostring(v))
+end
+
+-- The refusal is about completion, not about the line terminator.
+local recrlf = http.parser("request")
+assert(recrlf:parse(first) == #first, "CRLF head should parse")
+ok, err = pcall(recrlf.parse, recrlf, both)
+assert(not ok, "parse() after a completed CRLF head should raise")
+assert(tostring(err):find("already completed a message head", 1, true),
+  "unexpected error: " .. tostring(err))
+
+-- reset() reopens the parser, which is what keeps a keep-alive or
+-- pipelined connection working.
+assert(recrlf:reset():parse(both) == #first,
+  "reset() should reopen the parser")
+assert(recrlf:message(both).uri == "/one", "reset() should reparse the head")
+
+--------------------------------------------------------------------------------
 -- A head past SHRT_MAX is refused, never silently clamped
 --------------------------------------------------------------------------------
 
