@@ -100,7 +100,7 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
   char w[4];
   luaL_Buffer b;
   struct DecodeJson r;
-  const char *a, *reason;
+  const char *a, *reason, *string_start;
   int A, B, C, D, c, d, i, u;
   if (UNLIKELY(!depth))
     return (struct DecodeJson){-1, "maximum depth exceeded"};
@@ -323,7 +323,16 @@ static struct DecodeJson Parse(struct lua_State *L, const char *p,
       case '"':  // string
         if (context & (COLON | COMMA))
           goto OnColonComma;
+        string_start = p;
+        while (p < e && kJsonStr[(unsigned char)*p] == ASCII)
+          ++p;
+        if (p < e && *p == '"') {
+          lua_pushlstring(L, string_start, p - string_start);
+          return (struct DecodeJson){1, p + 1};
+        }
         luaL_buffinit(L, &b);
+        if (p > string_start)
+          luaL_addlstring(&b, string_start, p - string_start);
         for (;;) {
           if (UNLIKELY(p >= e)) {
           UnexpectedEofString:
