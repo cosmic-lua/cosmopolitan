@@ -101,6 +101,8 @@ fails('"abc', "unexpected eof in string")
 fails('"abc\\', "unexpected eof in string")
 fails('"\\u12', "invalid unicode escape")
 fails('"\194', "malformed utf-8")
+fails('"\195\169', "unexpected eof in string")
+fails('"\\a"', "invalid escape character")
 fails('"x"z', "junk after expression")
 succeeds('"x" \t\r\n ', "x")
 for _, n in ipairs({0, 1, 15, 16, 1023, 1024, 1025}) do
@@ -109,6 +111,8 @@ end
 
 local array = assert(DecodeJson('["x"]'))
 assert(getmetatable(array) == ARRAY_MT and array[1] == "x")
+assert(getmetatable(assert(DecodeJson("[]"))) == ARRAY_MT)
+assert(next(assert(DecodeJson("{}"))) == nil)
 local object = assert(DecodeJson('{"x":"y","x":"z"}'))
 assert(object.x == "z")
 local key = assert(DecodeJson('{"x":1}'))
