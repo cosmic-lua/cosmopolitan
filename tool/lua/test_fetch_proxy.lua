@@ -15,7 +15,8 @@
 
 -- Test cases for Fetch's HTTP-proxy contract (lfetch.c): CONNECT
 -- tunneling, Proxy-Authorization (including URL-decoding and long/
--- special-character passwords), the http_proxy env var, and local
+-- special-character passwords), proxy resolution from the environment
+-- (http_proxy/https_proxy by scheme, no_proxy), and local
 -- error handling (SSRF blocking, invalid scheme/method, negative
 -- maxresponse). Self-contained: every test starts its own loopback
 -- server and never reaches a network beyond it.
@@ -731,6 +732,195 @@ function test_proxy_auth_not_leaked_to_target()
     print("test_proxy_auth_not_leaked_to_target: PASS")
 end
 
+-- Helper: Fetch reads the proxy environment at call time.  Each
+-- environment test starts from a known-empty set and restores whatever
+-- the process had, so the suite does not depend on the ambient
+-- environment and leaves it untouched.
+local PROXY_ENV_VARS = {
+    "http_proxy", "HTTP_PROXY",
+    "https_proxy", "HTTPS_PROXY",
+    "no_proxy", "NO_PROXY",
+}
+
+local function clear_proxy_env()
+    local saved = {}
+    for _, name in ipairs(PROXY_ENV_VARS) do
+        saved[name] = os.getenv(name)
+        unix.unsetenv(name)
+    end
+    return saved
+end
+
+local function restore_proxy_env(saved)
+    for _, name in ipairs(PROXY_ENV_VARS) do
+        if saved[name] then
+            unix.setenv(name, saved[name], true)
+        else
+            unix.unsetenv(name)
+        end
+    end
+end
+
+-- Test: an https:// request uses HTTPS_PROXY from the environment
+-- The tunnel is fake, so the TLS handshake fails afterwards; the
+-- CONNECT the proxy received is the evidence the proxy was used.
+function test_https_proxy_env_var_used()
+    local server, port = create_test_server()
+    local capture = "/tmp/https_proxy_env_connect.txt"
+    os.remove(capture)
+    local saved = clear_proxy_env()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        local request = handle_one_request(
+            server, "HTTP/1.1 200 Connection Established\r\n\r\n", 5000)
+        local f = io.open(capture, "w")
+        if f and request then f:write(request); f:close() end
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    unix.setenv("HTTPS_PROXY", "http://127.0.0.1:" .. port, true)
+    Fetch("https://secure.example.com/path")
+    unix.wait(pid)
+    restore_proxy_env(saved)
+
+    local f = io.open(capture, "r")
+    local captured = f and f:read("*a")
+    if f then f:close(); os.remove(capture) end
+
+    assert(captured and #captured > 0,
+           "HTTPS_PROXY was ignored: the proxy saw no request")
+    local first_line = captured:match("^([^\r\n]+)")
+    assert(first_line:find("^CONNECT secure.example.com:443"),
+           "expected CONNECT through HTTPS_PROXY, got: " .. tostring(first_line))
+    print("test_https_proxy_env_var_used: PASS")
+end
+
+-- Test: an http:// request does not use HTTPS_PROXY
+-- The proxy is the only thing listening on that port, so if it were
+-- used the request would return 200; instead the loopback target is
+-- reached directly and the SSRF guard refuses it.
+function test_http_request_ignores_https_proxy()
+    local server, port = create_test_server()
+    local saved = clear_proxy_env()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        handle_one_request(server, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK", 1000)
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    unix.setenv("HTTPS_PROXY", "http://127.0.0.1:" .. port, true)
+    unix.setenv("https_proxy", "http://127.0.0.1:" .. port, true)
+    local status, err = Fetch("http://127.0.0.1:" .. port .. "/")
+    restore_proxy_env(saved)
+    unix.wait(pid)
+
+    assert(status == nil,
+           "http:// request used HTTPS_PROXY, got status: " .. tostring(status))
+    assert(err:find("private network blocked"),
+           "expected direct request blocked by SSRF guard, got: " .. tostring(err))
+    print("test_http_request_ignores_https_proxy: PASS")
+end
+
+-- Test: an http:// request uses http_proxy from the environment
+function test_http_proxy_env_var_used()
+    local server, port = create_test_server()
+    local response = "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nEnv proxy OK"
+    local saved = clear_proxy_env()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        handle_one_request(server, response, 5000)
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    unix.setenv("http_proxy", "http://127.0.0.1:" .. port, true)
+    local status, headers, body = Fetch("http://target.example.com/")
+    restore_proxy_env(saved)
+    unix.wait(pid)
+
+    assert(status == 200, "expected 200 through http_proxy, got: " .. tostring(status))
+    assert(body == "Env proxy OK", "expected env proxy response, got: " .. tostring(body))
+    print("test_http_proxy_env_var_used: PASS")
+end
+
+-- Test: the explicit proxy option wins over the environment
+-- The environment points at a dead port, so a request that reaches the
+-- live listener can only have come from the option.
+function test_proxy_option_overrides_env_proxy()
+    local server, port = create_test_server()
+    local capture = "/tmp/proxy_option_overrides_env.txt"
+    os.remove(capture)
+    local saved = clear_proxy_env()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        local request = handle_one_request(
+            server, "HTTP/1.1 200 Connection Established\r\n\r\n", 5000)
+        local f = io.open(capture, "w")
+        if f and request then f:write(request); f:close() end
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    unix.setenv("HTTPS_PROXY", "http://127.0.0.1:59999", true)
+    unix.setenv("http_proxy", "http://127.0.0.1:59999", true)
+    Fetch("https://secure.example.com/path", {
+        proxy = "http://127.0.0.1:" .. port
+    })
+    unix.wait(pid)
+    restore_proxy_env(saved)
+
+    local f = io.open(capture, "r")
+    local captured = f and f:read("*a")
+    if f then f:close(); os.remove(capture) end
+
+    assert(captured and #captured > 0,
+           "explicit proxy option lost to the environment")
+    local first_line = captured:match("^([^\r\n]+)")
+    assert(first_line:find("^CONNECT secure.example.com:443"),
+           "expected CONNECT through the option proxy, got: " .. tostring(first_line))
+    print("test_proxy_option_overrides_env_proxy: PASS")
+end
+
+-- Test: no_proxy exempts a host from the environment proxy
+-- The list carries a decoy entry and a leading-dot suffix entry that
+-- matches the loopback target, so the request is sent directly and the
+-- SSRF guard refuses it instead of returning the proxy's 200.
+function test_no_proxy_exempts_host()
+    local server, port = create_test_server()
+    local saved = clear_proxy_env()
+
+    local pid = unix.fork()
+    if pid == 0 then
+        handle_one_request(server, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK", 1000)
+        unix.close(server)
+        os.exit(0)
+    end
+
+    unix.close(server)
+    unix.setenv("http_proxy", "http://127.0.0.1:" .. port, true)
+    unix.setenv("no_proxy", "example.com, .0.1", true)
+    local status, err = Fetch("http://127.0.0.1:" .. port .. "/")
+    restore_proxy_env(saved)
+    unix.wait(pid)
+
+    assert(status == nil,
+           "no_proxy was ignored: request went through the proxy, status: " ..
+           tostring(status))
+    assert(err:find("private network blocked"),
+           "expected direct request blocked by SSRF guard, got: " .. tostring(err))
+    print("test_no_proxy_exempts_host: PASS")
+end
+
 -- Main test runner
 function main()
     print("Running lfetch proxy tests...")
@@ -757,6 +947,12 @@ function main()
         test_proxy_bypasses_ssrf_for_proxy_ip,
         test_http_proxy_env_var,
         test_proxy_option_overrides_env,
+        -- Proxy environment resolution (scheme split, no_proxy)
+        test_https_proxy_env_var_used,
+        test_http_request_ignores_https_proxy,
+        test_http_proxy_env_var_used,
+        test_proxy_option_overrides_env_proxy,
+        test_no_proxy_exempts_host,
         test_proxy_custom_port,
         test_proxy_host_header,
         -- Proxy authentication tests
