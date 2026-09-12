@@ -28,6 +28,7 @@
 #include "tool/net/lfetch.h"
 #include "tool/net/lgetopt.h"
 #include "tool/net/lzip.h"
+#include "tool/net/lhttp.h"
 #include "tool/net/lcov.h"
 #include "net/http/http.h"
 #include <stdlib.h>
@@ -359,6 +360,10 @@ int luaopen_cosmo(lua_State *L) {
 
   LuaZip(L);
   register_submodule(L, "cosmo.zip");
+  lua_pop(L, 1);
+
+  LuaHttp(L);
+  register_submodule(L, "cosmo.http");
   lua_pop(L, 1);
 
   LuaCov(L);

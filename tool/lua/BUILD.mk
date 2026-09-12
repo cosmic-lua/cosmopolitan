@@ -51,6 +51,7 @@ TOOL_LUA_LUA_MODULES =							\
 	o/$(MODE)/tool/net/lfetch.o					\
 	o/$(MODE)/tool/net/lgetopt.o					\
 	o/$(MODE)/tool/net/lzip.o					\
+	o/$(MODE)/tool/net/lhttp.o					\
 	o/$(MODE)/tool/net/lcov.o
 
 TOOL_LUA_DIRECTDEPS =							\
@@ -176,6 +177,10 @@ o/$(MODE)/tool/lua/test_zip.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_zip.lua
 	$< tool/lua/test_zip.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_http.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_http.lua
+	$< tool/lua/test_http.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_cov.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_cov.lua
 	$< tool/lua/test_cov.lua
 	@touch $@
@@ -244,7 +249,7 @@ o/$(MODE)/tool/lua/test_landlock_abi.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/tes
 	$< tool/lua/test_landlock_abi.lua
 	@touch $@
 
-o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua tool/net/definitions.lua tool/lua/lcosmo.c third_party/lua/cosmo/lunix.c third_party/lua/cosmo/lreplmod.c tool/net/lpath.c tool/net/lre.c tool/net/largon2.c tool/net/lsqlite3.c tool/net/lgetopt.c tool/net/lzip.c tool/net/lcov.c libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
+o/$(MODE)/tool/lua/test_definitions_coverage.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_definitions_coverage.lua tool/net/definitions.lua tool/lua/lcosmo.c third_party/lua/cosmo/lunix.c third_party/lua/cosmo/lreplmod.c tool/net/lpath.c tool/net/lre.c tool/net/largon2.c tool/net/lsqlite3.c tool/net/lgetopt.c tool/net/lzip.c tool/net/lhttp.c tool/net/lcov.c libc/intrin/kipoptnames.S libc/intrin/ktcpoptnames.S libc/intrin/ksockoptnames.S libc/intrin/kclocknames.S
 	$< tool/lua/test_definitions_coverage.lua
 	@touch $@
 
@@ -450,6 +455,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_slurp_barf.ok				\
 	o/$(MODE)/tool/lua/test_strftime.ok				\
 	o/$(MODE)/tool/lua/test_zip.ok					\
+	o/$(MODE)/tool/lua/test_http.ok					\
 	o/$(MODE)/tool/lua/test_cov.ok					\
 	o/$(MODE)/tool/lua/test_zip_append.ok				\
 	o/$(MODE)/tool/lua/test_zip_security.ok				\
