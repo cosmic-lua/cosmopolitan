@@ -54,8 +54,12 @@ struct LuaHttpParser {
   int kind;        // kHttpRequest or kHttpResponse
   int complete;    // a parse() has returned the head's length
   size_t headlen;  // that length, the bound every slice lies within
-                   // -- which holds only because `complete` closes the
-                   // parser to further parse() calls until reset()
+                   // -- which holds only because the parser refuses a
+                   // parse() that would move its cursor backwards:
+                   // `complete` closes it to a parse() past a finished
+                   // head, `maxlen` to one on a shrinking buffer
+  size_t maxlen;   // the longest buffer parse() has accepted for this
+                   // head, which the next one may not fall below
 };
 
 struct LuaHttpUnchunker {
@@ -132,6 +136,22 @@ static int LuaHttpParserParse(lua_State *L) {
     lua_pushstring(L, "message too large");
     return 2;
   }
+  // The cursor only ever moves forward while the caller's buffer only
+  // ever grows: ParseHttpMessage clamps its cursor DOWN to `n` when a
+  // call passes fewer bytes than an earlier one
+  // (net/http/parsehttpmessage.c, `if (r->i > n) r->i = n`), so a head
+  // could then complete at an offset BELOW slices already recorded from
+  // the longer buffer. `headlen` would be smaller than the offsets
+  // `message` reads, and its `n >= headlen` guard would admit a buffer
+  // far shorter than them -- the same out-of-bounds read, reached
+  // without ever parsing past a finished head. A buffer equal in length
+  // to the last one is normal (a wakeup that produced no new bytes) and
+  // rescans nothing; only a shorter one is refused.
+  if (n < p->maxlen)
+    return luaL_argerror(L, 2,
+                         "shorter than a buffer already parsed; a parser "
+                         "resumes a growing buffer, never a shrinking one");
+  p->maxlen = n;
   // `c` is not a memory bound -- ParseHttpMessage never indexes past `n`
   // with it -- but how large the message may still GROW, clamped to
   // SHRT_MAX. Passing `n` would declare the buffer already full, and an
@@ -153,34 +173,47 @@ static int LuaHttpParserParse(lua_State *L) {
   return 1;
 }
 
+// Whether net/http marks this header name as one a message may
+// legitimately carry more than once (Vary, Set-Cookie, ...). An
+// unrecognized name is not repeatable.
+static int IsRepeatable(const char *s, size_t n) {
+  int h;
+  if ((h = GetHttpHeader(s, n)) != -1)
+    return kHttpRepeatable[h];
+  return 0;
+}
+
 // Adds one header to the table at `tidx`, which must be an absolute
-// index. A name seen once holds its value as a string; a name seen
-// again is promoted to an array of every value in arrival order.
-// Repetition alone decides the shape here, unlike cosmo.Fetch, which
-// arrays a kHttpRepeatable name on its first occurrence too.
+// index, in the shape cosmo.Fetch returns (tool/net/lfetch.c's
+// LuaPushHeaders): a repeatable name holds an ARRAY of its values in
+// arrival order, from its first occurrence on, so a caller reads one
+// shape whether the message carried the header once or five times; any
+// other name holds a plain string, a later occurrence replacing an
+// earlier one. Both bindings emit the same table for the same bytes,
+// which is what lets one downstream normalizer serve both.
 static void PushHeader(lua_State *L, int tidx, const char *k, size_t kn,
                        const char *v, size_t vn) {
-  lua_pushlstring(L, k, kn);
-  lua_rawget(L, tidx);
-  if (lua_isnil(L, -1)) {
-    lua_pop(L, 1);
+  if (!IsRepeatable(k, kn)) {
     lua_pushlstring(L, k, kn);
     lua_pushlstring(L, v, vn);
     lua_rawset(L, tidx);
-  } else if (lua_istable(L, -1)) {
+    return;
+  }
+  lua_pushlstring(L, k, kn);
+  lua_rawget(L, tidx);
+  if (lua_istable(L, -1)) {
     lua_pushlstring(L, v, vn);
     lua_rawseti(L, -2, lua_rawlen(L, -2) + 1);
     lua_pop(L, 1);
   } else {
-    lua_createtable(L, 2, 0);
-    lua_pushvalue(L, -2);
-    lua_rawseti(L, -2, 1);
+    lua_pop(L, 1);
+    lua_createtable(L, 1, 0);
     lua_pushlstring(L, v, vn);
-    lua_rawseti(L, -2, 2);
+    lua_rawseti(L, -2, 1);
     lua_pushlstring(L, k, kn);
     lua_pushvalue(L, -2);
     lua_rawset(L, tidx);
-    lua_pop(L, 2);
+    lua_pop(L, 1);
   }
 }
 
@@ -250,6 +283,7 @@ static int LuaHttpParserReset(lua_State *L) {
   ResetHttpMessage(&p->msg, p->kind);
   p->complete = 0;
   p->headlen = 0;
+  p->maxlen = 0;
   lua_pushvalue(L, 1);
   return 1;
 }

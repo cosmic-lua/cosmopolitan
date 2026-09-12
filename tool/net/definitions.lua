@@ -2225,7 +2225,7 @@ http = {}
 ---@field version integer Protocol version as a two-digit integer: 9, 10 or 11
 ---@field status integer? Response status code; absent on a request
 ---@field message string? Response reason phrase; absent on a request
----@field headers table<string, string|string[]> Header values by canonical name (`Host`, `User-Agent`); a name seen more than once holds an array of its values in arrival order
+---@field headers table<string, string|string[]> Header values by canonical name (`Host`, `User-Agent`), in the same shape `cosmo.Fetch` returns: a repeatable name (`Vary`, `Set-Cookie`, ...) holds an array of its values in arrival order even when it appeared once, and any other name holds a string, a later occurrence replacing an earlier one
 
 --- An incremental HTTP/1.1 message head parser over one
 --- `struct HttpMessage`. State persists across `parse` calls, so a
@@ -2253,6 +2253,12 @@ function http.parser(kind) end
 --- the parser keeps its own cursor into it, so appending what was just
 --- read and calling again rescans nothing. A completed head returns its
 --- length in bytes, which is also where the message body begins.
+---
+--- That buffer only grows. Passing one SHORTER than a buffer an earlier
+--- call took is an argument error, because the parser would rewind its
+--- cursor below header offsets it has already recorded and report a head
+--- length that no longer bounds them; passing the same buffer again --
+--- a wakeup that produced no new bytes -- is fine and rescans nothing.
 ---
 --- A head longer than `SHRT_MAX` (32767) bytes is refused rather than
 --- silently truncated, which is what the underlying parser would do.

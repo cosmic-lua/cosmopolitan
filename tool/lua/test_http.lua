@@ -45,7 +45,11 @@ assert(msg.headers.Host == "10.10.10.124:8080",
 assert(msg.headers.Connection == "keep-alive",
   "Connection: " .. tostring(msg.headers.Connection))
 assert(msg.headers.DNT == "1", "DNT: " .. tostring(msg.headers.DNT))
-assert(msg.headers["Accept-Language"] == "en-US,en;q=0.9",
+-- Accept-Language is one of net/http's repeatable names, so it arrives as
+-- a one-element array even here, where the request sent it once.
+assert(type(msg.headers["Accept-Language"]) == "table" and
+  #msg.headers["Accept-Language"] == 1 and
+  msg.headers["Accept-Language"][1] == "en-US,en;q=0.9",
   "Accept-Language: " .. tostring(msg.headers["Accept-Language"]))
 assert(msg.headers["User-Agent"]:find("Chrome/89", 1, true),
   "User-Agent: " .. tostring(msg.headers["User-Agent"]))
@@ -100,19 +104,47 @@ assert(m2.method == "POST" and m2.uri == "/two" and m2.version == 10,
 assert(m2.headers.Host == "b", "second Host: " .. tostring(m2.headers.Host))
 
 --------------------------------------------------------------------------------
--- A repeated header name becomes an array, in arrival order
+-- Headers come back in cosmo.Fetch's shape, so one normalizer serves both
 --------------------------------------------------------------------------------
 
-local dup = http.parser("request")
-local dupbuf = "GET / HTTP/1.1\r\nX: y\r\nX: z\r\n\r\n"
+-- A repeatable name is an array from its FIRST occurrence, which is what
+-- cosmo.Fetch does (tool/net/lfetch.c's LuaPushHeaders): a caller reads
+-- one shape whether the message carried the header once or five times.
+local one = http.parser("response")
+local onebuf = "HTTP/1.1 200 OK\r\nVary: Accept\r\nServer: s\r\n\r\n"
+assert(one:parse(onebuf) == #onebuf, "single repeatable head should parse")
+local onemsg = one:message(onebuf)
+assert(type(onemsg.headers.Vary) == "table",
+  "a repeatable header seen once should still be an array, got " ..
+  type(onemsg.headers.Vary))
+assert(#onemsg.headers.Vary == 1 and onemsg.headers.Vary[1] == "Accept",
+  "Vary: " .. table.concat(onemsg.headers.Vary, ","))
+assert(onemsg.headers.Server == "s",
+  "a non-repeatable header stays a string, got " ..
+  type(onemsg.headers.Server))
+
+-- Seen again, the same array grows, in arrival order.
+local dup = http.parser("response")
+local dupbuf = "HTTP/1.1 200 OK\r\nVary: Accept\r\nVary: Origin\r\n\r\n"
 assert(dup:parse(dupbuf) == #dupbuf, "repeated-header head should parse")
 local dupmsg = dup:message(dupbuf)
-assert(type(dupmsg.headers.X) == "table",
-  "X should be an array, got " .. type(dupmsg.headers.X))
-assert(#dupmsg.headers.X == 2, "X should have 2 values, got " ..
-  #dupmsg.headers.X)
-assert(dupmsg.headers.X[1] == "y" and dupmsg.headers.X[2] == "z",
-  "X values: " .. table.concat(dupmsg.headers.X, ","))
+assert(type(dupmsg.headers.Vary) == "table",
+  "Vary should be an array, got " .. type(dupmsg.headers.Vary))
+assert(#dupmsg.headers.Vary == 2, "Vary should have 2 values, got " ..
+  #dupmsg.headers.Vary)
+assert(dupmsg.headers.Vary[1] == "Accept" and
+  dupmsg.headers.Vary[2] == "Origin",
+  "Vary values: " .. table.concat(dupmsg.headers.Vary, ","))
+
+-- A name net/http does not mark repeatable is a plain string even when
+-- it repeats, the later value winning -- Fetch's behaviour exactly.
+local xdup = http.parser("request")
+local xbuf = "GET / HTTP/1.1\r\nX-Once: y\r\nX-Once: z\r\n\r\n"
+assert(xdup:parse(xbuf) == #xbuf, "repeated x-header head should parse")
+local xmsg = xdup:message(xbuf)
+assert(xmsg.headers["X-Once"] == "z",
+  "a repeated non-repeatable header should hold the last value, got " ..
+  tostring(xmsg.headers["X-Once"]))
 
 --------------------------------------------------------------------------------
 -- A malformed head is the fallible tuple, not a throw
@@ -203,6 +235,57 @@ assert(tostring(err):find("already completed a message head", 1, true),
 assert(recrlf:reset():parse(both) == #first,
   "reset() should reopen the parser")
 assert(recrlf:message(both).uri == "/one", "reset() should reparse the head")
+
+--------------------------------------------------------------------------------
+-- A buffer that shrinks between parse() calls is refused
+--------------------------------------------------------------------------------
+
+-- The underlying parser clamps its cursor down to the buffer length it
+-- is handed, so a shorter buffer rewinds it below header offsets already
+-- recorded from a longer one. The head then completes at a length that
+-- no longer bounds those offsets, and message() -- whose guard is only
+-- that the buffer reaches the head length -- reads far past the end of
+-- the string it was given, handing back heap bytes as a header value.
+local shrink = http.parser("request")
+local long = "GET / HTTP/1.1\r\nXXXXXXXXX: " .. string.rep("v", 30000) .. "\r\n"
+assert(shrink:parse(long) == 0, "a headerless-terminator head needs more data")
+ok, err = pcall(shrink.parse, shrink, long:sub(1, 8))
+assert(not ok, "a shorter buffer should be refused")
+assert(tostring(err):find("shorter than a buffer already parsed", 1, true),
+  "unexpected error: " .. tostring(err))
+
+-- The refusal held, so nothing message() can return outruns its buffer.
+local tiny = "GET / HT\r\n"
+assert(shrink:parse(long .. "\r\n") == #long + 2,
+  "the head still completes on a growing buffer")
+ok, err = pcall(shrink.message, shrink, tiny)
+assert(not ok, "message() on the short buffer should raise")
+assert(tostring(err):find("shorter than the parsed head", 1, true),
+  "unexpected error: " .. tostring(err))
+local shrinkmsg = shrink:message(long .. "\r\n")
+for k, v in pairs(shrinkmsg.headers) do
+  assert(#k <= #long + 2, "header name outruns the buffer: " .. #k .. " bytes")
+  assert(#v <= #long + 2, "header value outruns the buffer: " .. #v .. " bytes")
+end
+assert(shrinkmsg.headers.XXXXXXXXX == string.rep("v", 30000),
+  "the long header should survive intact")
+
+-- An identical buffer is not a shrink: a wakeup that produced no new
+-- bytes reparses nothing and is not an error.
+local same = http.parser("request")
+local half = first:sub(1, 12)
+assert(same:parse(half) == 0, "a partial head needs more data")
+assert(same:parse(half) == 0, "the same buffer again is not an error")
+assert(same:parse(first) == #first, "the head completes once the rest lands")
+assert(same:message(first).uri == "/one",
+  "uri: " .. tostring(same:message(first).uri))
+
+-- reset() clears the high-water mark with everything else, so the next
+-- message on the connection may be shorter than the last.
+local shorter = http.parser("request")
+assert(shorter:parse(CHROME) == #CHROME, "the long head parses")
+assert(shorter:reset():parse(first) == #first,
+  "reset() should allow a shorter next message")
 
 --------------------------------------------------------------------------------
 -- A head past SHRT_MAX is refused, never silently clamped
