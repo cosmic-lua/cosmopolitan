@@ -2225,7 +2225,7 @@ http = {}
 ---@field version integer Protocol version as a two-digit integer: 9, 10 or 11
 ---@field status integer? Response status code; absent on a request
 ---@field message string? Response reason phrase; absent on a request
----@field headers table<string, string|string[]> Header values by canonical name (`Host`, `User-Agent`), in the same shape `cosmo.Fetch` returns: a repeatable name (`Vary`, `Set-Cookie`, ...) holds an array of its values in arrival order even when it appeared once, and any other name holds a string, a later occurrence replacing an earlier one
+---@field headers table<string, string|string[]> Header values by canonical name (`Host`, `User-Agent`), in the same shape `cosmo.Fetch` returns: a repeatable name (`Vary`, `Accept-Encoding`, ...) holds an array of its values in arrival order even when it appeared once, and any other name holds a string, a later occurrence replacing an earlier one
 
 --- An incremental HTTP/1.1 message head parser over one
 --- `struct HttpMessage`. State persists across `parse` calls, so a

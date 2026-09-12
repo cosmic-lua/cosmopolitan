@@ -174,7 +174,7 @@ static int LuaHttpParserParse(lua_State *L) {
 }
 
 // Whether net/http marks this header name as one a message may
-// legitimately carry more than once (Vary, Set-Cookie, ...). An
+// legitimately carry more than once (Vary, Accept-Encoding, ...). An
 // unrecognized name is not repeatable.
 static int IsRepeatable(const char *s, size_t n) {
   int h;

@@ -146,6 +146,20 @@ assert(xmsg.headers["X-Once"] == "z",
   "a repeated non-repeatable header should hold the last value, got " ..
   tostring(xmsg.headers["X-Once"]))
 
+-- Set-Cookie is NOT in net/http's kHttpRepeatable table, even though it
+-- is a natural-sounding example of a header a message repeats. A caller
+-- following the (once wrong) docs would read ipairs() over this and see
+-- nothing, silently losing the first cookie -- pin the real shape here
+-- so that mistake can't creep back into definitions.lua or lhttp.c.
+local cookie = http.parser("response")
+local cookiebuf = "HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n"
+assert(cookie:parse(cookiebuf) == #cookiebuf,
+  "repeated Set-Cookie head should parse")
+local cookiemsg = cookie:message(cookiebuf)
+assert(cookiemsg.headers["Set-Cookie"] == "b=2",
+  "Set-Cookie is not repeatable, so a second occurrence should replace " ..
+  "the first, got " .. tostring(cookiemsg.headers["Set-Cookie"]))
+
 --------------------------------------------------------------------------------
 -- A malformed head is the fallible tuple, not a throw
 --------------------------------------------------------------------------------
