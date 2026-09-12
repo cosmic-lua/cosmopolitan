@@ -336,6 +336,10 @@ o/$(MODE)/tool/lua/test_ljson.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_ljson
 	$< tool/lua/test_ljson.lua
 	@touch $@
 
+o/$(MODE)/tool/lua/test_ljson_ascii.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_ljson_ascii.lua tool/lua/testdata/json_ascii_corpus.lua
+	$< tool/lua/test_ljson_ascii.lua
+	@touch $@
+
 o/$(MODE)/tool/lua/test_unix_misc.ok: o/$(MODE)/tool/lua/lua.dbg tool/lua/test_unix_misc.lua
 	$< tool/lua/test_unix_misc.lua
 	@touch $@
@@ -505,6 +509,7 @@ TOOL_LUA_TESTS =							\
 	o/$(MODE)/tool/lua/test_jsontestsuite_okay.ok			\
 	o/$(MODE)/tool/lua/test_jsontestsuite_pass.ok			\
 	o/$(MODE)/tool/lua/test_ljson.ok				\
+	o/$(MODE)/tool/lua/test_ljson_ascii.ok			\
 	o/$(MODE)/tool/lua/test_build_mk_touch.ok			\
 	o/$(MODE)/tool/lua/test_srcs_scan.ok				\
 	o/$(MODE)/tool/lua/test_coverage.ok
