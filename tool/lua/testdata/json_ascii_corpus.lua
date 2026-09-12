@@ -14,11 +14,9 @@ for byte = 0x20, 0x7f do
   end
 end
 
-local function plain(n)
-  local out = {}
-  for i = 1, n do out[i] = allowed[(i - 1) % #allowed + 1] end
-  return table.concat(out)
-end
+local plain_bytes = table.concat(allowed)
+local plain_source = plain_bytes:rep(math.ceil(65536 / #plain_bytes))
+local function plain(n) return plain_source:sub(1, n) end
 
 function M.wrap(context, content)
   local quoted = '"' .. content .. '"'
@@ -28,6 +26,42 @@ function M.wrap(context, content)
   if context == "key" then return "{" .. quoted .. ":1}" end
   if context == "null" then return "[" .. quoted .. ",null]" end
   error("unknown JSON corpus context: " .. tostring(context))
+end
+
+-- The seeded iterator's fourth result names its operation. M.each preserves
+-- its first three results as case id, complete input bytes, and context.
+function M.mutations()
+  return coroutine.wrap(function()
+    local state = 0x4a534f4e
+    local function random(limit)
+      state = (1664525 * state + 1013904223) % 4294967296
+      return state % limit
+    end
+    for i = 1, 10000 do
+      local input = M.wrap("top", plain(1 + random(96)))
+      -- The low two LCG bits repeat at this fixed draw cadence. Select from
+      -- the high bits, while consuming the same two operand draws per case.
+      local op = math.floor(random(4294967296) / 1073741824)
+      local at = random(#input + 1)
+      local byte = random(256)
+      if op == 0 then
+        input = input:sub(1, at) .. string.char(byte) ..
+                input:sub(at + 1)
+      elseif op == 1 then
+        at = at % #input
+        input = input:sub(1, at) .. input:sub(at + 2)
+      elseif op == 2 then
+        at = at % #input
+        input = input:sub(1, at) .. string.char(byte) ..
+                input:sub(at + 2)
+      else
+        input = input:sub(1, at % #input)
+      end
+      assert(#input <= 4096)
+      coroutine.yield(string.format("mutate/%05d", i), input, "top",
+                      ({"insert", "delete", "substitute", "truncate"})[op + 1])
+    end
+  end)
 end
 
 -- The iterator yields case id, complete input bytes, and wrapper context.
@@ -56,31 +90,8 @@ function M.each()
         end
       end
     end
-
-    local state = 0x4a534f4e
-    local function random(limit)
-      state = (1664525 * state + 1013904223) % 4294967296
-      return state % limit
-    end
-    for i = 1, 10000 do
-      local input = M.wrap("top", plain(1 + random(96)))
-      local op = random(4)
-      if op == 0 then
-        local at = random(#input + 1)
-        input = input:sub(1, at) .. string.char(random(256)) ..
-                input:sub(at + 1)
-      elseif op == 1 then
-        local at = random(#input)
-        input = input:sub(1, at) .. input:sub(at + 2)
-      elseif op == 2 then
-        local at = random(#input)
-        input = input:sub(1, at) .. string.char(random(256)) ..
-                input:sub(at + 2)
-      else
-        input = input:sub(1, random(#input + 1))
-      end
-      assert(#input <= 4096)
-      coroutine.yield(string.format("mutate/%05d", i), input, "top")
+    for id, input, context, operation in M.mutations() do
+      coroutine.yield(id, input, context, operation)
     end
   end)
 end

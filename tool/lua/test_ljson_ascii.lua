@@ -47,9 +47,12 @@ local function record(input, context)
 end
 
 if arg[1] == "--emit" then
+  local count = 0
   for id, input, context in corpus.each() do
     io.write(id, "\t", record(input, context), "\n")
+    count = count + 1
   end
+  assert(count == corpus.count)
   return
 end
 
@@ -134,10 +137,14 @@ do
   assert(value == "collect me")
 end
 
-local count = 0
-for id, input, context in corpus.each() do
+local mutations = {insert = 0, delete = 0, substitute = 0, truncate = 0}
+local mutation = corpus.mutations()
+for _ = 1, 16 do
+  local id, input, context, operation = mutation()
   assert(id and context and #input <= 65538)
-  count = count + 1
+  mutations[operation] = mutations[operation] + 1
 end
-assert(count == corpus.count)
+for operation, n in pairs(mutations) do
+  assert(n > 0, "seeded corpus omitted " .. operation)
+end
 collectgarbage("collect")
