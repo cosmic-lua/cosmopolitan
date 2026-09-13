@@ -1,0 +1,5 @@
+# Fetched by fetch-poc.sh; not vendored -- see ../README.md.
+/simdjson.h
+/simdjson.cpp
+/simdjson.cc
+/simdjson.orig.h

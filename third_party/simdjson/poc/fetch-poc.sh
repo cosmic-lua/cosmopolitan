@@ -1,8 +1,12 @@
 #!/bin/sh
 # Fetches the simdjson single-header amalgamation this spike was built
-# against, verifies it, and applies iterator-include.patch. Not wired
-# into the make graph -- this is a standalone reproduction script for
-# the buildability spike; see ../README.md.
+# against, verifies it, and applies iterator-include.patch. Materializes
+# both simdjson.cpp (for the standalone cosmocc-only repro: poc.cpp,
+# dispatch.cpp) and simdjson.cc (an identical copy, for the make-graph
+# Lua-integration repro: BUILD.mk, lsimdjson.cc, main.cc, demo.lua --
+# this tree's pattern rules key off the .cc extension). Not wired into
+# the make graph itself, and simdjson.h/.cpp/.cc are gitignored here --
+# see ../README.md.
 set -e
 cd "$(dirname "$0")"
 
@@ -25,5 +29,6 @@ fetch_and_check() {
 fetch_and_check "$H_URL" simdjson.h "$H_SHA256"
 fetch_and_check "$CPP_URL" simdjson.cpp "$CPP_SHA256"
 patch simdjson.h < iterator-include.patch
+cp simdjson.cpp simdjson.cc
 
-echo "fetched simdjson $VERSION and applied iterator-include.patch"
+echo "fetched simdjson $VERSION, applied iterator-include.patch, and staged simdjson.cc for the make-graph repro"

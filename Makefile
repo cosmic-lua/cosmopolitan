@@ -330,6 +330,7 @@ include third_party/double-conversion/test/BUILD.mk
 include third_party/dash/BUILD.mk
 include third_party/netcat/BUILD.mk
 include third_party/lua/BUILD.mk
+include third_party/simdjson/poc/BUILD.mk
 include third_party/tree/BUILD.mk
 include third_party/zstd/BUILD.mk
 include third_party/awk/BUILD.mk

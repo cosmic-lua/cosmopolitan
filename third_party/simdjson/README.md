@@ -1,9 +1,14 @@
 # simdjson buildability spike (POC, not a binding)
 
-Answers one question: does simdjson build under cosmocc and run as a
-cosmopolitan fat binary at all? Nothing here is wired into the make
-graph, `tool/net/`, or `definitions.lua` -- there is no `cosmo.*`
-binding yet. `poc/` is a standalone repro, not a build target.
+Answers two questions with two separate repros under `poc/`, neither
+wired into the real make graph, `tool/net/`, or `definitions.lua` --
+there is no `cosmo.*` binding yet:
+
+1. does simdjson build under cosmocc and run as a cosmopolitan fat
+   binary at all? (`poc.cpp`/`dispatch.cpp`, the packaged `cosmocc` SDK)
+2. can a Lua script actually call into it? (`lsimdjson.cc`/`main.cc`,
+   this repo's own make graph + the real, unmodified `third_party/lua`
+   core)
 
 ## Result: yes, with one small header patch
 
@@ -25,11 +30,11 @@ cosmopolitan links against LLVM libc++, which does not backfill
 transitive standard-header includes the way upstream's libstdc++-based
 CI does. Same class of thing D21 (carried tl patches) exists for.
 
-## Reproducing
+## Reproducing: does it build (packaged cosmocc SDK)
 
 ```sh
 cd third_party/simdjson/poc
-./fetch-poc.sh          # downloads simdjson.h/.cpp (pinned by sha256), applies the patch
+./fetch-poc.sh          # downloads simdjson.h/.cpp/.cc (pinned by sha256), applies the patch
 export PATH=/path/to/.cosmocc/<version>/bin:$PATH
 cosmoc++ -std=c++17 -O2 -c simdjson.cpp -o simdjson.o
 cosmoc++ -std=c++17 -O2 -c poc.cpp -o poc.o
@@ -48,6 +53,49 @@ across the C boundary" contract from the C++ side, catching only what
 simdjson itself can still throw (e.g. `padded_string::load`'s file-IO
 path) at the wrapper's outermost frame.
 
+## Reproducing: can Lua call it (this repo's own make graph)
+
+`lsimdjson.cc` wraps simdjson's DOM API (not on-demand -- the DOM tree
+needs to survive being walked recursively into Lua tables, which
+on-demand's forward-only iterator doesn't support) as one Lua-callable
+C function, `simdjson_decode(str) -> table|scalar, nil` or `nil, err`.
+`main.cc` is a minimal stand-in for `tool/lua/lua`'s real entry point:
+it embeds the actual, unmodified `third_party/lua/*.c` core (via
+`third_party/lua/lua.a`, which this tree already builds) and registers
+`simdjson_decode` as a global before running a script.
+`third_party/simdjson/poc/BUILD.mk` (included from the top-level
+`Makefile`) wires `simdjson.cc` + `lsimdjson.cc` + `main.cc` into one
+target using this repo's normal C++ package conventions (the same
+shape as `test/ctl/BUILD.mk`), linked against `THIRD_PARTY_LUA` +
+`THIRD_PARTY_LIBCXX`/`LIBCXXABI`/`LIBUNWIND`:
+
+```sh
+cd third_party/simdjson/poc && ./fetch-poc.sh && cd ../../..
+make -j$(nproc) o//third_party/simdjson/poc/poc.dbg
+o/third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/demo.lua
+```
+
+`demo.lua` decodes a JSON document with nested objects/arrays/a null/a
+bool, asserts the whole shape came through correctly (JSON `null` ->
+Lua `nil`, matching `cosmo.DecodeJson`'s no-sentinel default), and
+exercises the parse-error path -> `nil, err`. Output:
+
+```
+name = cosmic-lua
+tags = lua, teal, cosmopolitan
+meta.simd = true
+error path ok: TAPE_ERROR: The JSON document has an improper structure: ...
+ALL OK
+```
+
+This is the real Lua core (not a toy re-implementation) linked against
+real simdjson, both built by this repo's actual toolchain invocations
+-- the only things cut short of a real binding are where it lives
+(`third_party/simdjson/poc/` instead of `tool/net/`), how it's
+registered (a hand-rolled `main.cc` instead of `tool/lua/cosmo/lua.main.c`
++ `lcosmo.c`'s real registration table), and the missing
+`definitions.lua` entry the coverage ratchet would require.
+
 ## What this does and doesn't prove
 
 Proven:
@@ -59,15 +107,26 @@ Proven:
   and selects an implementation (haswell/AVX2 here) when running inside
   an APE binary
 - a trivial on-demand parse round-trips correctly
+- **a Lua script can call into it**: `simdjson_decode()` round-trips
+  nested objects/arrays/strings/numbers/bools/null into real Lua
+  tables/values, and the parse-error path returns `nil, err` with no
+  C++ exception escaping into Lua -- built and run via this repo's own
+  `make` graph, linked against the real `third_party/lua.a`
+- a `.cc` binding file compiles cleanly in-tree alongside the existing
+  all-C `tool/net/`-style build, once given its own `BUILD.mk` package
+  (modeled on `test/ctl/BUILD.mk`) pulling in `THIRD_PARTY_LIBCXX` /
+  `LIBCXXABI` / `LIBUNWIND` -- the C/C++ boundary itself isn't the
+  obstacle a real binding would hit
 
 Not proven / left for real integration work:
-- **binding shape**: a thin `extern "C"` shim over the on-demand API
-  returning cosmic's `value|nil, err` tuple, exceptions caught at the
-  boundary, registered as a new `tool/net/lsimdjson.cc` (a `.cc` file
-  alongside the existing `.c` bindings -- BUILD.mk needs a C++ rule
-  added, there isn't one for `tool/net/*.c` today), plus the matching
+- **wired as a real `cosmo.*` binding**: living in `tool/net/`
+  alongside `ljson.c` (not `third_party/simdjson/poc/`), registered
+  through `tool/lua/lcosmo.c`'s real table (not a hand-rolled `main.cc`
+  standing in for `tool/lua/cosmo/lua.main.c`), with matching
   `definitions.lua` `@param`/`@return` annotations the coverage ratchet
-  requires
+  requires, and a decision on whether `tool/net/BUILD.mk`-style
+  packages should gain a C++ pattern rule or whether this stays a
+  separate package the way `poc/BUILD.mk` does it here
 - **decide push vs. replace**: whether this augments `cosmo.DecodeJson`
   for large-payload paths or replaces it outright is a real tradeoff --
   worth a decision record (D24-style, on whichever side ends up owning
