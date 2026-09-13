@@ -1,11 +1,15 @@
--- POC only: times simdjson_decode() (this spike's DOM-based wrapper
--- around simdjson) against cosmo_decode_json() (this tree's real,
--- unmodified tool/net/ljson.c parser, the same one cosmo.DecodeJson
--- calls) on identical payloads, in the same process. Rough and
--- reasonable, not this repo's real perf harness (that's cosmic's
--- _perf, which this repo doesn't have and this parser isn't wired
--- into cosmo.* yet anyway) -- os.clock() process-CPU-time, a handful
--- of payload shapes, warmup + repeated timed loops.
+-- POC only: times three JSON decoders on identical payloads, in the
+-- same process --
+--   simdjson_decode()          this spike's DOM-based simdjson wrapper
+--   simdjson_decode_ondemand() its on_demand-API sibling (single pass,
+--                              no separate DOM tape to build+walk)
+--   cosmo_decode_json()        this tree's real, unmodified
+--                              tool/net/ljson.c parser, the one
+--                              cosmo.DecodeJson calls
+-- Rough and reasonable, not this repo's real perf harness (that's
+-- cosmic's _perf, which this repo doesn't have and none of these are
+-- wired into cosmo.* yet anyway) -- os.clock() process-CPU-time, a
+-- handful of payload shapes, warmup + repeated timed loops.
 
 local function make_flat_array(n)
   local parts = {"["}
@@ -47,9 +51,9 @@ local function bench(fn, json, iterations)
   return os.clock() - t0
 end
 
-print(string.format("%-20s %10s %12s %12s %10s %8s",
-  "payload", "bytes", "simdjson(s)", "ljson.c(s)", "MB/s(sj)", "speedup"))
-print(string.rep("-", 78))
+print(string.format("%-20s %10s %10s %10s %10s %9s %9s",
+  "payload", "bytes", "dom(s)", "ondmd(s)", "ljson(s)", "dom-spdup", "od-spdup"))
+print(string.rep("-", 82))
 
 for _, p in ipairs(payloads) do
   local bytes = #p.json
@@ -57,12 +61,11 @@ for _, p in ipairs(payloads) do
   -- of wall time regardless of size
   local iterations = math.max(3, math.min(2000, math.floor(20000000 / bytes)))
 
-  local t_simd = bench(simdjson_decode, p.json, iterations)
+  local t_dom = bench(simdjson_decode, p.json, iterations)
+  local t_ondemand = bench(simdjson_decode_ondemand, p.json, iterations)
   local t_ljson = bench(cosmo_decode_json, p.json, iterations)
 
-  local mb_per_s_simd = (bytes * iterations / (1024 * 1024)) / t_simd
-  local speedup = t_ljson / t_simd
-
-  print(string.format("%-20s %10d %12.4f %12.4f %10.1f %7.2fx",
-    p.name, bytes, t_simd, t_ljson, mb_per_s_simd, speedup))
+  print(string.format("%-20s %10d %10.4f %10.4f %10.4f %8.2fx %8.2fx",
+    p.name, bytes, t_dom, t_ondemand, t_ljson,
+    t_ljson / t_dom, t_ljson / t_ondemand))
 end

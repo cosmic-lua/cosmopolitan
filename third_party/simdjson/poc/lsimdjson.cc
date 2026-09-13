@@ -31,9 +31,11 @@ void Get(simdjson::dom::element el, T &out) {
 void PushElement(lua_State *L, simdjson::dom::element el);
 
 void PushObject(lua_State *L, simdjson::dom::element el) {
-  lua_newtable(L);
   simdjson::dom::object obj;
   Get(el, obj);
+  // DOM's tape already knows the count, so pre-size the table instead
+  // of growing/rehashing it one lua_settable at a time.
+  lua_createtable(L, 0, (int)obj.size());
   for (auto field : obj) {
     lua_pushlstring(L, field.key.data(), field.key.size());
     PushElement(L, field.value);
@@ -42,9 +44,9 @@ void PushObject(lua_State *L, simdjson::dom::element el) {
 }
 
 void PushArray(lua_State *L, simdjson::dom::element el) {
-  lua_newtable(L);
   simdjson::dom::array arr;
   Get(el, arr);
+  lua_createtable(L, (int)arr.size(), 0);
   lua_Integer i = 1;
   for (auto v : arr) {
     PushElement(L, v);

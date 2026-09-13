@@ -11,6 +11,7 @@ extern "C" {
 #include <cstdio>
 
 extern "C" int LuaSimdjsonDecode(lua_State *L);
+extern "C" int LuaSimdjsonDecodeOnDemand(lua_State *L);
 extern "C" int LuaDecodeJsonBench(lua_State *L);
 
 int main(int argc, char **argv) {
@@ -22,6 +23,8 @@ int main(int argc, char **argv) {
   luaL_openlibs(L);
   lua_pushcfunction(L, LuaSimdjsonDecode);
   lua_setglobal(L, "simdjson_decode");
+  lua_pushcfunction(L, LuaSimdjsonDecodeOnDemand);
+  lua_setglobal(L, "simdjson_decode_ondemand");
   lua_pushcfunction(L, LuaDecodeJsonBench);
   lua_setglobal(L, "cosmo_decode_json");
   if (luaL_dofile(L, argv[1]) != LUA_OK) {

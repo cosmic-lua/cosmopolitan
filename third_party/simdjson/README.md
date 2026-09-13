@@ -98,64 +98,97 @@ registered (a hand-rolled `main.cc` instead of `tool/lua/cosmo/lua.main.c`
 
 ## Performance: a rough same-process comparison
 
-`bench.lua` times `simdjson_decode()` against `cosmo_decode_json()` --
-this tree's real, unmodified `tool/net/ljson.c` parser, the same one
-`cosmo.DecodeJson` calls -- on identical payloads in the same process
-(`os.clock()` process-CPU-time, warmup + a repeated timed loop sized so
-each payload runs long enough to be measurable). `ljson_wrapper.cc`
-registers it as `cosmo_decode_json`, mirroring `tool/lua/lcosmo.c`'s
-real `LuaDecodeJson` minus `opts.nullval` support. Run it with:
+`bench.lua` times three decoders on identical payloads in the same
+process (`os.clock()` process-CPU-time, warmup + a repeated timed loop
+sized so each payload runs long enough to be measurable):
+
+- `simdjson_decode()` -- `lsimdjson.cc`, the DOM-based wrapper above
+- `simdjson_decode_ondemand()` -- `lsimdjson_ondemand.cc`, an
+  `on_demand`-API sibling: forward-only iteration, no separate DOM
+  "tape" built and then walked
+- `cosmo_decode_json()` -- `ljson_wrapper.cc` registering this tree's
+  real, unmodified `tool/net/ljson.c` parser, the one
+  `cosmo.DecodeJson` actually calls (minus `opts.nullval` support, to
+  keep the comparison to the parsing itself)
 
 ```sh
 o/third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/bench.lua
 ```
 
-A representative run (this host, default MODE, unstripped, no LTO):
+**First pass, naive table construction** (both simdjson wrappers used
+plain `lua_newtable`):
 
 ```
-payload                   bytes  simdjson(s)   ljson.c(s)   MB/s(sj)  speedup
-------------------------------------------------------------------------------
-tiny object                  33       0.0018       0.0016       34.3    0.86x
-flat array (1k)            6632       0.0795       0.1674      159.1    2.11x
-flat array (50k)         412966       0.1060       0.2325      178.3    2.19x
-object array (200)        16413       0.4119       0.2319       46.3    0.56x
-object array (10000)     865385       0.4719       0.2963       40.2    0.63x
+payload                   bytes     dom(s)   ondmd(s)   ljson(s) dom-spdup  od-spdup
+----------------------------------------------------------------------------------
+tiny object                  33     0.0019     0.0018     0.0015     0.76x     0.82x
+flat array (1k)            6632     0.0780     0.0687     0.1726     2.21x     2.51x
+flat array (50k)         412966     0.1090     0.0972     0.2403     2.21x     2.47x
+object array (200)        16413     0.4121     0.4057     0.2316     0.56x     0.57x
+object array (10000)     865385     0.4691     0.4826     0.3108     0.66x     0.64x
 ```
 
-(`speedup` is `ljson.c(s) / simdjson(s)`; below 1.0 means simdjson is
-slower.) The result is not the uniform win the SIMD pitch suggests --
-it's a real split, and the split is informative about *why*:
+Not the uniform win the SIMD pitch suggests: simdjson wins clearly on
+flat numeric arrays (2.2-2.5x) and *loses* on object/string-heavy
+payloads (0.56-0.82x), `on_demand` included -- which was the surprise.
+The obvious hypothesis was DOM's two-pass design (build the full
+indexed tape, then a second pass -- this binding's `PushElement`
+recursion -- walks it into Lua tables) losing to `ljson.c`'s
+single-pass recursive descent. `on_demand` exists specifically to skip
+that separate tape: it iterates the JSON structure forward-only, in
+document order, which is exactly the order a recursive
+"materialize-into-Lua-tables" walk needs -- no random or backward
+access required, so the "DOM was picked because on_demand's iterator
+doesn't fit" reasoning an earlier revision of this file gave was
+wrong. Yet `on_demand` above is statistically indistinguishable from
+DOM on the losing cases. **The two-pass tape was not the bottleneck.**
 
-- **flat numeric arrays: simdjson wins clearly (2.1-2.2x)**. This is
-  simdjson's home turf: SIMD-accelerated structural indexing and number
-  parsing, and the DOM tree it builds for a flat array is cheap to walk
-  into a Lua sequence table.
-- **object/string-heavy payloads: simdjson loses (0.56-0.86x)**. The
-  DOM API is a **two-pass** design -- build the full indexed "tape"
-  first, then a second pass (this binding's `PushElement` recursion)
-  walks that tape into Lua tables. `ljson.c` is a **single-pass**
-  recursive-descent parser that writes Lua values directly as it reads
-  text. For JSON that's mostly keys/strings/nesting rather than flat
-  numeric data, paying for two passes plus a second copy loses to one
-  pass with no intermediate representation.
-- an earlier version of this benchmark allocated a fresh
-  `simdjson::dom::parser` per call, which reallocates its internal
-  capacity buffers every time -- that dominated the small/medium
-  cases and made the comparison meaningless. Fixed by reusing one
-  `thread_local` parser across calls, per simdjson's own guidance;
-  the numbers above are with that fix in. **A real binding must reuse
-  a parser instance** (keyed off the `lua_State`, most likely) or its
-  numbers will be quietly wrong the same way.
+**Root cause, found by checking what `ljson.c` does differently**:
+`tool/net/ljson.c` pre-sizes every table it creates --
+`lua_createtable(L, 8, 0)` for arrays, `lua_createtable(L, 0, 8)` for
+objects (`tool/net/ljson.c:253,295`) -- while both simdjson wrappers
+were calling plain `lua_newtable`, which starts empty and rehashes as
+fields are inserted. That rehashing, not parsing architecture, was
+what lost to `ljson.c` on payloads with many small objects. Fixed by
+pre-sizing too: DOM's `dom::array`/`dom::object` carry an O(1)
+`.size()` already (it's baked into the tape), so `PushObject`/
+`PushArray` now call `lua_createtable(L, 0, obj.size())` /
+`lua_createtable(L, arr.size(), 0)` for free. `on_demand` has no
+tape to read a count from -- its `count_fields()`/`count_elements()`
+are a documented last resort precisely because they scan ahead and
+rewind, i.e. they buy the same pre-sizing by paying for a second pass,
+the exact cost `on_demand` exists to avoid. Measured anyway, to see if
+it's still worth it on net:
 
-Caveats this is not: `os.clock()` in a handful of runs on one host is
-not `cosmic`'s noise-aware `_perf` compare gate; the DOM API is not
-simdjson's `on_demand` API (which skips building the full tape but
-whose forward-only iterator doesn't map cleanly onto "materialize an
-arbitrary nested table," which is why DOM was picked for this wrapper
--- an on-demand-based wrapper might close some of the object-heavy gap
-at the cost of a more constrained API); and none of this is compiled
-`MODE=rel`/stripped/LTO, which is what actually ships. Real numbers
-need `cosmic`'s `_perf` JSON scenarios once (if) this becomes a real
+```
+payload                   bytes     dom(s)   ondmd(s)   ljson(s) dom-spdup  od-spdup
+----------------------------------------------------------------------------------
+tiny object                  33     0.0012     0.0011     0.0015     1.30x     1.43x
+flat array (1k)            6632     0.0654     0.0675     0.1642     2.51x     2.43x
+flat array (50k)         412966     0.0852     0.0862     0.2179     2.56x     2.53x
+object array (200)        16413     0.1975     0.2283     0.2428     1.23x     1.06x
+object array (10000)     865385     0.2748     0.2889     0.3298     1.20x     1.14x
+```
+
+**Both simdjson variants now win everywhere tested.** Pre-sizing
+alone took the object-heavy cases from ~0.6x to 1.06-1.30x; DOM keeps
+a slightly larger margin than `on_demand` there specifically because
+its count is free where `on_demand`'s costs a pass -- a real,
+narrower version of the tradeoff the two-pass hypothesis originally
+reached for, just not the one that actually explained the first
+result.
+
+**Lesson for anyone benchmarking a Lua C binding**: an unsized
+`lua_newtable` on the hot path can plausibly cost more than which
+JSON parser you picked. Check what the thing you're comparing against
+already does before attributing a gap to architecture.
+
+Caveats this still is: `os.clock()` in a handful of runs on one host
+is not `cosmic`'s noise-aware `_perf` compare gate; none of this is
+compiled `MODE=rel`/stripped/LTO, which is what actually ships; and
+the synthetic payloads (`bench.lua`'s `make_flat_array`/
+`make_object_array`) are not real-world JSON shapes. Real numbers need
+`cosmic`'s `_perf` JSON scenarios once (if) this becomes a real
 binding, per the `optimize` skill's loop.
 
 ## What this does and doesn't prove
@@ -179,13 +212,15 @@ Proven:
   (modeled on `test/ctl/BUILD.mk`) pulling in `THIRD_PARTY_LIBCXX` /
   `LIBCXXABI` / `LIBUNWIND` -- the C/C++ boundary itself isn't the
   obstacle a real binding would hit
-- **it is not a uniform performance win**: a same-process comparison
-  against this tree's real `tool/net/ljson.c` shows simdjson ahead
-  2.1-2.2x on flat numeric arrays and *behind* 0.56-0.86x on
-  object/string-heavy payloads (see "Performance" below) -- the DOM
-  API's two-pass tape-then-walk design loses to `ljson.c`'s one-pass
-  recursive descent exactly where JSON is mostly keys and nesting
-  rather than flat numeric data
+- **once Lua tables are pre-sized, both simdjson wrappers win
+  everywhere tested**: a same-process comparison against this tree's
+  real `tool/net/ljson.c` initially showed simdjson losing
+  0.56-0.86x on object/string-heavy payloads -- not DOM's two-pass
+  design (an `on_demand` sibling showed the identical loss) but a
+  missing optimization in this spike's own binding: `ljson.c`
+  pre-sizes every table it creates and both simdjson wrappers were
+  calling plain `lua_newtable`. Fixed, simdjson wins 1.06-2.56x across
+  every payload shape tested (see "Performance" below)
 
 Not proven / left for real integration work:
 - **wired as a real `cosmo.*` binding**: living in `tool/net/`
@@ -197,23 +232,26 @@ Not proven / left for real integration work:
   packages should gain a C++ pattern rule or whether this stays a
   separate package the way `poc/BUILD.mk` does it here
 - **decide push vs. replace**: whether this augments `cosmo.DecodeJson`
-  for large-payload paths or replaces it outright is a real tradeoff --
-  worth a decision record (D24-style, on whichever side ends up owning
-  the contract) -- the existing parser is a small, dependency-free,
-  exception-free C recursive descent parser; simdjson is a
-  multi-megabyte C++ dependency that only wins on throughput for
-  large-enough documents
+  or replaces it outright is a real tradeoff -- worth a decision record
+  (D24-style, on whichever side ends up owning the contract) -- the
+  existing parser is a small, dependency-free, exception-free C
+  recursive descent parser; simdjson is a multi-megabyte C++
+  dependency. The spike's numbers now favor simdjson broadly rather
+  than only on large payloads, which makes "replace" a live option,
+  not just "augment for the big-document path" -- but see the caveats
+  in "Performance" before reading too much into that
 - **size cost, for real**: a rough baseline-vs-with-simdjson delta on
   this spike's throwaway dual-arch binary was ~600KB -> ~1.3MB (+~700KB
   across both architectures combined, `-O2`, unstripped, no LTO, whole
   translation unit linked in rather than only the symbols a real
   binding would touch) -- indicative only, not a number to cite as the
   real cost
-- **perf win, for real**: a rough same-process comparison was run (see
-  "Performance" above) and it's a genuine split, not a clean win --
-  landing this as a real binding needs `cosmic`'s `_perf` JSON
-  scenarios (noise-aware, `MODE=rel`, the payloads that actually show
-  up in practice) to say whether it's worth the size and dependency
+- **perf win, for real**: a rough same-process comparison was run and,
+  once a binding-side bug was fixed, favors simdjson everywhere tested
+  (see "Performance" above) -- landing this as a real binding still
+  needs `cosmic`'s `_perf` JSON scenarios (noise-aware, `MODE=rel`, the
+  payloads that actually show up in practice) to say whether the win
+  is real and large enough to justify the size and dependency
   cost, per the `optimize` skill's loop
 - **exceptions story**: only confirmed exceptions are unused on the
   non-throwing on-demand path used here; did not check whether

@@ -28,6 +28,7 @@ THIRD_PARTY_SIMDJSON_POC_HDRS =				\
 THIRD_PARTY_SIMDJSON_POC_SRCS =				\
 	third_party/simdjson/poc/simdjson.cc			\
 	third_party/simdjson/poc/lsimdjson.cc			\
+	third_party/simdjson/poc/lsimdjson_ondemand.cc		\
 	third_party/simdjson/poc/ljson_wrapper.cc		\
 	third_party/simdjson/poc/main.cc
 
