@@ -11,6 +11,14 @@
 #   make -j$(nproc) o//third_party/simdjson/poc/poc.dbg
 #   o//third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/demo.lua
 #   o//third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/bench.lua
+#
+# simdjson.cc/simdjson.h are gitignored (fetch-poc.sh materializes
+# them) so a fresh checkout -- CI included -- doesn't have them. This
+# whole package must stay a no-op until fetch-poc.sh has run: SRCS/HDRS
+# feed the tree-wide o/$(MODE)/depend generation regardless of whether
+# anyone ever builds this specific target, so pointing them at files
+# that don't exist yet breaks that for every build, not just this one.
+ifneq ($(wildcard third_party/simdjson/poc/simdjson.cc),)
 
 PKGS += THIRD_PARTY_SIMDJSON_POC
 
@@ -69,3 +77,5 @@ $(THIRD_PARTY_SIMDJSON_POC_OBJS): private			\
 .PHONY: o/$(MODE)/third_party/simdjson/poc
 o/$(MODE)/third_party/simdjson/poc:				\
 		o/$(MODE)/third_party/simdjson/poc/poc.dbg
+
+endif
