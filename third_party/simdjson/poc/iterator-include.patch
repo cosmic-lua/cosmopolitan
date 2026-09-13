@@ -1,0 +1,10 @@
+--- simdjson.orig.h	2026-09-13 22:46:23.361923207 +0000
++++ simdjson.h	2026-09-13 22:44:09.777915267 +0000
+@@ -11964,6 +11964,7 @@
+ #include <cmath>
+ #include <algorithm>
+ #include <cstring>
++#include <iterator>
+ 
+ namespace simdjson {
+ namespace internal {
