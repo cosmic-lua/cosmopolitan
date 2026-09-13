@@ -107,7 +107,13 @@ extern "C" int LuaSimdjsonDecode(lua_State *L) {
   size_t len;
   const char *s = luaL_checklstring(L, 1, &len);
   try {
-    simdjson::dom::parser parser;
+    // simdjson's own docs recommend reusing a parser across calls: it
+    // keeps its internal capacity buffers instead of reallocating them
+    // per parse, which otherwise dominates the cost of small/medium
+    // documents. thread_local rather than a Lua-registry-held instance
+    // -- a real binding would probably key it off the lua_State -- but
+    // safe here since this POC is single-threaded.
+    thread_local simdjson::dom::parser parser;
     simdjson::dom::element doc;
     auto error = parser.parse(s, len).get(doc);
     if (error) {

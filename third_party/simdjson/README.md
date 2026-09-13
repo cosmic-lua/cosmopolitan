@@ -96,6 +96,68 @@ registered (a hand-rolled `main.cc` instead of `tool/lua/cosmo/lua.main.c`
 + `lcosmo.c`'s real registration table), and the missing
 `definitions.lua` entry the coverage ratchet would require.
 
+## Performance: a rough same-process comparison
+
+`bench.lua` times `simdjson_decode()` against `cosmo_decode_json()` --
+this tree's real, unmodified `tool/net/ljson.c` parser, the same one
+`cosmo.DecodeJson` calls -- on identical payloads in the same process
+(`os.clock()` process-CPU-time, warmup + a repeated timed loop sized so
+each payload runs long enough to be measurable). `ljson_wrapper.cc`
+registers it as `cosmo_decode_json`, mirroring `tool/lua/lcosmo.c`'s
+real `LuaDecodeJson` minus `opts.nullval` support. Run it with:
+
+```sh
+o/third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/bench.lua
+```
+
+A representative run (this host, default MODE, unstripped, no LTO):
+
+```
+payload                   bytes  simdjson(s)   ljson.c(s)   MB/s(sj)  speedup
+------------------------------------------------------------------------------
+tiny object                  33       0.0018       0.0016       34.3    0.86x
+flat array (1k)            6632       0.0795       0.1674      159.1    2.11x
+flat array (50k)         412966       0.1060       0.2325      178.3    2.19x
+object array (200)        16413       0.4119       0.2319       46.3    0.56x
+object array (10000)     865385       0.4719       0.2963       40.2    0.63x
+```
+
+(`speedup` is `ljson.c(s) / simdjson(s)`; below 1.0 means simdjson is
+slower.) The result is not the uniform win the SIMD pitch suggests --
+it's a real split, and the split is informative about *why*:
+
+- **flat numeric arrays: simdjson wins clearly (2.1-2.2x)**. This is
+  simdjson's home turf: SIMD-accelerated structural indexing and number
+  parsing, and the DOM tree it builds for a flat array is cheap to walk
+  into a Lua sequence table.
+- **object/string-heavy payloads: simdjson loses (0.56-0.86x)**. The
+  DOM API is a **two-pass** design -- build the full indexed "tape"
+  first, then a second pass (this binding's `PushElement` recursion)
+  walks that tape into Lua tables. `ljson.c` is a **single-pass**
+  recursive-descent parser that writes Lua values directly as it reads
+  text. For JSON that's mostly keys/strings/nesting rather than flat
+  numeric data, paying for two passes plus a second copy loses to one
+  pass with no intermediate representation.
+- an earlier version of this benchmark allocated a fresh
+  `simdjson::dom::parser` per call, which reallocates its internal
+  capacity buffers every time -- that dominated the small/medium
+  cases and made the comparison meaningless. Fixed by reusing one
+  `thread_local` parser across calls, per simdjson's own guidance;
+  the numbers above are with that fix in. **A real binding must reuse
+  a parser instance** (keyed off the `lua_State`, most likely) or its
+  numbers will be quietly wrong the same way.
+
+Caveats this is not: `os.clock()` in a handful of runs on one host is
+not `cosmic`'s noise-aware `_perf` compare gate; the DOM API is not
+simdjson's `on_demand` API (which skips building the full tape but
+whose forward-only iterator doesn't map cleanly onto "materialize an
+arbitrary nested table," which is why DOM was picked for this wrapper
+-- an on-demand-based wrapper might close some of the object-heavy gap
+at the cost of a more constrained API); and none of this is compiled
+`MODE=rel`/stripped/LTO, which is what actually ships. Real numbers
+need `cosmic`'s `_perf` JSON scenarios once (if) this becomes a real
+binding, per the `optimize` skill's loop.
+
 ## What this does and doesn't prove
 
 Proven:
@@ -117,6 +179,13 @@ Proven:
   (modeled on `test/ctl/BUILD.mk`) pulling in `THIRD_PARTY_LIBCXX` /
   `LIBCXXABI` / `LIBUNWIND` -- the C/C++ boundary itself isn't the
   obstacle a real binding would hit
+- **it is not a uniform performance win**: a same-process comparison
+  against this tree's real `tool/net/ljson.c` shows simdjson ahead
+  2.1-2.2x on flat numeric arrays and *behind* 0.56-0.86x on
+  object/string-heavy payloads (see "Performance" below) -- the DOM
+  API's two-pass tape-then-walk design loses to `ljson.c`'s one-pass
+  recursive descent exactly where JSON is mostly keys and nesting
+  rather than flat numeric data
 
 Not proven / left for real integration work:
 - **wired as a real `cosmo.*` binding**: living in `tool/net/`
@@ -140,11 +209,12 @@ Not proven / left for real integration work:
   translation unit linked in rather than only the symbols a real
   binding would touch) -- indicative only, not a number to cite as the
   real cost
-- **perf win, for real**: no benchmark was run; the whole point of
-  landing this as a binding would be `cosmic`'s `_perf` JSON scenarios
-  showing a decode/encode win worth the size and dependency cost, per
-  the `optimize` skill's loop -- this spike is upstream of that, purely
-  "does it build"
+- **perf win, for real**: a rough same-process comparison was run (see
+  "Performance" above) and it's a genuine split, not a clean win --
+  landing this as a real binding needs `cosmic`'s `_perf` JSON
+  scenarios (noise-aware, `MODE=rel`, the payloads that actually show
+  up in practice) to say whether it's worth the size and dependency
+  cost, per the `optimize` skill's loop
 - **exceptions story**: only confirmed exceptions are unused on the
   non-throwing on-demand path used here; did not check whether
   `-fno-exceptions` is viable for the whole translation unit (some

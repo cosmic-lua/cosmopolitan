@@ -4,10 +4,13 @@
 # POC only -- not part of any real binary's build. Proves a Lua script
 # can call into simdjson end to end, using the real third_party/lua.a
 # this tree already builds, plus a standalone simdjson.cc + a thin
-# Lua-callable wrapper. Run poc/fetch-poc.sh first to materialize
+# Lua-callable wrapper -- and, for bench.lua, this tree's real
+# tool/net/ljson.c linked in alongside it for a same-process perf
+# comparison. Run poc/fetch-poc.sh first to materialize
 # simdjson.h/simdjson.cc (not vendored -- see ../README.md), then:
 #   make -j$(nproc) o//third_party/simdjson/poc/poc.dbg
 #   o//third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/demo.lua
+#   o//third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/bench.lua
 
 PKGS += THIRD_PARTY_SIMDJSON_POC
 
@@ -17,10 +20,15 @@ THIRD_PARTY_SIMDJSON_POC_HDRS =				\
 THIRD_PARTY_SIMDJSON_POC_SRCS =				\
 	third_party/simdjson/poc/simdjson.cc			\
 	third_party/simdjson/poc/lsimdjson.cc			\
+	third_party/simdjson/poc/ljson_wrapper.cc		\
 	third_party/simdjson/poc/main.cc
 
+THIRD_PARTY_SIMDJSON_POC_C_SRCS =				\
+	tool/net/ljson.c
+
 THIRD_PARTY_SIMDJSON_POC_OBJS =				\
-	$(THIRD_PARTY_SIMDJSON_POC_SRCS:%.cc=o/$(MODE)/%.o)
+	$(THIRD_PARTY_SIMDJSON_POC_SRCS:%.cc=o/$(MODE)/%.o)	\
+	$(THIRD_PARTY_SIMDJSON_POC_C_SRCS:%.c=o/$(MODE)/%.o)
 
 THIRD_PARTY_SIMDJSON_POC_DIRECTDEPS =				\
 	LIBC_CALLS						\
@@ -33,6 +41,7 @@ THIRD_PARTY_SIMDJSON_POC_DIRECTDEPS =				\
 	LIBC_STR						\
 	LIBC_SYSV						\
 	LIBC_THREAD						\
+	THIRD_PARTY_DOUBLECONVERSION				\
 	THIRD_PARTY_LIBCXX					\
 	THIRD_PARTY_LIBCXXABI					\
 	THIRD_PARTY_LIBUNWIND					\
