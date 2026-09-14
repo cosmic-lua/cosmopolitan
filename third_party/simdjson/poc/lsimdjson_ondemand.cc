@@ -1,9 +1,14 @@
-// POC only -- an on_demand-API sibling to lsimdjson.cc's DOM-based
-// simdjson_decode(), registered as simdjson_decode_ondemand(), to test
-// whether on_demand's forward-only iteration (which needs no separate
-// "build the tape, then walk it" second pass) closes the gap DOM shows
-// against ljson.c on object/string-heavy payloads in bench.lua. See
-// ../README.md's Performance section for the numbers.
+// POC only -- REJECTED, kept as the evidence for that call, not as an
+// alternative still under consideration: see ../README.md's "Decision"
+// section. This on_demand-API sibling to lsimdjson.cc's DOM-based
+// simdjson_decode() (registered as simdjson_decode_ondemand()) tested
+// whether on_demand's forward-only iteration (no separate "build the
+// tape, then walk it" second pass) closes the gap DOM initially showed
+// against ljson.c on object/string-heavy payloads in bench.lua -- and,
+// in the process of checking that against JSONTestSuite, turned up 37
+// cases (of 336) where it accepts invalid JSON. That disqualifies it
+// regardless of its bench.lua numbers. Any real binding builds on
+// lsimdjson.cc.
 #include "simdjson.h"
 
 extern "C" {

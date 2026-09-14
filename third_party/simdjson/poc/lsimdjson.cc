@@ -5,6 +5,11 @@
 // accessors throughout and catches anything simdjson itself can still
 // throw (e.g. allocation failure) at this boundary, so nothing crosses
 // into Lua as a C++ exception.
+//
+// This is the chosen API for any real binding -- see ../README.md's
+// "Decision" section: it's fully conformant against JSONTestSuite (0
+// bugs), where the on_demand sibling (lsimdjson_ondemand.cc) is not
+// (37 bugs) and was rejected on that basis.
 #include "simdjson.h"
 
 extern "C" {

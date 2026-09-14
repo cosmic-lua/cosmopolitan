@@ -16,6 +16,30 @@ there is no `cosmo.*` binding yet:
    which also documents a process-crashing bug this check found and a
    fix for it)
 
+## Decision: DOM, not on_demand
+
+If this ever becomes a real binding, it uses simdjson's **DOM API**,
+not `on_demand`. This is settled, not still open: `on_demand` accepts
+invalid JSON in 37 of 336 JSONTestSuite strict-grammar cases (see
+"Conformance") -- `[NaN]`, `[.123]`, bare `abc` all "parse" successfully
+-- and that disqualifies it outright, independent of speed. Correctness
+isn't a tradeoff to weigh against performance for a JSON parser; an
+implementation that silently accepts garbage is not a candidate,
+full stop.
+
+The performance case for DOM over `on_demand` is a mild tailwind, not
+the reason: on `bench.lua`'s large synthetic payloads DOM's margin
+over `ljson.c` is close to (and on the flat-array cases, slightly
+behind) `on_demand`'s, so choosing DOM costs close to nothing there
+either.
+
+`lsimdjson_ondemand.cc` stays in the tree as the evidence for this
+decision -- the sibling implementation that tested and ruled out the
+"DOM's two-pass design is the bottleneck" hypothesis, and then
+surfaced `on_demand`'s own correctness gap in the process -- not as an
+alternative still under consideration. Any future work on a real
+binding builds on `lsimdjson.cc`, not `lsimdjson_ondemand.cc`.
+
 ## Result: yes, with one small header patch
 
 simdjson 4.6.1's single-header amalgamation (`singleheader/simdjson.h`
