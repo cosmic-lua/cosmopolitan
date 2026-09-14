@@ -14,8 +14,26 @@ extern "C" {
 
 #include <cassert>
 #include <exception>
+#include <stdexcept>
 
 namespace {
+
+// PushElement recurses once per JSON nesting level, and an adversarial
+// document (JSONTestSuite ships exactly this case, i_structure_500_
+// nested_arrays.json) can nest deep enough to blow Lua's own internal
+// stack -- not a native segfault but an unassert() abort, just as
+// fatal to the process. ljson.c guards the same hazard with its own
+// DEPTH cap (64) and returns a clean error instead of crashing; this
+// needs the same guard, but NOT at 64 -- each level here does several
+// raw Lua C API calls (lua_createtable, lua_settable/lua_seti) that
+// ljson.c's leaner native recursion doesn't pay per level, so this
+// wrapper's actual safe ceiling is lower. Measured empirically (one
+// process per depth, since a crash takes the whole process down):
+// depth 19 succeeds, depth 21 aborts. 16 leaves real margin below
+// that -- rejecting some deeply-nested documents ljson.c would still
+// accept, a real (if narrow) conformance gap a non-recursive rewrite
+// would close; see ../README.md.
+constexpr int kMaxDepth = 16;
 
 // el.get(out) always succeeds here: the caller already switched on
 // el.type() to pick which overload to call, so a mismatch would be a
@@ -28,9 +46,9 @@ void Get(simdjson::dom::element el, T &out) {
   (void)error;
 }
 
-void PushElement(lua_State *L, simdjson::dom::element el);
+void PushElement(lua_State *L, simdjson::dom::element el, int depth);
 
-void PushObject(lua_State *L, simdjson::dom::element el) {
+void PushObject(lua_State *L, simdjson::dom::element el, int depth) {
   simdjson::dom::object obj;
   Get(el, obj);
   // DOM's tape already knows the count, so pre-size the table instead
@@ -38,29 +56,32 @@ void PushObject(lua_State *L, simdjson::dom::element el) {
   lua_createtable(L, 0, (int)obj.size());
   for (auto field : obj) {
     lua_pushlstring(L, field.key.data(), field.key.size());
-    PushElement(L, field.value);
+    PushElement(L, field.value, depth + 1);
     lua_settable(L, -3);
   }
 }
 
-void PushArray(lua_State *L, simdjson::dom::element el) {
+void PushArray(lua_State *L, simdjson::dom::element el, int depth) {
   simdjson::dom::array arr;
   Get(el, arr);
   lua_createtable(L, (int)arr.size(), 0);
   lua_Integer i = 1;
   for (auto v : arr) {
-    PushElement(L, v);
+    PushElement(L, v, depth + 1);
     lua_seti(L, -2, i++);
   }
 }
 
-void PushElement(lua_State *L, simdjson::dom::element el) {
+void PushElement(lua_State *L, simdjson::dom::element el, int depth) {
+  if (depth > kMaxDepth) {
+    throw std::runtime_error("nesting too deep");
+  }
   switch (el.type()) {
     case simdjson::dom::element_type::OBJECT:
-      PushObject(L, el);
+      PushObject(L, el, depth);
       return;
     case simdjson::dom::element_type::ARRAY:
-      PushArray(L, el);
+      PushArray(L, el, depth);
       return;
     case simdjson::dom::element_type::STRING: {
       std::string_view sv;
@@ -123,7 +144,7 @@ extern "C" int LuaSimdjsonDecode(lua_State *L) {
       lua_pushstring(L, simdjson::error_message(error));
       return 2;
     }
-    PushElement(L, doc);
+    PushElement(L, doc, 0);
     return 1;
   } catch (const std::exception &e) {
     lua_pushnil(L);

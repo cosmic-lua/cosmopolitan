@@ -4,13 +4,15 @@
 # POC only -- not part of any real binary's build. Proves a Lua script
 # can call into simdjson end to end, using the real third_party/lua.a
 # this tree already builds, plus a standalone simdjson.cc + a thin
-# Lua-callable wrapper -- and, for bench.lua, this tree's real
-# tool/net/ljson.c linked in alongside it for a same-process perf
-# comparison. Run poc/fetch-poc.sh first to materialize
-# simdjson.h/simdjson.cc (not vendored -- see ../README.md), then:
+# Lua-callable wrapper -- and, for bench.lua/conformance.lua, this
+# tree's real tool/net/ljson.c linked in alongside it for a same-process
+# perf and conformance comparison. Run poc/fetch-poc.sh first to
+# materialize simdjson.h/simdjson.cc (not vendored -- see ../README.md),
+# then:
 #   make -j$(nproc) o//third_party/simdjson/poc/poc.dbg
 #   o//third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/demo.lua
 #   o//third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/bench.lua
+#   o//third_party/simdjson/poc/poc.dbg third_party/simdjson/poc/conformance.lua
 #
 # simdjson.cc/simdjson.h are gitignored (fetch-poc.sh materializes
 # them) so a fresh checkout -- CI included -- doesn't have them. This
